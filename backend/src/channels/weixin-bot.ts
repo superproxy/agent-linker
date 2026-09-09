@@ -20,6 +20,7 @@
  *   LINKAGENT_STATE_DIR     登录态目录（默认 <repo>/.runtime-state/plugins）
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { findRepoRoot } from '../gateway/config.js';
 import { runChatSession } from './gateway-chat.js';
@@ -45,6 +46,61 @@ const MAX_MSG_LEN = 2000;
 const RETRY_DELAY_MS = 2_000;
 const BACKOFF_DELAY_MS = 30_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+// ── context_token 存储（对齐旧 openclaw 插件的 store 策略）──
+// 腾讯每次 getUpdates 入站都下发 context_token，回推 sendMessage 必须原样带回；
+// 同一用户存「最新」token（内存 + <account>.context-tokens.json 落盘，与旧插件同路径/格式），
+// 发送时取最新值而非当前消息的 token，避免延迟处理时用了过期 token 被腾讯丢弃。
+const contextTokenStore = new Map<string, string>(); // `${accountId}:${userId}` -> token
+
+function contextTokenKey(accountId: string, userId: string): string {
+  return `${accountId}:${userId}`;
+}
+
+function loadContextTokens(stateDir: string, accountId: string): number {
+  try {
+    const file = join(stateDir, 'openclaw-weixin', 'accounts', `${accountId}.context-tokens.json`);
+    if (!existsSync(file)) return 0;
+    const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
+    let count = 0;
+    for (const [userId, token] of Object.entries(data)) {
+      if (typeof token === 'string' && token) {
+        contextTokenStore.set(contextTokenKey(accountId, userId), token);
+        count += 1;
+      }
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+function saveContextTokens(stateDir: string, accountId: string): void {
+  try {
+    const dir = join(stateDir, 'openclaw-weixin', 'accounts');
+    mkdirSync(dir, { recursive: true });
+    const prefix = `${accountId}:`;
+    const tokens: Record<string, string> = {};
+    for (const [k, v] of contextTokenStore) {
+      if (k.startsWith(prefix)) tokens[k.slice(prefix.length)] = v;
+    }
+    writeFileSync(join(dir, `${accountId}.context-tokens.json`), JSON.stringify(tokens), 'utf8');
+  } catch {
+    /* 落盘失败不影响运行 */
+  }
+}
+
+function setContextToken(stateDir: string, accountId: string, userId: string, token: string | undefined): void {
+  if (!token) return;
+  const key = contextTokenKey(accountId, userId);
+  if (contextTokenStore.get(key) === token) return;
+  contextTokenStore.set(key, token);
+  saveContextTokens(stateDir, accountId);
+}
+
+function getContextToken(accountId: string, userId: string): string | undefined {
+  return contextTokenStore.get(contextTokenKey(accountId, userId));
+}
 
 export interface WeixinBotOptions {
   /** 网关 base（默认 http://127.0.0.1:8787） */
@@ -145,6 +201,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
       return;
     }
     log(`[bot] inbound from=${from} text="${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"`);
+    // 入站即更新该用户最新 context_token（供回推原样带回）
+    setContextToken(stateDir, account.id, from, msg.context_token);
 
     const sessionKey = `weixin:${from}`;
     const out = await runChatSession({
@@ -153,7 +211,16 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
       sessionKey,
       message: text,
       send: async (chunk) => {
-        await sendText({ baseUrl: account.baseUrl, token: account.token, to: from, text: chunk, contextToken: msg.context_token });
+        await sendText({
+          baseUrl: account.baseUrl,
+          token: account.token,
+          to: from,
+          text: chunk,
+          // 回推 token 取该用户最新已存值（收消息时已刷新），兜底用当前消息自带的
+          contextToken: getContextToken(account.id, from) ?? msg.context_token,
+          // 对齐旧 openclaw 插件：每次回推携带随机 run_id
+          runId: randomUUID(),
+        });
       },
       split: (t) => splitChunks(t, MAX_MSG_LEN),
       log,
@@ -224,6 +291,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 
   log(`[bot] 账号 ${account.id} (${account.userId || '未知用户'})`);
   log(`[bot] 网关 ${gatewayUrl}  模型 ${model}`);
+  const restored = loadContextTokens(stateDir, account.id);
+  if (restored > 0) log(`[bot] 恢复 ${restored} 个用户 context_token`);
   if (!existsSync(syncBufPath)) log('[bot] 无历史游标，全新开始收消息');
   log(`[bot] 微信长轮询启动（${account.baseUrl}）`);
 

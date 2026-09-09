@@ -31,13 +31,26 @@ export interface AcpAdapterOptions {
   /** 启动命令；缺省按 agentName 的内置默认 */
   command?: string[];
   verbose?: boolean;
+  /**
+   * persistent 会话（渠道多轮：微信/企微）的空闲超时：
+   * 会话进程常驻（免冷启动），空闲超过该时长才关闭进程；会话状态始终保留，超时后同 sessionKey 可恢复续聊。
+   * 默认 30 分钟。
+   */
+  persistentIdleTimeoutMs?: number;
 }
+
+/** persistent 会话默认空闲超时：30 分钟无消息 → 关闭进程（状态保留，可续聊） */
+const DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * ACP 后端适配器：直接以 acpx runtime 连接目标 agent 的 ACP server 进程
  * （opencode 原生 `opencode acp`；pi 经第三方 `pi-acp` 桥接到 `pi --mode rpc`）。
- * 一期采用「每请求独立 oneshot ACP 会话」，客户端侧管理多轮历史，
- * 避免 agent 持久记忆跨用户/跨聊天串扰；进程冷启动延迟为已知代价。
+ *
+ * 会话生命周期：
+ * - oneshot（/v1 HTTP 无 sessionKey）：每请求独立会话，用完即弃，避免记忆跨请求串扰；
+ * - persistent（渠道多轮，微信/企微带 sessionKey）：进程常驻于 acpx retained 池，
+ *   同 sessionKey 下一轮免冷启动复用；仅空闲超过 persistentIdleTimeoutMs（默认 30 分钟）才关闭进程，
+ *   会话状态始终保留在 stateDir，超时后同一 sessionKey 可恢复续聊。
  */
 export class AcpAdapter implements AgentAdapter {
   readonly id: string;
@@ -48,6 +61,8 @@ export class AcpAdapter implements AgentAdapter {
   private runtimeReady: Promise<AcpxRuntime> | null = null;
   /** 运行时模型覆盖（控制台切换）；undefined=沿用 definition.model */
   private modelOverride: string | undefined;
+  /** persistent 会话空闲定时器：sessionKey → 最近一次使用的 handle + 空闲倒计时 */
+  private readonly persistentIdle = new Map<string, { handle: Awaited<ReturnType<AcpxRuntime['ensureSession']>>; timer: NodeJS.Timeout }>();
 
   constructor(options: AcpAdapterOptions) {
     this.definition = options.definition;
@@ -181,13 +196,71 @@ export class AcpAdapter implements AgentAdapter {
       }
       throw err;
     } finally {
-      // persistent 会话保留状态（进入 stateDir session store），供同一 sessionKey 续聊
-      await runtime.close({ handle, reason: 'request-complete', discardPersistentState: !persistent }).catch(() => {});
+      if (persistent) {
+        // persistent 会话（渠道多轮：微信/企微）：进程保留在 acpx retained 池，
+        // 同 sessionKey 下一轮免冷启动直接复用；仅空闲超时（默认 30 分钟）才关闭进程。
+        // 会话状态始终保留（stateDir），超时关闭后同一 sessionKey 可恢复续聊。
+        this.armPersistentIdle(handle);
+      } else {
+        // oneshot（/v1 HTTP，无 sessionKey）：用完即弃，避免 agent 记忆跨请求串扰
+        await this.closeOneShot(runtime, handle);
+      }
     }
   }
 
+  /**
+   * oneshot 会话关闭：优先 discardPersistentState=true（后端支持 ACP session/close 时
+   * 明确丢弃后端会话状态，防记忆跨请求串扰）。
+   *
+   * pi-acp 等后端未实现 session/close：acpx close() 会在标记记录 closed 前抛
+   * ACP_BACKEND_UNSUPPORTED_CONTROL，导致 oneshot 记录永远 closed=False（实测 67/67）
+   * 且每轮静默抛错。检测到不支持时退回 discardPersistentState=false —— 同样经
+   * closeRetainedSessionOwner→stopSessionOwner→client.close() 释放进程/连接，且正常标记
+   * 记录 closed；oneshot sessionKey 每次唯一（gw-<id>-<uuid>），残留后端状态不会被复用。
+   * 任何关闭失败记录日志，不再静默吞掉。
+   */
+  private async closeOneShot(runtime: AcpxRuntime, handle: Awaited<ReturnType<AcpxRuntime['ensureSession']>>): Promise<void> {
+    try {
+      // handle 实为 acpx 的 SessionRecord（运行时含 agentCapabilities；公开类型未声明，安全断言读取）
+      const closeSupported = Boolean(
+        (handle as { agentCapabilities?: { sessionCapabilities?: { close?: unknown } } }).agentCapabilities?.sessionCapabilities?.close,
+      );
+      await runtime.close({
+        handle,
+        reason: 'request-complete',
+        discardPersistentState: closeSupported,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(`[acp] oneshot 会话关闭失败 handle=${handle.acpxRecordId ?? handle.sessionKey}: ${detail}`);
+    }
+  }
+
+  /**
+   * 重置/登记 persistent 会话的空闲倒计时：进程常驻，空闲超时后调用 runtime.close
+   * 释放进程（discardPersistentState=false → 会话状态保留，下轮可恢复续聊）。
+   */
+  private armPersistentIdle(handle: Awaited<ReturnType<AcpxRuntime['ensureSession']>>): void {
+    const key = handle.sessionKey;
+    const existing = this.persistentIdle.get(key);
+    if (existing) clearTimeout(existing.timer);
+    const timer = setTimeout(() => {
+      this.persistentIdle.delete(key);
+      // 空闲超时：关闭进程释放资源；状态保留，同一 sessionKey 后续消息可恢复
+      void this.runtime?.close({ handle, reason: 'idle-timeout', discardPersistentState: false }).catch(() => {});
+    }, this.options.persistentIdleTimeoutMs ?? DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS);
+    timer.unref?.(); // 不阻止网关进程退出
+    this.persistentIdle.set(key, { handle, timer });
+  }
+
   async dispose(): Promise<void> {
-    // oneshot 模式下无长驻会话，runtime 无后台进程需保留；仅清引用
+    // 关闭所有仍常驻的 persistent 会话进程（状态保留，重启后同 sessionKey 可恢复）
+    for (const { handle, timer } of this.persistentIdle.values()) {
+      clearTimeout(timer);
+      await this.runtime?.close({ handle, reason: 'dispose', discardPersistentState: false }).catch(() => {});
+    }
+    this.persistentIdle.clear();
+    // oneshot 模式无长驻会话，runtime 无后台进程需保留；仅清引用
     this.runtime = null;
   }
 }

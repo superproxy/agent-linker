@@ -29,7 +29,7 @@
  *   WECOM_PORT        回调 HTTP 端口（默认 8798）
  *   WECOM_CALLBACK_PATH  回调路径（默认 /wecom/callback）
  *   LINKAGENT_GATEWAY_URL  网关 base（默认 http://127.0.0.1:8787）
- *   LINKAGENT_GATEWAY_MODEL 模型（默认 agent:opencode）
+ *   LINKAGENT_GATEWAY_MODEL 模型（默认 agent:pi；agent:opencode 默认启动即崩溃，见 weixin-bot 说明）
  *
  * 企业微信后台配置：应用管理 → 自建应用 → 接收消息 → 设置 API 接收
  *   URL = http(s)://<公网>/<path>，Token/EncodingAESKey 与上面对应。
@@ -60,7 +60,7 @@ if (AES_KEY.length !== 43) {
 const PORT = Number(process.env.WECOM_PORT ?? 8798);
 const CALLBACK_PATH = (process.env.WECOM_CALLBACK_PATH ?? '/wecom/callback').replace(/\/$/, '') || '/wecom/callback';
 const GATEWAY_URL = process.env.LINKAGENT_GATEWAY_URL ?? 'http://127.0.0.1:8787';
-const GATEWAY_MODEL = process.env.LINKAGENT_GATEWAY_MODEL ?? 'agent:opencode';
+const GATEWAY_MODEL = process.env.LINKAGENT_GATEWAY_MODEL ?? 'agent:pi';
 
 /** text 消息 content 上限（企业微信：2048 字节） */
 const TEXT_MAX_BYTES = 2048;
