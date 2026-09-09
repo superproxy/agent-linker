@@ -217,6 +217,37 @@ function createTextStreamDeliverer(
   };
 }
 
+/**
+ * 全文缓存交付器（对齐 weixin-bot 成段体验）：
+ * agent 输出全文缓存，流结束后按 2000 字符/条一次性分段交付；
+ * 生成过程中不实时推送，避免微信多条短消息陆续弹出（成段可读性更好）。
+ * 思考不经过本交付器（走 createReasoningCollector，正文前以 🤔 一次性推送，thinking 可见）。
+ */
+function createBufferedTextDeliverer(
+  deliver: (payload: DispatchDeliverPayload) => void | Promise<void>,
+): { push(delta: string): void; flush(): void } {
+  let buf = '';
+  let flushed = false;
+  const CHUNK = 2000;
+  return {
+    push(delta) {
+      buf += delta;
+    },
+    flush() {
+      if (flushed) return;
+      flushed = true;
+      if (!buf) return;
+      let rest = buf;
+      buf = '';
+      do {
+        const chunk = rest.slice(0, CHUNK);
+        rest = rest.slice(CHUNK);
+        void deliver({ text: chunk });
+      } while (rest.length > 0);
+    },
+  };
+}
+
 export interface ReplyChannelApi {
   dispatchReplyWithBufferedBlockDispatcher(
     params: DispatchReplyParams & { agentDispatch: ChannelAgentDispatch },
@@ -331,7 +362,19 @@ export function createReplyDispatcherWithTyping(params: {
         await new Promise((r) => setTimeout(r, humanDelay));
       }
       if (typingCallbacks) await typingCallbacks.start().catch(() => {});
-      await deliver(payload);
+      // 交付失败（通道 sendMessage 限流/网络错误等）不能向上抛：
+      // onText 里的 void deliver(...) 会产生 unhandled rejection，直接崩掉整个 gateway
+      try {
+        await deliver(payload);
+      } catch (err) {
+        if (onError) {
+          try {
+            await onError(err, { kind: 'deliver' });
+          } catch {
+            // 错误兜底再失败也不允许崩进程
+          }
+        }
+      }
     },
     onError,
     typing: typingCallbacks,
@@ -415,6 +458,10 @@ export async function dispatchReplyFromConfig(
   }
 
   const reasoning = createReasoningCollector((payload) => dispatcher.deliver(payload));
+  // 正文全文缓存成段发送（对齐 weixin-bot）：ACP 回调的 delta 粒度很小（词级/字符级），
+  // 实时逐块 deliver 会让微信多条短消息陆续弹出；改为流结束后按 2000 字符/条一次分段交付。
+  // 思考仍由 createReasoningCollector 在正文前以 🤔 一次性推送，thinking 照常可见。
+  const stream = createBufferedTextDeliverer((payload) => dispatcher.deliver(payload));
   let delivered = false;
   try {
     await deps.agentDispatch.chat(
@@ -423,7 +470,7 @@ export async function dispatchReplyFromConfig(
         onText(delta) {
           reasoning.flushBeforeText();
           delivered = true;
-          void dispatcher.deliver({ text: delta });
+          stream.push(delta);
         },
         onReasoning(delta) {
           reasoning.push(delta);
@@ -433,9 +480,11 @@ export async function dispatchReplyFromConfig(
         },
       },
     );
+    stream.flush();
     reasoning.flush(); // 兜底：仅有思考无正文时也要让用户看到
     return { delivered };
   } catch (err) {
+    stream.flush();
     reasoning.flush();
     if (dispatcher.onError) {
       await dispatcher.onError(err, { kind: 'agent' });
