@@ -1,0 +1,5 @@
+packages:
+  - "backend"
+  - "shared"
+  - "web"
+  - "openclaw-shim"

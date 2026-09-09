@@ -1,0 +1,36 @@
+{
+  "name": "linkagent-gw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenAI 兼容网关：Chatbox/Open WebUI → Gateway → ACP(acpx) → opencode",
+  "packageManager": "pnpm@8.6.5",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @linkagent/backend dev",
+    "start": "pnpm --filter @linkagent/backend start",
+    "probe": "pnpm --filter @linkagent/backend probe",
+    "typecheck": "pnpm -r typecheck",
+    "bot:weixin": "pnpm --filter @linkagent/backend bot:weixin",
+    "bot:wecom": "pnpm --filter @linkagent/backend bot:wecom",
+    "web": "pnpm --filter @linkagent/web dev",
+    "server": "bash scripts/server.sh start",
+    "server:start": "bash scripts/server.sh start",
+    "server:stop": "bash scripts/server.sh stop",
+    "server:restart": "bash scripts/server.sh restart",
+    "server:status": "bash scripts/server.sh status",
+    "server:log": "bash scripts/server.sh log",
+    "server:dev": "bash scripts/server.sh foreground"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "openclaw": "workspace:*"
+    }
+  }
+}

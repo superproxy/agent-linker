@@ -1,0 +1,34 @@
+{
+  "name": "@linkagent/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/gateway/index.ts",
+    "start": "tsx src/gateway/index.ts",
+    "probe": "tsx src/dev/probe.ts",
+    "smoke-plugin": "tsx src/dev/smoke-plugin.ts",
+    "weixin-login": "tsx src/dev/weixin-login.ts",
+    "bot:weixin": "tsx src/channels/weixin-bot.ts",
+    "bot:wecom": "tsx src/channels/wecom-bot.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@linkagent/shared": "workspace:*",
+    "@tencent-weixin/openclaw-weixin": "^2.4.8",
+    "@wecom/aibot-node-sdk": "^1.0.6",
+    "@wecom/wecom-openclaw-plugin": "^2026.8.17",
+    "acpx": "^0.15.1",
+    "fastify": "^5.2.0",
+    "openclaw": "workspace:*",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

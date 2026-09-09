@@ -1,0 +1,22 @@
+{
+  "name": "openclaw",
+  "version": "2026.9.3",
+  "description": "linkagent 内嵌 openclaw 插件运行时 shim：仅实现 @wecom/wecom-openclaw-plugin 等渠道插件所需的 plugin-sdk 子集，避免引入完整 openclaw 编排。",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./plugin-sdk/runtime-store": "./src/runtime-store.mjs",
+    "./plugin-sdk/account-id": "./src/account-id.mjs",
+    "./plugin-sdk/core": "./src/core.mjs",
+    "./plugin-sdk/setup": "./src/setup.mjs",
+    "./plugin-sdk/channel-config-schema": "./src/channel-config-schema.mjs",
+    "./plugin-sdk/infra-runtime": "./src/infra-runtime.mjs",
+    "./plugin-sdk/config-runtime": "./src/config-runtime.mjs",
+    "./plugin-sdk/hook-runtime": "./src/hook-runtime.mjs",
+    "./plugin-sdk/plugin-runtime": "./src/plugin-runtime.mjs",
+    "./plugin-sdk/channel-message": "./src/channel-message.mjs",
+    "./plugin-sdk/command-auth": "./src/command-auth.mjs",
+    "./package.json": "./package.json"
+  }
+}

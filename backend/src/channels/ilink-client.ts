@@ -1,0 +1,227 @@
+/**
+ * ilink 微信官方 Bot API 客户端（方案 B botAgent 的微信侧）。
+ *
+ * 纯 HTTP 直连 ilinkai.weixin.qq.com，不复用 openclaw 插件包——协议细节
+ * （headers / body 结构）从 @tencent-weixin/openclaw-weixin@2.4.8 实测提取：
+ *   - getUpdates:   POST /ilink/bot/getupdates    长轮询收消息（35s）
+ *   - sendMessage:  POST /ilink/bot/sendmessage   主动推送文本
+ * 鉴权：Authorization: Bearer <bot_token> + AuthorizationType: ilink_bot_token。
+ * 登录态复用现有扫码登录产物（openclaw-weixin/accounts/<id>.json，见 weixin-login.ts）。
+ */
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
+
+/** 插件声明的 ilink_appid 与客户端版本（2.4.8 → 0x020408），服务端按此识别调用方 */
+const ILINK_APP_ID = 'bot';
+const ILINK_APP_CLIENT_VERSION = 0x020408;
+const CHANNEL_VERSION = '2.4.8';
+const DEFAULT_BOT_AGENT = 'linkagent-bot/0.1.0';
+
+export const DEFAULT_LONG_POLL_TIMEOUT_MS = 35_000;
+export const DEFAULT_API_TIMEOUT_MS = 15_000;
+
+/** 微信消息类型（proto 常量，与插件 dist/src/api/types.js 一致） */
+export const MessageType = { NONE: 0, USER: 1, BOT: 2 } as const;
+export const MessageItemType = { NONE: 0, TEXT: 1, IMAGE: 2, VOICE: 3, FILE: 4, VIDEO: 5 } as const;
+export const MessageState = { NEW: 0, GENERATING: 1, FINISH: 2 } as const;
+
+/** 登录态账号（openclaw-weixin/accounts/<id>.json 的结构） */
+export interface WeixinAccount {
+  id: string;
+  token: string;
+  baseUrl: string;
+  userId: string;
+  savedAt: string;
+}
+
+/**
+ * 从 <dir>/openclaw-weixin/accounts/ 加载登录态账号。
+ * 显式 accountId 时加载指定文件；缺省扫描目录，选择含 token 字段的账号文件
+ * （跳过 accounts.json / *.sync.json / *.context-tokens.json 等非账号产物）。
+ */
+export function loadWeixinAccount(accountsRootDir: string, accountId?: string): WeixinAccount {
+  const dir = join(accountsRootDir, 'openclaw-weixin', 'accounts');
+  if (!existsSync(dir)) {
+    throw new Error(`未找到微信登录态目录 ${dir}；请先运行 pnpm --filter @linkagent/backend weixin-login 扫码登录`);
+  }
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'accounts.json');
+  const candidates = accountId ? files.filter((f) => f === `${accountId}.json`) : files;
+  for (const file of candidates) {
+    try {
+      const raw = JSON.parse(readFileSync(join(dir, file), 'utf8')) as {
+        token?: string;
+        baseUrl?: string;
+        userId?: string;
+        savedAt?: string;
+      };
+      if (typeof raw.token !== 'string' || !raw.token) continue; // 非账号文件（sync/context-tokens）
+      return {
+        id: file.replace(/\.json$/, ''),
+        token: raw.token,
+        baseUrl: raw.baseUrl ?? ILINK_DEFAULT_BASE_URL,
+        userId: raw.userId ?? '',
+        savedAt: raw.savedAt ?? '',
+      };
+    } catch {
+      continue; // 单个文件损坏不影响扫描
+    }
+  }
+  throw new Error(
+    `登录态目录 ${dir} 中没有可用账号${accountId ? `（找不到 ${accountId}.json）` : ''}；请先运行 pnpm --filter @linkagent/backend weixin-login 扫码登录`,
+  );
+}
+
+/** X-WECHAT-UIN：随机 uint32 → 十进制字符串 → base64（每请求随机） */
+function randomWechatUin(): string {
+  const uint32 = randomBytes(4).readUInt32BE(0);
+  return Buffer.from(String(uint32), 'utf-8').toString('base64');
+}
+
+function buildBaseInfo(): { channel_version: string; bot_agent: string } {
+  return { channel_version: CHANNEL_VERSION, bot_agent: DEFAULT_BOT_AGENT };
+}
+
+function buildHeaders(token: string): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    AuthorizationType: 'ilink_bot_token',
+    Authorization: `Bearer ${token.trim()}`,
+    'X-WECHAT-UIN': randomWechatUin(),
+    'iLink-App-Id': ILINK_APP_ID,
+    'iLink-App-ClientVersion': String(ILINK_APP_CLIENT_VERSION),
+  };
+}
+
+interface PostResult {
+  ret: number;
+  errcode?: number;
+  errmsg?: string;
+  [key: string]: unknown;
+}
+
+async function postJson(baseUrl: string, endpoint: string, token: string, body: unknown, timeoutMs: number): Promise<PostResult> {
+  const url = new URL(endpoint, baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      method: 'POST',
+      headers: buildHeaders(token),
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const rawText = await res.text();
+  if (!res.ok) throw new Error(`${endpoint} HTTP ${res.status}: ${rawText.slice(0, 300)}`);
+  return JSON.parse(rawText) as PostResult;
+}
+
+export interface GetUpdatesParams {
+  baseUrl: string;
+  token: string;
+  getUpdatesBuf?: string;
+  timeoutMs?: number;
+  abortSignal?: AbortSignal;
+}
+
+export interface GetUpdatesResult {
+  ret: number;
+  msgs: WeixinInboundMessage[];
+  get_updates_buf?: string;
+  longpolling_timeout_ms?: number;
+  errcode?: number;
+  errmsg?: string;
+}
+
+/** 入站消息（getUpdates msgs[] 元素） */
+export interface WeixinInboundMessage {
+  from_user_id: string;
+  to_user_id?: string;
+  client_id?: string;
+  message_type?: number;
+  message_state?: number;
+  context_token?: string;
+  run_id?: string;
+  item_list?: Array<{
+    type: number;
+    text_item?: { text: string };
+    [key: string]: unknown;
+  }>;
+}
+
+/**
+ * 长轮询收消息。服务端挂起请求直到有新消息或超时（35s 正常，ret=0 空响应需重试）。
+ */
+export async function getUpdates(params: GetUpdatesParams): Promise<GetUpdatesResult> {
+  const timeoutMs = params.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  params.abortSignal?.addEventListener('abort', () => controller.abort(), { once: true });
+  try {
+    const resp = await postJson(params.baseUrl, 'ilink/bot/getupdates', params.token, {
+      get_updates_buf: params.getUpdatesBuf ?? '',
+      base_info: buildBaseInfo(),
+    }, timeoutMs);
+    return resp as unknown as GetUpdatesResult;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError' && !params.abortSignal?.aborted) {
+      // 客户端长轮询超时是正常控制流：返回空响应让调用方重试
+      return { ret: 0, msgs: [], get_updates_buf: params.getUpdatesBuf ?? '' };
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface SendTextParams {
+  baseUrl: string;
+  token: string;
+  to: string;
+  text: string;
+  contextToken?: string;
+  runId?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * 主动推送一条纯文本消息（message_type=BOT, message_state=FINISH）。
+ * 返回 client_id（可作为消息 id）。ret!=0 抛错。
+ */
+export async function sendText(params: SendTextParams): Promise<{ messageId: string }> {
+  const clientId = `linkagent-${randomBytes(8).toString('hex')}`;
+  const msg = {
+    from_user_id: '',
+    to_user_id: params.to,
+    client_id: clientId,
+    message_type: MessageType.BOT,
+    message_state: MessageState.FINISH,
+    item_list: params.text
+      ? [{ type: MessageItemType.TEXT, text_item: { text: params.text } }]
+      : [],
+    ...(params.contextToken ? { context_token: params.contextToken } : {}),
+    ...(params.runId ? { run_id: params.runId } : {}),
+  };
+  const resp = await postJson(params.baseUrl, 'ilink/bot/sendmessage', params.token, {
+    msg,
+    base_info: buildBaseInfo(),
+  }, params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS);
+  if (resp.ret && resp.ret !== 0) {
+    throw new Error(`sendMessage ret=${resp.ret} errmsg=${resp.errmsg ?? '(none)'}`);
+  }
+  return { messageId: clientId };
+}
+
+/** 从入站消息提取纯文本（只取 TEXT item，多段拼接） */
+export function extractText(msg: WeixinInboundMessage): string {
+  const parts = (msg.item_list ?? [])
+    .filter((item) => item.type === MessageItemType.TEXT && item.text_item?.text)
+    .map((item) => item.text_item!.text);
+  return parts.join('');
+}
