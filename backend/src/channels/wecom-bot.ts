@@ -37,6 +37,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WecomCrypto } from '@wecom/aibot-node-sdk';
 import { runChatSession, streamChat } from './gateway-chat.js';
+import { TaskRouter } from './task-router.js';
 
 // ── 配置 ──────────────────────────────────────────────────────────────
 function requireEnv(name: string): string {
@@ -71,6 +72,8 @@ const DEDUP_MAX = 500;
 const userChains = new Map<string, Promise<void>>();
 
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
+// 单聊任务路由层：选中任务缓存（网关 /api/tasks 为单一事实源）
+const router = new TaskRouter({ gatewayUrl: GATEWAY_URL, channel: 'wecom' });
 const errLog = (...args: unknown[]) => console.error(new Date().toISOString(), ...args);
 
 const crypto = new WecomCrypto(TOKEN, AES_KEY, CORP_ID);
@@ -196,19 +199,37 @@ async function handleWecomMessage(msg: WecomMessage): Promise<void> {
     log(`[wecom] 跳过非文本消息 type=${msg.msgType} from=${from}`);
     return;
   }
-  // 群聊 @ 消息通常带 ChatId；会话按 chat/user 维度区分上下文
-  const sessionKey = msg.chatId ? `wecom:chat:${msg.chatId}` : `wecom:user:${from}`;
   log(`[wecom] inbound from=${from}${msg.chatId ? ` chat=${msg.chatId}` : ''} text="${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"`);
 
+  // 群聊：多人窗口不套用个人任务路由，保持原 chat 维度会话
+  if (msg.chatId) {
+    await runChatSession({
+      gatewayUrl: GATEWAY_URL,
+      model: GATEWAY_MODEL,
+      sessionKey: `wecom:chat:${msg.chatId}`,
+      message: text,
+      send: (chunk) => sendWecomText(from, chunk),
+      split: splitByBytes,
+      log,
+    });
+    return;
+  }
+
+  // 单聊：任务路由（命令 → 网关本地解析回文本；普通消息 → 激活任务）
+  const isCmd = TaskRouter.isCommand(text);
+  const route = isCmd ? null : await router.active(from);
   await runChatSession({
     gatewayUrl: GATEWAY_URL,
     model: GATEWAY_MODEL,
-    sessionKey,
+    channel: 'wecom',
+    userId: from,
     message: text,
+    ...(!isCmd && route ? { agent: route.agent, task: route.task } : {}),
     send: (chunk) => sendWecomText(from, chunk),
     split: splitByBytes,
     log,
   });
+  if (isCmd) router.invalidate(from);
 }
 
 function enqueue(from: string, task: () => Promise<void>): void {
