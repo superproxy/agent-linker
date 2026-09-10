@@ -41,16 +41,22 @@ export const gatewayConfigSchema = z.object({
   weixin: z
     .object({
       /**
-       * plugin：openclaw 插件运行时（加载 plugins 里的 @tencent-weixin/openclaw-weixin，登录态复用同目录）
+       * openclaw-weixin-plugin：openclaw 插件运行时（加载 plugins 里的 @tencent-weixin/openclaw-weixin，登录态复用同目录）
        * weixin-bot：独立标准 adapter（gateway 进程内拉起，走 ilink 长轮询 + 网关 SSE，默认）
        */
-      mode: z.enum(['plugin', 'weixin-bot']).default('weixin-bot'),
+      mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin']).default('weixin-bot'),
       /** weixin-bot 模式：登录态账号 id（缺省取 accounts/ 下第一个） */
       accountId: z.string().optional(),
       /** weixin-bot 模式：对话模型（默认 agent:opencode） */
       model: z.string().optional(),
     })
     .default({ mode: 'weixin-bot' }),
+  /** 任务公共能力（多渠道共享）：默认任务绑定的 agent（缺省 opencode） */
+  tasks: z
+    .object({
+      defaultAgentId: z.string().default('opencode'),
+    })
+    .default({ defaultAgentId: 'opencode' }),
 });
 
 export type GatewayConfig = z.infer<typeof gatewayConfigSchema>;
@@ -87,5 +93,6 @@ export function defaultConfig(): GatewayConfig {
     channels: {},
     plugins: [],
     weixin: { mode: 'weixin-bot' },
+    tasks: { defaultAgentId: 'opencode' },
   };
 }

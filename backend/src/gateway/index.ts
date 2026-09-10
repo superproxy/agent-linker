@@ -104,9 +104,11 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   };
 
   // ── 任务公共能力（多渠道共享；state 落在 <repo>/.runtime-state/tasks/）──
-  // 缺省 defaultAgentId=opencode；config 接线在 Task 7（config.tasks.defaultAgentId）
   const taskStateDir = join(findRepoRoot(), '.runtime-state', 'tasks');
-  const taskService = new TaskService({ store: createJsonStore(taskStateDir) });
+  const taskService = new TaskService({
+    store: createJsonStore(taskStateDir),
+    defaultAgentId: config.tasks?.defaultAgentId,
+  });
   registerTaskApi(app, taskService, (req) => checkAuth(req as FastifyRequest));
 
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
