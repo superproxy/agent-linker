@@ -106,11 +106,16 @@ export class TaskService {
     return task;
   }
 
-  /** 普通消息路由：taskId 缺省用激活任务；任务缺失回落到列表第一个 */
+  /**
+   * 普通消息路由：taskId 缺省用激活任务；显式 taskId 即使不在列表中也保持
+   * （按 sessionKey 隔离会话，agent 沿用激活任务的 agent）。
+   */
   resolveRoute(state: UserTasks, taskId?: string): TaskRoute {
     const id = taskId?.trim() || state.activeTaskId || DEFAULT_TASK_ID;
-    const task = state.tasks.find((t) => t.id === id) ?? state.tasks[0];
-    return { agentId: task.agentId, taskId: task.id, taskName: task.name };
+    const task = state.tasks.find((t) => t.id === id);
+    if (task) return { agentId: task.agentId, taskId: task.id, taskName: task.name };
+    const active = state.tasks.find((t) => t.id === state.activeTaskId) ?? state.tasks[0];
+    return { agentId: active?.agentId ?? this.defaultAgentId, taskId: id, taskName: id };
   }
 
   /** 当前激活任务的 agent（新建任务缺省继承） */
