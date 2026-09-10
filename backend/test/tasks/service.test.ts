@@ -70,3 +70,59 @@ test('resolveRoute 缺省用激活任务，可覆盖', () => {
   assert.equal(r2.taskId, DEFAULT_TASK_ID);
   assert.equal(r2.agentId, 'opencode');
 });
+
+test('handleCommand: new 解析名称与可选 agent', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  const r = svc.handleCommand(state, '/task new 写方案 pi')!;
+  assert.ok(r.text.includes('写方案'));
+  assert.equal(r.activeTaskId, state.activeTaskId);
+  const t = state.tasks.find((x) => x.id === state.activeTaskId)!;
+  assert.equal(t.name, '写方案');
+  assert.equal(t.agentId, 'pi');
+});
+
+test('handleCommand: new 无 agent 继承当前', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  const r = svc.handleCommand(state, '/task new 另一个')!;
+  assert.equal(r.activeAgentId, 'opencode');
+  assert.equal(state.tasks.find((x) => x.id === state.activeTaskId)!.agentId, 'opencode');
+});
+
+test('handleCommand: list 带激活标记', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  svc.handleCommand(state, '/task new 排查 pi')!;
+  const r = svc.handleCommand(state, '/task list')!;
+  assert.ok(r.text.includes('默认'));
+  assert.ok(r.text.includes('排查'));
+  assert.ok(r.text.includes('激活'));
+});
+
+test('handleCommand: use / del / rename / help / 错误分支', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  const t = svc.createTask(state, '排查', 'pi');
+  const rUse = svc.handleCommand(state, `/task use ${t.id}`)!;
+  assert.equal(rUse.activeTaskId, t.id);
+  assert.equal(rUse.activeAgentId, 'pi');
+  const rRename = svc.handleCommand(state, `/task rename ${t.id} 大排查`)!;
+  assert.ok(rRename.text.includes('大排查'));
+  const rDel = svc.handleCommand(state, `/task del ${t.id}`)!;
+  assert.ok(rDel.text.includes('已删除'));
+  assert.ok(!state.tasks.some((x) => x.id === t.id));
+  const rHelp = svc.handleCommand(state, '/task help')!;
+  assert.ok(rHelp.text.includes('/task new'));
+  const rBad = svc.handleCommand(state, '/task del nope')!;
+  assert.ok(rBad.text.includes('任务不存在'));
+  const rDelDefault = svc.handleCommand(state, '/task del default')!;
+  assert.ok(rDelDefault.text.includes('默认任务不可删除'));
+});
+
+test('handleCommand: 非命令返回 null', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  assert.equal(svc.handleCommand(state, '你好呀'), null);
+  assert.equal(svc.handleCommand(state, '/taskx'), null);
+});
