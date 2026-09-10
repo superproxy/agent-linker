@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { findRepoRoot } from '../gateway/config.js';
 import { runChatSession } from './gateway-chat.js';
+import { TaskRouter } from './task-router.js';
 import {
   extractText,
   getUpdates,
@@ -157,6 +158,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const account = loadWeixinAccount(stateDir, options.accountId ?? DEFAULT_ACCOUNT_ID);
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
+  // bot 路由层：选中任务缓存（网关 /api/tasks 为单一事实源）
+  const router = new TaskRouter({ gatewayUrl, channel: 'weixin' });
 
   const syncBufPath = join(stateDir, 'openclaw-weixin', 'accounts', `${account.id}.sync.json`);
 
@@ -204,12 +207,16 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
     // 入站即更新该用户最新 context_token（供回推原样带回）
     setContextToken(stateDir, account.id, from, msg.context_token);
 
-    const sessionKey = `weixin:${from}`;
+    const isCmd = TaskRouter.isCommand(text);
+    const route = isCmd ? null : await router.active(from);
     const out = await runChatSession({
       gatewayUrl,
       model,
-      sessionKey,
+      channel: 'weixin',
+      userId: from,
       message: text,
+      // 命令：网关本地解析回文本；普通消息：按激活任务路由（agent/task 透传）
+      ...(!isCmd && route ? { agent: route.agent, task: route.task } : {}),
       send: async (chunk) => {
         await sendText({
           baseUrl: account.baseUrl,
@@ -225,6 +232,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
       split: (t) => splitChunks(t, MAX_MSG_LEN),
       log,
     });
+    if (isCmd) router.invalidate(from); // 命令改过任务状态，失效缓存
     if (out.text.trim()) {
       log(`[bot] outbound to=${from} len=${out.text.length}`);
     } else if (!out.reasoning.trim()) {

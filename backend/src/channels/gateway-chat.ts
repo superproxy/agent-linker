@@ -24,7 +24,8 @@ export interface StreamOutput {
 export interface StreamChatParams {
   gatewayUrl: string;
   model: string;
-  sessionKey: string;
+  /** 会话 key（可选）：网关 /v1 收到 channel+userId 时会自行派生任务会话 key */
+  sessionKey?: string;
   /** 任务路由扩展字段（linkagent 非标准，网关 /v1 识别）：渠道标识 / 用户 id / agent / 任务 id */
   channel?: string;
   userId?: string;
@@ -45,7 +46,7 @@ export async function streamChat(params: StreamChatParams): Promise<StreamOutput
       model: params.model,
       messages: [{ role: 'user', content: params.message }],
       stream: true,
-      sessionKey: params.sessionKey,
+      ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
       ...(params.channel ? { channel: params.channel } : {}),
       ...(params.userId ? { userId: params.userId } : {}),
       ...(params.agent ? { agent: params.agent } : {}),
@@ -115,8 +116,8 @@ const SEND_RETRY_MS = 2_000;
 export interface RunChatSessionOptions {
   gatewayUrl: string;
   model: string;
-  /** 会话 key（渠道:用户），网关持久会话有记忆 */
-  sessionKey: string;
+  /** 会话 key（可选）：网关 /v1 收到 channel+userId 时自行派生任务会话 key */
+  sessionKey?: string;
   /** 任务路由扩展字段（透传给 streamChat → /v1）：渠道标识 / 用户 id / agent / 任务 id */
   channel?: string;
   userId?: string;
@@ -143,8 +144,7 @@ export interface RunChatSessionResult {
  * 返回累积文本供调用方记日志。任何阶段失败 → 推送 ⚠️ 摘要（send 失败除外，尽力而为）。
  */
 export async function runChatSession(opts: RunChatSessionOptions): Promise<RunChatSessionResult> {
-  const { gatewayUrl, model, sessionKey, message, send, split } = opts;
-  const log = opts.log ?? (() => {});
+  const { gatewayUrl, model, sessionKey, message, send, split } = opts;  const log = opts.log ?? (() => {});
 
   let reasoning = '';
   let reasoningFlushed = false;
@@ -186,8 +186,8 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
     const out = await streamChat({
       gatewayUrl,
       model,
-      sessionKey,
       message,
+      ...(opts.sessionKey ? { sessionKey: opts.sessionKey } : {}),
       ...(opts.channel ? { channel: opts.channel } : {}),
       ...(opts.userId ? { userId: opts.userId } : {}),
       ...(opts.agent ? { agent: opts.agent } : {}),
