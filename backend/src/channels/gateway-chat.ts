@@ -25,6 +25,11 @@ export interface StreamChatParams {
   gatewayUrl: string;
   model: string;
   sessionKey: string;
+  /** 任务路由扩展字段（linkagent 非标准，网关 /v1 识别）：渠道标识 / 用户 id / agent / 任务 id */
+  channel?: string;
+  userId?: string;
+  agent?: string;
+  task?: string;
   message: string;
   signal?: AbortSignal;
   onReasoning?: (delta: string) => void;
@@ -41,6 +46,10 @@ export async function streamChat(params: StreamChatParams): Promise<StreamOutput
       messages: [{ role: 'user', content: params.message }],
       stream: true,
       sessionKey: params.sessionKey,
+      ...(params.channel ? { channel: params.channel } : {}),
+      ...(params.userId ? { userId: params.userId } : {}),
+      ...(params.agent ? { agent: params.agent } : {}),
+      ...(params.task ? { task: params.task } : {}),
     }),
     signal: params.signal,
   });
@@ -108,6 +117,11 @@ export interface RunChatSessionOptions {
   model: string;
   /** 会话 key（渠道:用户），网关持久会话有记忆 */
   sessionKey: string;
+  /** 任务路由扩展字段（透传给 streamChat → /v1）：渠道标识 / 用户 id / agent / 任务 id */
+  channel?: string;
+  userId?: string;
+  agent?: string;
+  task?: string;
   message: string;
   /** 底层发送一条消息（已切块）。重试由本模块处理 */
   send: (chunk: string) => Promise<void>;
@@ -174,6 +188,10 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       model,
       sessionKey,
       message,
+      ...(opts.channel ? { channel: opts.channel } : {}),
+      ...(opts.userId ? { userId: opts.userId } : {}),
+      ...(opts.agent ? { agent: opts.agent } : {}),
+      ...(opts.task ? { task: opts.task } : {}),
       signal: controller.signal,
       onReasoning: (d) => {
         reasoning += d;
