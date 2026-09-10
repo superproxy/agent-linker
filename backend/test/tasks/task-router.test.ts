@@ -34,7 +34,6 @@ test('isCommand 识别 /task 前缀', () => {
 
 test('active 首次查询 /api/tasks 并缓存；第二次不查询', async () => {
   let queries = 0;
-  const router = new TaskRouter({ gatewayUrl: '', channel: 'weixin' });
   await withTaskApi(
     (req, res) => {
       queries += 1;
@@ -52,6 +51,7 @@ test('active 首次查询 /api/tasks 并缓存；第二次不查询', async () =
       );
     },
     async (base) => {
+      const router = new TaskRouter({ gatewayUrl: base, channel: 'weixin' });
       const r1 = await router.active('wx_1');
       assert.equal(r1.agent, 'pi');
       assert.equal(r1.task, 't_2');
@@ -66,13 +66,13 @@ test('active 首次查询 /api/tasks 并缓存；第二次不查询', async () =
 });
 
 test('active 对 404/无激活任务回落 default+opencode', async () => {
-  const router = new TaskRouter({ gatewayUrl: '', channel: 'weixin' });
   await withTaskApi(
     (_req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ channel: 'weixin', userId: 'wx_1', activeTaskId: '', tasks: [] }));
     },
     async (base) => {
+      const router = new TaskRouter({ gatewayUrl: base, channel: 'weixin' });
       const r = await router.active('wx_new');
       assert.equal(r.task, 'default');
       assert.equal(r.agent, 'opencode');
