@@ -13,7 +13,9 @@
     "weixin-login": "tsx src/dev/weixin-login.ts",
     "bot:weixin": "tsx src/channels/weixin-bot.ts",
     "bot:wecom": "tsx src/channels/wecom-bot.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/tasks/*.test.ts",
+    "test:watch": "tsx --test --watch test/tasks/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

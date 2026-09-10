@@ -285,9 +285,27 @@ pnpm bot:wecom
 
 企业微信后台配置：应用管理 → 自建应用 → 接收消息 → 设置 API 接收，`URL = http(s)://<公网>:8798/wecom/callback`，Token/EncodingAESKey 与上面一致。回调支持 URL 验证（echostr）、消息验签+AES 解密、MsgId 去重、5s 内回 `success` 防重试。
 
-会话 key：单聊 `wecom:user:<userid>`，群聊 `wecom:chat:<chatid>`；text 按 2048 字节切块（UTF-8）。
+会话 key：单聊 `wecom:user:<userid>`（已接入任务路由：命令走网关、普通消息进激活任务），群聊 `wecom:chat:<chatid>`（保持原行为）；text 按 2048 字节切块（UTF-8）。
 
 > 提示：独立 botAgent 直连 `/v1`，若网关开了 `auth.enabled`，需要给 adapter 的 `/v1` 请求带 Bearer token（当前版本未内置该支持，请保持 auth 关闭或自行扩展）。
+
+### 任务命令（多渠道共享，网关公共能力）
+
+每个渠道用户拥有独立任务列表（`.runtime-state/tasks/`），每条任务绑定一个 agent、拥有独立持久会话：
+
+| 命令 | 说明 |
+|---|---|
+| `/task new <名称> [agent]` | 新建任务并激活（agent: pi / opencode） |
+| `/task list` | 查看全部任务（`← 激活` 标记当前） |
+| `/task use <id>` | 切换到指定任务 |
+| `/task del <id>` | 删除任务（默认任务不可删） |
+| `/task rename <id> <新名>` | 重命名 |
+| `/task help` | 用法说明 |
+
+- 普通消息自动进入「激活任务」绑定的 agent 会话，各任务记忆互不串扰（会话 key `channel:userId:task:<id>`）；
+- 首次使用自动创建「默认」任务（agent 由 `tasks.defaultAgentId` 配置，缺省 opencode）；
+- web 后台可经 `/api/tasks` 点击管理，与微信命令等价；
+- 普通 OpenAI 客户端（不传 `channel/userId`）走原 `model + sessionKey` 路径，不受影响。
 
 ## 开发 / 运维
 
@@ -301,6 +319,7 @@ pnpm server:stop / restart / status / log
 pnpm web                 # web 后台（vite dev）
 pnpm bot:weixin          # 独立个人微信 botAgent
 pnpm bot:wecom           # 独立企业微信 botAgent
+pnpm test                # backend 单测（任务路由 store/service/api/gateway/router）
 pnpm --filter @linkagent/backend smoke-plugin   # 插件运行时冒烟测试（不连真实企微）
 pnpm --filter @linkagent/backend weixin-login   # 微信扫码登录
 ```
