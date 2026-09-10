@@ -142,9 +142,12 @@ export class TaskService {
         const rest = parts.slice(1);
         let name = rest.join(' ');
         let agentId: string | undefined;
-        if (rest.length >= 2 && known.includes(rest[rest.length - 1].toLowerCase())) {
-          agentId = rest[rest.length - 1].toLowerCase();
-          name = rest.slice(0, -1).join(' ');
+        if (rest.length >= 2) {
+          const last = rest[rest.length - 1]; // rest.length >= 2 保证存在
+          if (last !== undefined && known.includes(last.toLowerCase())) {
+            agentId = last.toLowerCase();
+            name = rest.slice(0, -1).join(' ');
+          }
         }
         const task = this.createTask(state, name, agentId);
         return {

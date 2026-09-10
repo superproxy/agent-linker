@@ -8,6 +8,9 @@ import { loadGatewayConfig, findRepoRoot } from './config.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { collectModelCandidates } from './modelcandidates.js';
 import { PluginManager } from './plugins/manager.js';
+import { createJsonStore } from './tasks/store.js';
+import { TaskService } from './tasks/service.js';
+import { decideTaskRouting, registerTaskApi } from './tasks/api.js';
 import { startWeixinBot, type WeixinBotHandle } from '../channels/weixin-bot.js';
 import {
   formatSseData,
@@ -24,11 +27,20 @@ import {
 /** 内置控制台页（单文件，打开 GET / 即可切换 agent/模型并对话测试） */
 const CONSOLE_PAGE = readFileSync(new URL('../dev/console.html', import.meta.url), 'utf8');
 
+/** 请求体扩展：linkagent 任务路由字段（OpenAI 兼容字段保持原样，多出的字段透明透传） */
+type TaskAwareChatBody = ChatCompletionRequest & {
+  channel?: string;
+  userId?: string;
+  agent?: string;
+  task?: string;
+  sessionKey?: string;
+};
+
 /**
  * OpenAI 兼容网关 HTTP 入口（Chatbox / Open WebUI → /v1 → ACP(acpx) → agent）。
  * 路由：
  *   GET  /v1/models             列出 agent:opencode / agent:pi 等模型
- *   POST /v1/chat/completions   支持 stream / 非 stream（SSE）
+ *   POST /v1/chat/completions   支持 stream / 非 stream（SSE）；渠道请求可带 channel/userId/agent/task（任务路由）
  * 配置见 backend/config/gateway.yaml（缺省 127.0.0.1:8787，agent 用内置默认）。
  */
 
@@ -68,6 +80,8 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   app: FastifyInstance;
   manager: AgentManager;
   pluginManager: PluginManager | null;
+  /** 任务公共能力（多渠道共享，/v1 命令/路由 + /api/tasks 管理） */
+  taskService: TaskService;
   /** 个人微信渠道实现句柄（weixin.mode=weixin-bot 时非空，server listen 后由 main 调 start） */
   weixinBot: { start(): Promise<void>; stop(): Promise<void> } | null;
   host: string;
@@ -89,6 +103,12 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     return config.auth.token !== '' && token === config.auth.token;
   };
 
+  // ── 任务公共能力（多渠道共享；state 落在 <repo>/.runtime-state/tasks/）──
+  // 缺省 defaultAgentId=opencode；config 接线在 Task 7（config.tasks.defaultAgentId）
+  const taskStateDir = join(findRepoRoot(), '.runtime-state', 'tasks');
+  const taskService = new TaskService({ store: createJsonStore(taskStateDir) });
+  registerTaskApi(app, taskService, (req) => checkAuth(req as FastifyRequest));
+
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
 
   app.get('/v1/models', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -105,7 +125,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     return { object: 'list', data };
   });
 
-  app.post('/v1/chat/completions', async (request: FastifyRequest<{ Body: ChatCompletionRequest }>, reply: FastifyReply) => {
+  app.post('/v1/chat/completions', async (request: FastifyRequest<{ Body: TaskAwareChatBody }>, reply: FastifyReply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
@@ -115,27 +135,72 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       return reply.code(400).send(openaiError('请求体需含 model(string) 与 messages(array)', 'invalid_request_error', 'invalid_request'));
     }
 
-    const adapter = manager.resolve(body.model);
-    if (!adapter) {
-      const known = manager.listDescriptors().map((d) => modelIdFor(d.id)).join(', ');
-      return reply
-        .code(404)
-        .send(openaiError(`未知模型 "${body.model}"；可用: ${known}`, 'invalid_request_error', 'model_not_found'));
-    }
-
     // oneshot 无状态会话：把客户端全量多轮历史拼成一段完整上下文一次性下发。
     // 渠道 adapter（botAgent）可传 sessionKey 扩展字段 → 复用同一 agent 持久会话（有记忆）。
     const prompt = messagesToText(body.messages);
     if (!prompt) {
       return reply.code(400).send(openaiError('messages 中没有可发送的文本', 'invalid_request_error', 'empty_messages'));
     }
+
+    // ── 任务路由（渠道传 channel/userId/agent/task）──
+    // 命令 → 本地解析回文本（不走 agent）；普通消息 → 激活任务派生 agentId+sessionKey；
+    // 无 channel/userId → 原 model+sessionKey 路径（兼容）。
+    // 注意：命令判断用最后一条用户消息的原始文本（messagesToText 会加 "User: " 前缀，命令识别需原文）
+    const lastUserText =
+      body.messages
+        .filter((m): m is { role: 'user'; content: string } => m.role === 'user' && typeof m.content === 'string')
+        .at(-1)?.content ?? '';
+    const routing = decideTaskRouting(taskService, {
+      channel: body.channel,
+      userId: body.userId,
+      agent: body.agent,
+      task: body.task,
+      text: lastUserText || prompt,
+    });
+    if (routing.kind === 'command') {
+      if (body.stream !== true) {
+        const result: ChatCompletion = {
+          id: `chatcmpl-${randomUUID()}`,
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: body.model,
+          choices: [{ index: 0, message: { role: 'assistant', content: routing.text }, finish_reason: 'stop' }],
+        };
+        return result;
+      }
+      reply.hijack();
+      const res = reply.raw;
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      const meta = newMeta(body.model);
+      res.write(formatSseData(chunkDelta(meta, { role: 'assistant', content: routing.text }, 'stop')));
+      res.write(SSE_DONE);
+      res.end();
+      return;
+    }
+
+    const modelForChat = routing.kind === 'chat' ? modelIdFor(routing.agentId) : body.model;
+    const sessionKeyForChat = routing.kind === 'chat'
+      ? routing.sessionKey
+      : (typeof body.sessionKey === 'string' ? body.sessionKey.trim() : '');
+
+    const adapter = manager.resolve(modelForChat);
+    if (!adapter) {
+      const known = manager.listDescriptors().map((d) => modelIdFor(d.id)).join(', ');
+      return reply
+        .code(404)
+        .send(openaiError(`未知模型 "${modelForChat}"；可用: ${known}`, 'invalid_request_error', 'model_not_found'));
+    }
+
     const chatRequest = {
       messages: [{ role: 'user' as const, content: prompt }],
-      ...(typeof body.sessionKey === 'string' && body.sessionKey.trim()
-        ? { sessionKey: body.sessionKey.trim() }
-        : {}),
+      ...(sessionKeyForChat ? { sessionKey: sessionKeyForChat } : {}),
     };
-    const meta = newMeta(body.model);
+    const meta = newMeta(modelForChat);
 
     // ---- 非流式：聚合后一次返回 ----
     if (body.stream !== true) {
@@ -158,7 +223,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
         id: meta.id,
         object: 'chat.completion',
         created: meta.created,
-        model: body.model,
+        model: modelForChat,
         choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
       };
       return result;
@@ -259,7 +324,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   });
 
   // ── 个人微信渠道实现二选一 ──
-  //  mode=plugin：加载 openclaw-weixin 插件运行时（登录态复用 accounts/）
+  //  mode=openclaw-weixin-plugin：加载 openclaw-weixin 插件运行时（登录态复用 accounts/）
   //  mode=weixin-bot（默认）：跳过该插件，改由网关进程内拉起独立 adapter（少跑一套插件运行时）
   const weixinMode = config.weixin?.mode ?? 'weixin-bot';
   const skipWeixinPlugin = weixinMode === 'weixin-bot';
@@ -316,7 +381,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       }
     : null;
 
-  return { app, manager, pluginManager, weixinBot, host: config.server.host, port: config.server.port, authEnabled: config.auth.enabled };
+  return { app, manager, pluginManager, taskService, weixinBot, host: config.server.host, port: config.server.port, authEnabled: config.auth.enabled };
 }
 
 async function main(): Promise<void> {
