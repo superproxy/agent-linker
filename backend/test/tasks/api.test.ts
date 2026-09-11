@@ -54,6 +54,33 @@ test('普通消息带 agent/task 参数 → 覆盖路由', () => {
   assert.equal(d.sessionKey, 'weixin:wx_1:task:t_x');
 });
 
+test('任务绑定 agent+cwd：微信普通消息路由到对应 ACP agent 与工作目录', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  const t = svc.createTask(state, '股票分析', 'pi', undefined, '/tmp/wx-stock');
+  // 切到该任务
+  svc.handleCommand(state, `/task use ${t.id}`);
+  // 微信普通消息 → chat，agent/cwd 均由任务决定
+  const d = decideTaskRouting(svc, { text: '帮我分析下股票', channel: 'weixin', userId: 'wx_1' });
+  assert.equal(d.kind, 'chat');
+  assert.equal(d.agentId, 'pi');
+  assert.equal(d.taskId, t.id);
+  assert.equal(d.cwd, '/tmp/wx-stock');
+  assert.equal(d.sessionKey, `weixin:wx_1:task:${t.id}`);
+});
+
+test('切回 default 任务：回落 defaultAgentId，无任务 cwd', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  svc.createTask(state, '股票分析', 'pi', undefined, '/tmp/wx-stock');
+  svc.handleCommand(state, '/task default');
+  const d = decideTaskRouting(svc, { text: '你好', channel: 'weixin', userId: 'wx_1' });
+  assert.equal(d.kind, 'chat');
+  assert.equal(d.agentId, 'opencode'); // defaultAgentId
+  assert.equal(d.taskId, 'default');
+  assert.equal(d.cwd, undefined);
+});
+
 test('decideTaskRouting: taskKey 单 key 直连路由，sessionKey 与三元素一致', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_1');
