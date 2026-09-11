@@ -9,7 +9,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
-import { AcpAdapter } from '../gateway/agents/opencode.js';
+import { AcpWrapper } from '../gateway/agents/acpWrapper.js';
 import { defaultAgentDefinitions } from '@linkagent/shared';
 import type { AgentDefinition } from '@linkagent/shared';
 
@@ -34,7 +34,7 @@ function snapshot(label: string): void {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function chat(adapter: AcpAdapter, sessionKey: string, msg: string): Promise<string> {
+async function chat(adapter: AcpWrapper, sessionKey: string, msg: string): Promise<string> {
   let text = '';
   await adapter.chat(
     { sessionKey, messages: [{ role: 'user', content: msg }] },
@@ -62,7 +62,7 @@ async function main() {
   };
   if (process.env.PI_MODEL) def.model = process.env.PI_MODEL;
 
-  const adapter = new AcpAdapter({
+  const adapter = new AcpWrapper({
     definition: def,
     stateDir: join(repoRoot, '.runtime-state', 'acpx'),
     persistentIdleTimeoutMs: IDLE_MS,

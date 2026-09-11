@@ -1,8 +1,14 @@
 /** 任务（一个任务 = 一个绑定特定 agent 的持久会话） */
 export interface TaskItem {
   id: string;
+  /** 全局唯一任务 key（跨用户反查/直连路由用，k_ 前缀）；旧数据读取时惰性补齐 */
+  key: string;
+  /** key 是否可用：停用后 taskKey 直连被拒（403），任务本体（微信/三元素路由）不受影响；缺省视为启用，读取时惰性补齐 */
+  keyEnabled?: boolean;
   name: string;
   agentId: string;
+  /** 任务工作目录：agent 会话在此目录下启动；缺省用 agent 默认 cwd */
+  cwd?: string;
   createdAt: number;
 }
 
@@ -20,6 +26,8 @@ export interface TaskRoute {
   agentId: string;
   taskId: string;
   taskName: string;
+  /** 任务配置的工作目录（agent 会话启动目录） */
+  cwd?: string;
 }
 
 /** /task 命令处理结果 */
@@ -31,6 +39,8 @@ export interface CommandResult {
 }
 
 export const TASK_COMMAND_PREFIX = '/task';
+/** 任务 key 前缀（全局唯一标识，区别于 per-user 的 t_ 任务 id） */
+export const TASK_KEY_PREFIX = 'k_';
 export const DEFAULT_TASK_ID = 'default';
 export const DEFAULT_TASK_NAME = '默认';
 export const DEFAULT_AGENT_ID = 'opencode';

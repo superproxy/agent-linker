@@ -139,6 +139,17 @@ export interface GetUpdatesResult {
   errmsg?: string;
 }
 
+/** 语音 item（对齐插件 VoiceItem：服务端带语音转写 text，无需本地 ASR） */
+export interface WeixinVoiceItem {
+  /** 语音转文字内容（服务端已转写） */
+  text?: string;
+  /** 语音长度（毫秒） */
+  playtime?: number;
+  /** 编码类型：1=pcm 2=adpcm 3=feature 4=speex 5=amr 6=silk 7=mp3 8=ogg-speex */
+  encode_type?: number;
+  sample_rate?: number;
+}
+
 /** 入站消息（getUpdates msgs[] 元素） */
 export interface WeixinInboundMessage {
   from_user_id: string;
@@ -151,6 +162,9 @@ export interface WeixinInboundMessage {
   item_list?: Array<{
     type: number;
     text_item?: { text: string };
+    voice_item?: WeixinVoiceItem;
+    image_item?: { url?: string };
+    ref_msg?: { title?: string };
     [key: string]: unknown;
   }>;
 }
@@ -218,10 +232,27 @@ export async function sendText(params: SendTextParams): Promise<{ messageId: str
   return { messageId: clientId };
 }
 
-/** 从入站消息提取纯文本（只取 TEXT item，多段拼接） */
+/**
+ * 从入站消息提取正文（对齐官方插件 bodyFromItemList 的文本部分）：
+ * - TEXT：直接取文本（多段拼接，行为与旧版一致）
+ * - VOICE：优先用服务端语音转写 text；无转写降级为占位
+ * - IMAGE / FILE / VIDEO：占位描述（当前不做 CDN 下载与视觉理解）
+ */
 export function extractText(msg: WeixinInboundMessage): string {
-  const parts = (msg.item_list ?? [])
-    .filter((item) => item.type === MessageItemType.TEXT && item.text_item?.text)
-    .map((item) => item.text_item!.text);
+  const parts: string[] = [];
+  for (const item of msg.item_list ?? []) {
+    if (item.type === MessageItemType.TEXT && item.text_item?.text) {
+      parts.push(item.text_item.text);
+      continue;
+    }
+    if (item.type === MessageItemType.VOICE) {
+      const t = item.voice_item?.text;
+      parts.push(t?.trim() ? `[语音转写: ${t.trim()}]` : '[语音消息]');
+      continue;
+    }
+    if (item.type === MessageItemType.IMAGE) parts.push('[图片]');
+    else if (item.type === MessageItemType.FILE) parts.push('[文件]');
+    else if (item.type === MessageItemType.VIDEO) parts.push('[视频]');
+  }
   return parts.join('');
 }

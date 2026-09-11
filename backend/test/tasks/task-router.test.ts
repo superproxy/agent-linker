@@ -65,7 +65,7 @@ test('active 首次查询 /api/tasks 并缓存；第二次不查询', async () =
   );
 });
 
-test('active 对 404/无激活任务回落 default+opencode', async () => {
+test('active 无激活任务回落 default，不指定 agent（由网关权威兜底）', async () => {
   await withTaskApi(
     (_req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -75,7 +75,22 @@ test('active 对 404/无激活任务回落 default+opencode', async () => {
       const router = new TaskRouter({ gatewayUrl: base, channel: 'weixin' });
       const r = await router.active('wx_new');
       assert.equal(r.task, 'default');
-      assert.equal(r.agent, 'opencode');
+      assert.equal(r.agent, undefined);
+    },
+  );
+});
+
+test('active 对 HTTP 500 回落 default，不指定 agent（由网关权威兜底）', async () => {
+  await withTaskApi(
+    (_req, res) => {
+      res.writeHead(500);
+      res.end('boom');
+    },
+    async (base) => {
+      const router = new TaskRouter({ gatewayUrl: base, channel: 'weixin' });
+      const r = await router.active('wx_err');
+      assert.equal(r.task, 'default');
+      assert.equal(r.agent, undefined);
     },
   );
 });

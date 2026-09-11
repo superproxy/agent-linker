@@ -198,9 +198,10 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const handleMessage = async (msg: WeixinInboundMessage): Promise<void> => {
     const from = msg.from_user_id;
     if (!from) return;
+    // 正文提取：TEXT 直接取文本；语音走服务端转写 text（无转写降级占位）；表情/图片/文件/视频占位
     const text = extractText(msg);
     if (!text.trim()) {
-      log(`[bot] 跳过非文本消息 from=${from}`);
+      log(`[bot] 跳过无内容消息 from=${from}`);
       return;
     }
     log(`[bot] inbound from=${from} text="${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"`);
@@ -230,6 +231,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
         });
       },
       split: (t) => splitChunks(t, MAX_MSG_LEN),
+      // 快速返回：正文累计达到 512 字符即中断请求，用户只收到前 512 字符
+      maxTextChars: 512,
       log,
     });
     if (isCmd) router.invalidate(from); // 命令改过任务状态，失效缓存

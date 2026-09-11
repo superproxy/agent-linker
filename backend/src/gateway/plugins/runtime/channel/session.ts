@@ -4,7 +4,7 @@
  * openclaw 用磁盘目录 + JSON 记录每个 sessionKey 的 inbound 元数据
  * （updatedAt / last ctx），供 `formatAgentEnvelope` 计算上次对话时间、
  * 以及插件判断是否新建会话。agent 真实记忆由 ACP 持久会话（acpx session
- * store，见 AcpAdapter sessionKey 复用）承担。
+ * store，见 AcpWrapper sessionKey 复用）承担。
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';

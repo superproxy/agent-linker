@@ -7,7 +7,7 @@
  * 3. 对每个注册的 channel：解析账号（listAccountIds/resolveAccount/isConfigured）
  *    → 调 channelPlugin.gateway.startAccount() 启动（Bot WS / Agent webhook）
  * 4. 把插件注册的 HTTP 路由挂到 Fastify
- * 5. agent 派发桥：core.channel.reply.dispatch → AgentManager → AcpAdapter（持久会话）
+ * 5. agent 派发桥：core.channel.reply.dispatch → AgentManager → AcpWrapper（持久会话）
  */
 import type { FastifyInstance } from 'fastify';
 import type { AgentManager } from '../agents/manager.js';
@@ -135,7 +135,7 @@ export class PluginManager {
     };
   }
 
-  /** agent 派发桥：dispatch → AgentManager → AcpAdapter（sessionKey 持久会话） */
+  /** agent 派发桥：dispatch → AgentManager → AcpWrapper（sessionKey 持久会话） */
   private createAgentDispatch(): ChannelAgentDispatch {
     const manager = this.manager;
     return {

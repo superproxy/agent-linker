@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntimeError, type AcpxRuntime } from 'acpx/runtime';
 import type { AgentAdapter, AgentDefinition, AgentDescriptor, ChatRequest, ChatResult, StreamCallbacks } from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
@@ -43,6 +43,16 @@ export interface AcpWrapperOptions {
 
 /** persistent 会话默认空闲超时：30 分钟无消息 → 关闭进程（状态保留，可续聊） */
 const DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * acpx 持久会话「恢复失败」错误判定（acpx 抛 SessionResumeRequiredError，
+ * 消息形如 `Persistent ACP session xxx could not be resumed: <reason>`）。
+ * 常见原因：agent 侧会话状态已失效（如 pi 按 cwd 清理旧会话文件、session-map 丢失），
+ * 此时 acpx 的 resumePolicy=same-session-only 不会自动回退到新会话，需要调用方重置记录后新建。
+ */
+function isSessionRecoveryRequiredError(err: unknown): boolean {
+  return err instanceof Error && /could not be resumed/i.test(err.message);
+}
 
 /**
  * ACP 后端适配器：直接以 acpx runtime 连接目标 agent 的 ACP server 进程
@@ -145,12 +155,8 @@ export class AcpWrapper implements AgentAdapter {
     // 有显式 sessionKey（渠道多轮会话：微信/企微等）→ persistent 复用同一 agent 会话（有记忆）；
     // 缺省（/v1 HTTP）→ oneshot 新会话用完即弃，避免 agent 记忆跨用户串扰
     const persistent = Boolean(req.sessionKey?.trim());
-    const handle = await runtime.ensureSession({
-      sessionKey: persistent ? req.sessionKey!.trim() : `gw-${this.id}-${requestId}`,
-      agent: this.agentName,
-      mode: persistent ? 'persistent' : 'oneshot',
-      cwd: this.cwd(),
-    });
+    const sessionKey = persistent ? req.sessionKey!.trim() : `gw-${this.id}-${requestId}`;
+    const mode: 'persistent' | 'oneshot' = persistent ? 'persistent' : 'oneshot';
 
     const text = lastUserText(req.messages) ?? '';
     if (!text) throw new Error('请求中没有可发送的 user 文本（网关一期仅支持文本）');
@@ -158,65 +164,90 @@ export class AcpWrapper implements AgentAdapter {
     // 配置了会话模型时，先经 ACP set_config_option 指到指定模型（pi-acp 场景必需，
     // pi 自身默认 provider 可能无凭据；opencode 配置了也会生效，不配则不调用）
     const sessionModel = this.model;
-    if (sessionModel) {
+    // 会话工作目录：任务级 cwd（ChatRequest.cwd）优先，否则 agent 默认 cwd（definition.cwd / defaultCwd / 网关启动目录）
+    const cwd = req.cwd?.trim() ? resolve(req.cwd) : this.cwd();
+
+    // 单次执行一轮。resetFirst=true 时先重置旧会话记录（后端侧会话状态已失效），同 sessionKey 新建会话。
+    // 恢复失败仅允许在尚未开始流式输出时重试一次，避免重复输出。
+    const attempt = async (resetFirst: boolean): Promise<ChatResult> => {
+      if (resetFirst) {
+        await this.dropRuntimeSessionRecord(sessionKey);
+        cb.onText?.('⚠️ 会话上下文已失效，已开启新会话（历史记忆不可用）。');
+      }
+
+      let handle: Awaited<ReturnType<AcpxRuntime['ensureSession']>>;
       try {
-        await runtime.setConfigOption({ handle, key: 'model', value: sessionModel });
+        handle = await runtime.ensureSession({ sessionKey, agent: this.agentName, mode, cwd });
       } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          `设置会话模型“${sessionModel}”失败（请确认该 agent 可用模型，或调整会话模型）：${detail}`,
-          { cause: err },
-        );
+        // 恢复旧持久会话失败（agent 侧会话状态丢失，如 pi 清理旧会话文件）→ 重置记录并新建会话续聊
+        if (persistent && !resetFirst && isSessionRecoveryRequiredError(err)) return attempt(true);
+        throw err;
       }
-    }
 
-    try {
-      const turn = runtime.startTurn({
-        handle,
-        text,
-        mode: 'prompt',
-        requestId,
-        signal,
-        onElicitation: async () => ({ action: 'decline' }),
-      });
-
-      for await (const ev of turn.events) {
-        if (ev.type === 'text_delta') {
-          if (ev.stream === 'thought') cb.onReasoning?.(ev.text);
-          else cb.onText(ev.text);
-        } else if (ev.type === 'tool_call') {
-          cb.onToolActivity?.(ev.title ?? ev.text);
+      if (sessionModel) {
+        try {
+          await runtime.setConfigOption({ handle, key: 'model', value: sessionModel });
+        } catch (err) {
+          // 恢复动作实际发生在 setConfigOption 内部（lazy 连后端），同样按上述规则重置重试
+          if (persistent && !resetFirst && isSessionRecoveryRequiredError(err)) return attempt(true);
+          const detail = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `设置会话模型“${sessionModel}”失败（请确认该 agent 可用模型，或调整会话模型）：${detail}`,
+            { cause: err },
+          );
         }
-        // status / done / error 通过 turn.result 收敛，不在此处理
       }
 
-      const result = await turn.result;
-      if (result.status === 'failed') {
-        const msg = result.error?.message ?? 'agent 执行失败';
-        throw new Error(msg);
+      try {
+        const turn = runtime.startTurn({
+          handle,
+          text,
+          mode: 'prompt',
+          requestId,
+          signal,
+          onElicitation: async () => ({ action: 'decline' }),
+        });
+
+        for await (const ev of turn.events) {
+          if (ev.type === 'text_delta') {
+            if (ev.stream === 'thought') cb.onReasoning?.(ev.text);
+            else cb.onText(ev.text);
+          } else if (ev.type === 'tool_call') {
+            cb.onToolActivity?.(ev.title ?? ev.text);
+          }
+          // status / done / error 通过 turn.result 收敛，不在此处理
+        }
+
+        const result = await turn.result;
+        if (result.status === 'failed') {
+          const msg = result.error?.message ?? 'agent 执行失败';
+          throw new Error(msg);
+        }
+        cb.onSessionId?.(handle.acpxRecordId ?? handle.agentSessionId ?? requestId);
+        return {};
+      } catch (err) {
+        if (isAcpRuntimeError(err)) {
+          const hint =
+            err.code === 'ACP_BACKEND_UNAVAILABLE'
+              ? `（确认本机已就绪 agent 启动命令：${this.command().join(' ')}）`
+              : '';
+          throw new Error(`ACP 运行时错误 [${err.code}]${hint}: ${err.message}`, { cause: err });
+        }
+        throw err;
+      } finally {
+        if (persistent) {
+          // persistent 会话（渠道多轮：微信/企微）：进程保留在 acpx retained 池，
+          // 同 sessionKey 下一轮免冷启动直接复用；仅空闲超时（默认 30 分钟）才关闭进程。
+          // 会话状态始终保留（stateDir），超时关闭后同一 sessionKey 可恢复续聊。
+          this.armPersistentIdle(handle);
+        } else {
+          // oneshot（/v1 HTTP，无 sessionKey）：用完即弃，避免 agent 记忆跨请求串扰
+          await this.closeOneShot(runtime, handle);
+        }
       }
-      cb.onSessionId?.(handle.acpxRecordId ?? handle.agentSessionId ?? requestId);
-      return {};
-    } catch (err) {
-      if (isAcpRuntimeError(err)) {
-        const hint =
-          err.code === 'ACP_BACKEND_UNAVAILABLE'
-            ? `（确认本机已就绪 agent 启动命令：${this.command().join(' ')}）`
-            : '';
-        throw new Error(`ACP 运行时错误 [${err.code}]${hint}: ${err.message}`, { cause: err });
-      }
-      throw err;
-    } finally {
-      if (persistent) {
-        // persistent 会话（渠道多轮：微信/企微）：进程保留在 acpx retained 池，
-        // 同 sessionKey 下一轮免冷启动直接复用；仅空闲超时（默认 30 分钟）才关闭进程。
-        // 会话状态始终保留（stateDir），超时关闭后同一 sessionKey 可恢复续聊。
-        this.armPersistentIdle(handle);
-      } else {
-        // oneshot（/v1 HTTP，无 sessionKey）：用完即弃，避免 agent 记忆跨请求串扰
-        await this.closeOneShot(runtime, handle);
-      }
-    }
+    };
+
+    return attempt(false);
   }
 
   /**
@@ -244,6 +275,22 @@ export class AcpWrapper implements AgentAdapter {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       console.error(`[acp] oneshot 会话关闭失败 handle=${handle.acpxRecordId ?? handle.sessionKey}: ${detail}`);
+    }
+  }
+
+  /**
+   * 删除 acpx 中该 sessionKey 的持久会话记录（stateDir/sessions/<encodeURIComponent(sessionKey)>.json）。
+   * 用于 agent 侧会话状态已失效（无法恢复）时重置记录，使同一 sessionKey 后续请求新建会话续聊。
+   * 删除失败仅记录日志，不影响主流程（后续 ensureSession 会重新创建记录）。
+   */
+  private async dropRuntimeSessionRecord(sessionKey: string): Promise<void> {
+    try {
+      const file = join(this.options.stateDir, 'sessions', `${encodeURIComponent(sessionKey)}.json`);
+      rmSync(file, { force: true });
+      console.warn(`[acp] 持久会话状态失效，已重置会话记录 sessionKey=${sessionKey}`);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.warn(`[acp] 重置持久会话记录失败 sessionKey=${sessionKey}: ${detail}`);
     }
   }
 

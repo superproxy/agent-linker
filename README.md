@@ -51,6 +51,9 @@ auth:
   enabled: false        # 开启后 /v1 与 /api/* 均要求 Authorization: Bearer <token>
   token: ""             # enabled=true 时必须填写
 
+# agent 默认工作目录（= 默认工作空间 default）：未显式配 cwd 的 agent 在此运行
+# defaultCwd: /path/to/works
+
 # agents 省略时使用内置默认（opencode + pi）
 agents:
   - id: opencode
@@ -98,7 +101,7 @@ curl http://127.0.0.1:8787/v1/models
 
 ### POST /v1/chat/completions
 
-支持 stream / 非 stream。请求体为标准 OpenAI 格式（一期实现文本子集）：
+支持 stream / 非 stream。请求体为标准 OpenAI 格式（一期实现文本子集），并可叠加 linkagent 扩展字段（见下表）：
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
@@ -110,9 +113,18 @@ curl http://127.0.0.1:8787/v1/chat/completions \
   }'
 ```
 
+| 扩展字段 | 说明 |
+|---|---|
+| `taskKey` | 任务 key 单参数直连（见「任务 Key 直连」）；停用的 key 返回 `403 key_disabled` |
+| `channel` / `userId` / `task` | 三元素路由（微信渠道可用，见下）；`userId` 缺省即 `default` 用户 |
+| `agent` | 显式指定 agent，所有分支最高优先级；微信渠道（三元素）agent 仅由「任务绑定 + 此字段」决定 |
+| `sessionKey` | 复用同一持久会话（渠道 adapter 使用） |
+
+- 微信渠道（三元素）普通消息的 agent **不读 `model`**（weixin-bot 固定传 `weixin.model`，默认 `agent:pi`），由激活任务绑定决定；`taskKey` 直连分支 `model: agent:<id>` 仍可显式指定 agent。完整决策见「路由策略」。
+
 - 非流式：返回 `chat.completion`，内容在 `choices[0].message.content`
 - 流式：SSE 事件为标准 `chat.completion.chunk`，思考过程放在 `choices[0].delta.reasoning_content`，结束为 `data: [DONE]`
-- 错误体为标准结构 `{ error: { message, type, param, code } }`，常见：`400` 请求体非法 / `401` 鉴权失败 / `404` 未知模型 / `500` agent 执行失败
+- 错误体为标准结构 `{ error: { message, type, param, code } }`，常见：`400` 请求体非法 / `401` 鉴权失败 / `403` key 已停用 / `404` 未知模型或任务不存在 / `500` agent 执行失败
 
 ### 会话语义（重要）
 
@@ -254,7 +266,7 @@ pnpm bot:weixin
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
 | `LINKAGENT_GATEWAY_URL` | `http://127.0.0.1:8787` | 网关 base |
-| `LINKAGENT_GATEWAY_MODEL` | `agent:opencode` | 模型 |
+| `LINKAGENT_GATEWAY_MODEL` | `agent:pi` | 对话模型（weixin.model；仅作 OpenAI 字段透传，不参与任务路由） |
 | `LINKAGENT_ACCOUNT_ID` | 取 accounts/ 第一个 | 微信登录态账号 |
 | `LINKAGENT_STATE_DIR` | `<repo>/.runtime-state/plugins` | 登录态目录 |
 
@@ -285,7 +297,7 @@ pnpm bot:wecom
 
 企业微信后台配置：应用管理 → 自建应用 → 接收消息 → 设置 API 接收，`URL = http(s)://<公网>:8798/wecom/callback`，Token/EncodingAESKey 与上面一致。回调支持 URL 验证（echostr）、消息验签+AES 解密、MsgId 去重、5s 内回 `success` 防重试。
 
-会话 key：单聊 `wecom:user:<userid>`（已接入任务路由：命令走网关、普通消息进激活任务），群聊 `wecom:chat:<chatid>`（保持原行为）；text 按 2048 字节切块（UTF-8）。
+会话 key：单聊 `wecom:user:<userid>`，群聊 `wecom:chat:<chatid>`；消息走原 `model + sessionKey` 路径（无任务机制，任务路由白名单仅微信渠道）；text 按 2048 字节切块（UTF-8）。
 
 > 提示：独立 botAgent 直连 `/v1`，若网关开了 `auth.enabled`，需要给 adapter 的 `/v1` 请求带 Bearer token（当前版本未内置该支持，请保持 auth 关闭或自行扩展）。
 
@@ -306,6 +318,86 @@ pnpm bot:wecom
 - 首次使用自动创建「默认」任务（agent 由 `tasks.defaultAgentId` 配置，缺省 opencode）；
 - web 后台可经 `/api/tasks` 点击管理，与微信命令等价；
 - 普通 OpenAI 客户端（不传 `channel/userId`）走原 `model + sessionKey` 路径，不受影响。
+
+### 路由策略：/v1 消息如何选择 agent
+
+`POST /v1/chat/completions` 的 agent 选择统一由网关 `decideTaskRouting` 决策，按请求形态分四个分支：
+
+| 请求形态 | 分支 | agent 选择 | 会话 |
+|---|---|---|---|
+| 带 `taskKey` | 任务 Key 直连 | 任务绑定 agent；`model: agent:<id>` / 扩展字段 `agent` 可显式覆盖 | 任务持久会话（与微信 `/task use` 互通） |
+| `channel: weixin` + 普通消息 | 三元素路由 | 激活任务绑定 agent；`agent` 可覆盖，**`model` 不参与** | `weixin:<userId>:task:<taskId>` |
+| `channel: weixin` + `/task 命令` | 命令分支 | 不走 agent，网关本地解析返回文本 | — |
+| 无 `channel`（普通 OpenAI 客户端） | legacy | 原 `model`（`agent:<id>`） | 原 model + sessionKey 路径 |
+
+核心原则：
+
+- **微信渠道普通消息的 agent 只由任务决定**：进入「激活任务」绑定的 agent。`model` 参数（weixin-bot 写死的 `weixin.model`，默认 `agent:pi`）**不参与** agent 路由——避免它与默认任务绑定 `tasks.defaultAgentId`（缺省 `opencode`）配置不一致时，把 default 任务误路由到写死的 agent。
+- **显式 `agent` 扩展字段优先级最高**：任意分支都可覆盖任务绑定。
+- **`taskKey` 直连保留 `model` 显式指定**：与普通 OpenAI 客户端一致，便于通用客户端凭 key 直连并指定 agent。
+- **`userId` 缺省视为 `default` 用户**（独立任务列表与会话，见「userId 缺省」）。
+- **查询失败兜底**：weixin-bot 向网关查询 `/api/tasks` 失败（网关离线/异常）时，透传 `task: default` 且不指定 agent，由网关按默认任务绑定的 `tasks.defaultAgentId` 权威兜底，保证默认任务始终路由到配置的默认 agent。
+
+### 任务 Key 直连与认证方式（/v1 扩展）
+
+#### 鉴权开关（系统设置）
+
+网关鉴权可在配置里整体启用/禁用（`backend/config/gateway.yaml`）：
+
+```yaml
+auth:
+  enabled: true    # false=完全关闭（默认）；true=启用 Bearer 鉴权
+  token: "..."     # enabled=true 时必须填写
+```
+
+- 关闭时 `/v1` 与 `/api/*` 全部免鉴权直通（默认行为）；
+- 启用后所有请求要求 `Authorization: Bearer <token>`，无/错 token 返回 `401`；
+- 网页控制台右上角「API Key」可填写 Bearer token 继续使用。
+
+#### 1. 任务 Key 直接访问 API（`taskKey` 单参数直连）
+
+任务创建后自动分配全局唯一 key（`k_` 前缀，可在控制台查看/复制）。任何调用方凭 key 即可直连该任务，**无需** channel/userId/task 三元素：
+
+```bash
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
+  -d '{
+    "taskKey": "k_abc123",
+    "model": "agent:opencode",
+    "messages": [{ "role": "user", "content": "继续上次的话题" }]
+  }'
+```
+
+- agent 用 **model 方式**指定（`model: agent:<agentId>`），与普通 OpenAI 客户端一致；也可用扩展字段 `agent` 覆盖，优先级高于 model；
+- 会话自动落到 key 对应任务的持久会话（有记忆），与微信命令 `/task use` 切换出的会话**互通**；
+- 任务 key 被停用后返回 `403`（`code: key_disabled`），任务本体（微信/三元素路由）不受影响；
+- 默认工作空间为 `default`（agent 工作目录：`agents.<id>.cwd` → 配置 `defaultCwd` → 网关启动目录，见配置章节）。
+
+#### 2. 微信渠道：三元素 或 Key 认证
+
+微信渠道用户访问 `/v1` 有两种等价认证方式：
+
+- **三元素**：`channel: "weixin"` + `userId` + 可选 `task`（活动任务）：
+  ```bash
+  -d '{
+    "channel": "weixin", "userId": "wx_10001",
+    "messages": [{ "role": "user", "content": "帮我写方案" }]
+  }'
+  ```
+- **Key 认证**：只带 `taskKey`（单参数直连，见上），channel/userId 由 key 对应任务决定。
+
+#### 3. userId 缺省 = default 用户
+
+三元素路由时 `userId` 可以不写，网关视其为 `default` 用户（不写 user 就是 default）：
+
+```bash
+-d '{ "channel": "weixin", "messages": [{ "role": "user", "content": "你好" }] }'
+# 等价于 channel=weixin, userId=default
+```
+
+- `default` 用户拥有独立任务列表与会话，不与其他用户串扰；
+- `channel` 完全不写时走原 `model + sessionKey` 路径（oneshot，无任务机制）。
 
 ## 开发 / 运维
 

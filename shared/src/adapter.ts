@@ -61,6 +61,8 @@ export interface ChatRequest {
   messages: ChatMessage[];
   /** 会话 key：相同 key 复用同一 agent 会话；缺省则每次新会话 */
   sessionKey?: string;
+  /** 会话工作目录：任务级 cwd 时传入；缺省用 agent 默认 cwd（definition.cwd / defaultCwd / 网关启动目录） */
+  cwd?: string;
   permissionMode?: AcpPermissionMode;
 }
 

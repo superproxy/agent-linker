@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { AcpAdapter } from '../gateway/agents/opencode.js';
+import { AcpWrapper } from '../gateway/agents/acpWrapper.js';
 import { defaultAgentDefinitions } from '@linkagent/shared';
 import type { AgentDefinition } from '@linkagent/shared';
 
@@ -33,7 +33,7 @@ async function main() {
   if (agent === 'pi' && process.env.PI_MODEL) def.model = process.env.PI_MODEL;
 
   console.log(`→ 启动 ${agent} ACP（acpx oneshot）…`);
-  const adapter = new AcpAdapter({
+  const adapter = new AcpWrapper({
     definition: def,
     stateDir: join(repoRoot, '.runtime-state', 'acpx'),
     verbose: process.env.VERBOSE === '1',

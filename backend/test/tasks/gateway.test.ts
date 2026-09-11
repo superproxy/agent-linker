@@ -172,3 +172,38 @@ test('POST /v1 命令分支：未知 agent 路由到 chat 报 404', async () => 
     await app.close().catch(() => {});
   }
 });
+
+test('POST /v1 taskKey 鉴权：停用 key → 403 key_disabled；不存在 → 404', async () => {
+  const built = await freshBuilt([{ id: 'opencode', type: 'opencode', displayName: 'OpenCode' }]);
+  const { app, manager, pluginManager, taskService } = built;
+  try {
+    const channel = 'weixin';
+    const userId = `gw_key_${Date.now()}`;
+    const state = taskService.load(channel, userId);
+    const t = taskService.createTask(state, '分享任务', 'opencode');
+    const send = (taskKey: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/chat/completions',
+        payload: {
+          model: 'agent:opencode',
+          taskKey,
+          messages: [{ role: 'user', content: '你好' }],
+        },
+      });
+
+    // 停用前正常路由到 chat（command 分支不走 agent，这里用普通消息会进 agent，故先只断言非 403/404）
+    taskService.setKeyEnabled(state, t.id, false);
+    const off = await send(t.key);
+    assert.equal(off.statusCode, 403);
+    assert.equal(off.json().error.code, 'key_disabled');
+
+    // 不存在 key → 404
+    const nf = await send('k_nonexist');
+    assert.equal(nf.statusCode, 404);
+  } finally {
+    await pluginManager?.dispose().catch(() => {});
+    await manager.dispose().catch(() => {});
+    await app.close().catch(() => {});
+  }
+});

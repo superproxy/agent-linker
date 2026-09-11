@@ -71,11 +71,19 @@ export async function streamChat(params: StreamChatParams): Promise<StreamOutput
       if (data === '[DONE]') continue;
       let chunk: {
         choices?: Array<{ delta?: { content?: string; reasoning_content?: string; role?: string } }>;
+        error?: { message?: string; code?: string | null };
       };
       try {
         chunk = JSON.parse(data) as typeof chunk;
       } catch {
         continue; // 非 JSON 事件（如错误文案）跳过
+      }
+      // 网关流式错误事件（agent chat failed 等）：向上抛出真实原因，
+      // 否则静默忽略会导致 bot 端只见「网关无输出」而无法定位问题
+      const err = chunk.error;
+      if (err) {
+        const msg = err.message ?? JSON.stringify(err);
+        throw new Error(`网关错误${err.code ? ` [${err.code}]` : ''}: ${msg}`);
       }
       const delta = chunk.choices?.[0]?.delta;
       if (!delta) continue;
@@ -130,6 +138,8 @@ export interface RunChatSessionOptions {
   split: (text: string) => string[];
   /** 单轮超时，默认 5 分钟 */
   timeoutMs?: number;
+  /** 正文累计字符上限：达到即中断请求快速返回（用户只收到前 N 字符）。不设则完整生成 */
+  maxTextChars?: number;
   /** 日志回调（可选） */
   log?: (...args: unknown[]) => void;
 }
@@ -181,6 +191,9 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  // 达到 maxTextChars 主动截断（快速返回）：与超时/异常区分，不作为错误推送
+  let truncated = false;
+  let receivedText = '';
   try {
     let textReceived = false;
     const out = await streamChat({
@@ -197,19 +210,34 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
         reasoning += d;
         scheduleReasoningFlush();
       },
-      onText: () => {
+      onText: (d) => {
+        receivedText += d;
         if (!textReceived) {
           textReceived = true;
           void flushReasoningNow(); // 正文第一条输出 → 先推思考块（fire，不等正文）
+        }
+        // 正文累计达到上限 → 中断请求，让模型提前停、快速返回（已收内容截断发给用户）
+        if (opts.maxTextChars && receivedText.length >= opts.maxTextChars && !controller.signal.aborted) {
+          truncated = true;
+          controller.abort();
         }
       },
     });
     await flushReasoningNow();
     if (out.text.trim()) {
-      await pushChunks(out.text.trim());
+      const capped = opts.maxTextChars ? out.text.trim().slice(0, opts.maxTextChars) : out.text.trim();
+      await pushChunks(capped);
     }
-    return { text: out.text, reasoning: out.reasoning };
+    return { text: opts.maxTextChars ? out.text.trim().slice(0, opts.maxTextChars) : out.text, reasoning: out.reasoning };
   } catch (err) {
+    // 主动截断（abort）不算失败：把已收到的前 N 字符发给用户即可
+    if (truncated) {
+      if (reasoning && !reasoningFlushed) await flushReasoningNow().catch(() => {});
+      const capped = receivedText.trim().slice(0, opts.maxTextChars ?? Infinity);
+      if (capped) await pushChunks(capped).catch(() => {});
+      log(`[chat] 正文达上限（${opts.maxTextChars}）截断快速返回`);
+      return { text: capped, reasoning };
+    }
     const errMsg = err instanceof Error ? err.message : String(err);
     log('[chat] 处理失败:', errMsg);
     await pushChunks(`⚠️ 处理失败：${errMsg.slice(0, 500)}`).catch(() => {});

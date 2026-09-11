@@ -3,7 +3,7 @@
  * - opencode：~/.config/opencode/opencode.json（或仓库根 opencode.json）provider.<id>.models 的键
  * - pi：       ~/.pi/agent/models.json provider.<id>.models[].id
  * 结果统一为 "providerId/modelId"（如 volcengine/deepseek-v4-flash-ga-260731），与
- * AcpAdapter 通过 ACP set_config_option('model') 下发的取值一致。
+ * AcpWrapper 通过 ACP set_config_option('model') 下发的取值一致。
  * 文件缺失 / 结构不符 / 解析失败一律静默降级为空列表（UI 仍可手动输入模型）。
  */
 import { readFileSync } from 'node:fs';

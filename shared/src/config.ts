@@ -10,7 +10,7 @@ export const agentDefSchema = z.object({
   displayName: z.string().optional(),
   description: z.string().optional(),
   cwd: z.string().optional(),
-  // 缺省值在 AcpAdapter 侧兜底为 approve-reads（与 AgentDefinition.permissionMode 的 optional 一致）
+  // 缺省值在 AcpWrapper 侧兜底为 approve-reads（与 AgentDefinition.permissionMode 的 optional 一致）
   permissionMode: z.enum(ACP_PERMISSION_MODES).optional(),
   env: z.record(z.string(), z.string()).optional(),
   command: z.array(z.string()).optional(),
@@ -31,6 +31,8 @@ export const gatewayConfigSchema = z.object({
     })
     .default({ enabled: false, token: '' }),
   agents: z.array(agentDefSchema).default([]),
+  /** agent 默认工作目录：agent 未显式配 cwd 时用它作为 ACP 进程/会话的工作目录；缺省为空串（沿用网关启动目录） */
+  defaultCwd: z.string().default(''),
   /** 预留：渠道配置（微信等）二期接入 */
   channels: z.record(z.string(), z.unknown()).default({}),
   /** openclaw 渠道插件包（企业微信默认内置；个人微信 @tencent-weixin/openclaw-weixin） */
@@ -94,5 +96,6 @@ export function defaultConfig(): GatewayConfig {
     plugins: [],
     weixin: { mode: 'weixin-bot' },
     tasks: { defaultAgentId: 'opencode' },
+    defaultCwd: '',
   };
 }

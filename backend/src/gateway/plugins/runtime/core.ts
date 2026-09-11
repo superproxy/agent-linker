@@ -41,7 +41,7 @@ export interface PluginRuntimeDeps {
   /** openclaw 兼容配置（channels/tools/agents/session 等） */
   config: Record<string, unknown>;
   logger: RuntimeLogger;
-  /** agent 调度桥（linkagent AgentManager + AcpAdapter） */
+  /** agent 调度桥（linkagent AgentManager + AcpWrapper） */
   agentDispatch: ChannelAgentDispatch;
   /** writeConfigFile 是否真实写回 gateway.yaml；缺省仅内存合并 */
   persistConfig?: (next: Record<string, unknown>) => boolean | Promise<boolean>;

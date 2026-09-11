@@ -2,13 +2,15 @@ import { join } from 'node:path';
 import type { AgentAdapter, AgentDefinition, AgentDescriptor } from '@linkagent/shared';
 import { modelIdFor } from '@linkagent/shared';
 import { findRepoRoot } from '../config.js';
-import { AcpAdapter, type AcpAgentKind } from './opencode.js';
+import { AcpWrapper, type AcpAgentKind } from './acpWrapper.js';
 
 export interface ManagerOptions {
   /** agent 定义 */
   definitions: AgentDefinition[];
   /** 会话状态根目录，缺省 <repoRoot>/.runtime-state/acpx */
   stateDir?: string;
+  /** agent 默认工作目录：agent 未配 cwd 时用它（透传给 AcpWrapper） */
+  defaultCwd?: string;
   repoRoot?: string;
 }
 
@@ -33,16 +35,18 @@ export interface AgentPatch {
 
 /** 统一管理所有 agent 后端实例；对外按模型 id 解析 */
 export class AgentManager {
-  private readonly adapters = new Map<string, AcpAdapter>();
+  private readonly adapters = new Map<string, AcpWrapper>();
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly definitions: AgentDefinition[];
   private readonly stateDir: string;
+  private readonly defaultCwd: string;
   private readonly enabled = new Set<string>();
 
   constructor(options: ManagerOptions) {
     this.definitions = options.definitions;
     const repo = options.repoRoot ?? findRepoRoot();
     this.stateDir = options.stateDir ?? join(repo, '.runtime-state', 'acpx');
+    this.defaultCwd = options.defaultCwd ?? '';
   }
 
   async start(): Promise<void> {
@@ -50,8 +54,12 @@ export class AgentManager {
     for (const def of this.definitions) {
       if (seen.has(def.id)) throw new Error(`agent id 重复: ${def.id}`);
       seen.add(def.id);
-      // AcpAdapter 内部按 definition.type 决定 ACP agent key 与默认命令
-      const adapter = new AcpAdapter({ definition: def, stateDir: this.stateDir });
+      // AcpWrapper 内部按 definition.type 决定 ACP agent key 与默认命令
+      const adapter = new AcpWrapper({
+        definition: def,
+        stateDir: this.stateDir,
+        defaultCwd: this.defaultCwd,
+      });
       this.adapters.set(def.id, adapter);
       this.descriptors.set(modelIdFor(def.id), adapter.descriptor());
       this.enabled.add(def.id);

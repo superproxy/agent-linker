@@ -36,8 +36,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WecomCrypto } from '@wecom/aibot-node-sdk';
-import { runChatSession, streamChat } from './gateway-chat.js';
-import { TaskRouter } from './task-router.js';
+import { runChatSession } from './gateway-chat.js';
 
 // ── 配置 ──────────────────────────────────────────────────────────────
 function requireEnv(name: string): string {
@@ -72,8 +71,6 @@ const DEDUP_MAX = 500;
 const userChains = new Map<string, Promise<void>>();
 
 const log = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
-// 单聊任务路由层：选中任务缓存（网关 /api/tasks 为单一事实源）
-const router = new TaskRouter({ gatewayUrl: GATEWAY_URL, channel: 'wecom' });
 const errLog = (...args: unknown[]) => console.error(new Date().toISOString(), ...args);
 
 const crypto = new WecomCrypto(TOKEN, AES_KEY, CORP_ID);
@@ -215,21 +212,19 @@ async function handleWecomMessage(msg: WecomMessage): Promise<void> {
     return;
   }
 
-  // 单聊：任务路由（命令 → 网关本地解析回文本；普通消息 → 激活任务）
-  const isCmd = TaskRouter.isCommand(text);
-  const route = isCmd ? null : await router.active(from);
+  // 单聊：wecom 无任务机制（活动任务只属于微信渠道 / dev 控制台对话框），
+  // 直接按默认模型 + 持久 sessionKey 路由（多轮记忆保持，不受任务状态影响）
   await runChatSession({
     gatewayUrl: GATEWAY_URL,
     model: GATEWAY_MODEL,
     channel: 'wecom',
     userId: from,
+    sessionKey: `wecom:${from}`,
     message: text,
-    ...(!isCmd && route ? { agent: route.agent, task: route.task } : {}),
     send: (chunk) => sendWecomText(from, chunk),
     split: splitByBytes,
     log,
   });
-  if (isCmd) router.invalidate(from);
 }
 
 function enqueue(from: string, task: () => Promise<void>): void {

@@ -12,6 +12,7 @@ import { createJsonStore } from './tasks/store.js';
 import { TaskService } from './tasks/service.js';
 import { decideTaskRouting, registerTaskApi } from './tasks/api.js';
 import { startWeixinBot, type WeixinBotHandle } from '../channels/weixin-bot.js';
+import { registerWeixinApi, WeixinLoginService } from './weixin-login.js';
 import {
   formatSseData,
   SSE_DONE,
@@ -24,8 +25,11 @@ import {
   type ChatCompletionRequest,
 } from '@linkagent/shared';
 
-/** 内置控制台页（单文件，打开 GET / 即可切换 agent/模型并对话测试） */
-const CONSOLE_PAGE = readFileSync(new URL('../dev/console.html', import.meta.url), 'utf8');
+/** 内置聊天页（默认，GET / 打开即可切换 agent/模型并对话测试） */
+const CHAT_PAGE = readFileSync(new URL('../dev/chat.html', import.meta.url), 'utf8');
+
+/** 内置管理后台页（GET /admin 打开，用户/任务/Agent 管理） */
+const ADMIN_PAGE = readFileSync(new URL('../dev/admin.html', import.meta.url), 'utf8');
 
 /** 请求体扩展：linkagent 任务路由字段（OpenAI 兼容字段保持原样，多出的字段透明透传） */
 type TaskAwareChatBody = ChatCompletionRequest & {
@@ -33,6 +37,8 @@ type TaskAwareChatBody = ChatCompletionRequest & {
   userId?: string;
   agent?: string;
   task?: string;
+  /** 任务全局 key：单 key 直连路由（无需 channel/userId/task 三元素） */
+  taskKey?: string;
   sessionKey?: string;
 };
 
@@ -83,14 +89,14 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   /** 任务公共能力（多渠道共享，/v1 命令/路由 + /api/tasks 管理） */
   taskService: TaskService;
   /** 个人微信渠道实现句柄（weixin.mode=weixin-bot 时非空，server listen 后由 main 调 start） */
-  weixinBot: { start(): Promise<void>; stop(): Promise<void> } | null;
+  weixinBot: { start(): Promise<void>; stop(): Promise<void>; reload(): Promise<void> } | null;
   host: string;
   port: number;
   authEnabled: boolean;
 }> {
   const { config } = loadGatewayConfig(options?.configPath);
   const definitions = options?.definitions ?? (config.agents.length > 0 ? config.agents : defaultAgentDefinitions());
-  const manager = new AgentManager({ definitions });
+  const manager = new AgentManager({ definitions, defaultCwd: config.defaultCwd });
   await manager.start();
 
   const app = Fastify({ logger: { level: 'info' } });
@@ -157,8 +163,20 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       userId: body.userId,
       agent: body.agent,
       task: body.task,
+      taskKey: body.taskKey,
+      model: body.model,
       text: lastUserText || prompt,
     });
+    if (routing.kind === 'notfound') {
+      return reply
+        .code(404)
+        .send(openaiError(`任务不存在: ${body.taskKey ?? ''}`, 'invalid_request_error', 'task_not_found'));
+    }
+    if (routing.kind === 'disabled') {
+      return reply
+        .code(403)
+        .send(openaiError(`任务 key 已被停用: ${body.taskKey ?? ''}（请联系管理员或换用有效 key）`, 'invalid_request_error', 'key_disabled'));
+    }
     if (routing.kind === 'command') {
       if (body.stream !== true) {
         const result: ChatCompletion = {
@@ -201,6 +219,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     const chatRequest = {
       messages: [{ role: 'user' as const, content: prompt }],
       ...(sessionKeyForChat ? { sessionKey: sessionKeyForChat } : {}),
+      ...(routing.kind === 'chat' && routing.cwd ? { cwd: routing.cwd } : {}),
     };
     const meta = newMeta(modelForChat);
 
@@ -273,9 +292,13 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     }
   });
 
-  // ── 控制台与运行态控制 API（GET / 打开单页；/api/agents 供切换 agent/模型）──
+  // ── 页面与运行态控制 API（GET / 聊天页；GET /admin 管理后台；/api/agents 供切换 agent/模型）──
   app.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(CONSOLE_PAGE);
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(CHAT_PAGE);
+  });
+
+  app.get('/admin', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(ADMIN_PAGE);
   });
 
   app.get('/api/agents', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -380,8 +403,23 @@ export async function buildServer(options?: { configPath?: string; definitions?:
           await weixinBotHandle?.stop().catch(() => {});
           weixinBotHandle = null;
         },
+        /** 扫码登录/登出后热重启 adapter（stop + start，monitor 重新读取 accounts/） */
+        async reload(): Promise<void> {
+          await weixinBotHandle?.stop().catch(() => {});
+          weixinBotHandle = null;
+          await this.start();
+        },
       }
     : null;
+
+  // ── 微信登录管理 API（web 后台扫码登录 / 状态 / 热重启）──
+  const weixinLoginService = new WeixinLoginService({ log: (...args: unknown[]) => app.log.info(args.map((a) => String(a)).join(' ')) });
+  registerWeixinApi(
+    app,
+    weixinLoginService,
+    (req) => checkAuth(req as FastifyRequest),
+    { reloadBot: weixinBot ? () => weixinBot.reload() : undefined },
+  );
 
   return { app, manager, pluginManager, taskService, weixinBot, host: config.server.host, port: config.server.port, authEnabled: config.auth.enabled };
 }

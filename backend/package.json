@@ -9,6 +9,7 @@
     "dev": "tsx watch src/gateway/index.ts",
     "start": "tsx src/gateway/index.ts",
     "probe": "tsx src/dev/probe.ts",
+    "verify-resume-recovery": "tsx src/dev/verify-resume-recovery.ts",
     "smoke-plugin": "tsx src/dev/smoke-plugin.ts",
     "weixin-login": "tsx src/dev/weixin-login.ts",
     "bot:weixin": "tsx src/channels/weixin-bot.ts",
@@ -26,9 +27,11 @@
     "acpx": "^0.15.1",
     "fastify": "^5.2.0",
     "openclaw": "workspace:*",
+    "qrcode": "^1.5.4",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
+    "@types/qrcode": "^1.5.6",
     "qrcode-terminal": "^0.12.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"

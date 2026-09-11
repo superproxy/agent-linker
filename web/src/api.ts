@@ -100,3 +100,71 @@ export class GatewayClient {
     }
   }
 }
+
+export interface WeixinAccountInfo {
+  id: string;
+  userId?: string;
+  savedAt?: string;
+}
+
+export interface WeixinStatus {
+  configured: boolean;
+  accounts: WeixinAccountInfo[];
+  activeAccountId?: string;
+}
+
+export interface WeixinQrResult {
+  sessionKey?: string;
+  qrContent: string;
+  qrDataUrl?: string;
+}
+
+export interface WeixinQrStatus {
+  connected: boolean;
+  accountId?: string;
+  message?: string;
+}
+
+export class WeixinClient {
+  constructor(private base: string) {}
+
+  private url(path: string): string {
+    return this.base.replace(/\/$/, '') + path;
+  }
+
+  async status(): Promise<WeixinStatus> {
+    const res = await fetch(this.url('/api/weixin/status'));
+    if (!res.ok) throw new Error(`weixin status ${res.status}`);
+    return (await res.json()) as WeixinStatus;
+  }
+
+  async startQr(): Promise<WeixinQrResult> {
+    const res = await fetch(this.url('/api/weixin/qr'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: true }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`weixin qr ${res.status} ${body.slice(0, 200)}`);
+    }
+    return (await res.json()) as WeixinQrResult;
+  }
+
+  async qrStatus(sessionKey: string | undefined, timeoutMs = 8_000): Promise<WeixinQrStatus> {
+    const q = new URLSearchParams();
+    if (sessionKey) q.set('sessionKey', sessionKey);
+    q.set('timeoutMs', String(timeoutMs));
+    const res = await fetch(this.url(`/api/weixin/qr/status?${q}`));
+    if (!res.ok) throw new Error(`weixin qr status ${res.status}`);
+    return (await res.json()) as WeixinQrStatus;
+  }
+
+  async reload(): Promise<void> {
+    const res = await fetch(this.url('/api/weixin/reload'), { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`weixin reload ${res.status} ${body.slice(0, 200)}`);
+    }
+  }
+}
