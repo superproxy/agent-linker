@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createJsonStore } from '../../src/gateway/tasks/store.js';
 import { TaskService } from '../../src/gateway/tasks/service.js';
 import { decideTaskRouting } from '../../src/gateway/tasks/api.js';
+import { persistDefaultTaskAgentId, loadGatewayConfig } from '../../src/gateway/config.js';
 
 function freshService(): TaskService {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-tasks-'));
@@ -256,6 +257,36 @@ test('/api/tasks/all: 返回全部用户任务明细（管理后台任务页）'
   }
 });
 
+test('/api/tasks/all: 开箱状态（无任何落盘）懒展示系统默认用户的默认任务', async () => {
+  const app = await freshApp();
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/tasks/all' });
+    assert.equal(res.statusCode, 200);
+    const users = res.json().users;
+    assert.equal(users.length, 1);
+    assert.equal(users[0].channel, 'weixin');
+    assert.equal(users[0].userId, 'default');
+    assert.equal(users[0].activeTaskId, 'default');
+    assert.equal(users[0].tasks.length, 1);
+    assert.equal(users[0].tasks[0].id, 'default');
+    assert.equal(users[0].tasks[0].name, '默认');
+    assert.equal(users[0].tasks[0].agentId, 'opencode');
+
+    // 用户列表页同样可见（含任务数 1）
+    const ures = await app.inject({ method: 'GET', url: '/api/users' });
+    const summary = ures.json().users.find((u: { userId: string }) => u.userId === 'default');
+    assert.ok(summary);
+    assert.equal(summary.taskCount, 1);
+
+    // 幂等：再次请求仍是同一个默认任务（不重复建档）
+    const again = await app.inject({ method: 'GET', url: '/api/tasks/all' });
+    assert.equal(again.json().users.length, 1);
+    assert.equal(again.json().users[0].tasks[0].key, users[0].tasks[0].key);
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
 test('/api/tasks: POST 自动生成 key 且返回；自定义 key 成功、重复/非法 400', async () => {
   const app = await freshApp();
   try {
@@ -425,3 +456,204 @@ test('taskKey 直连 + model 覆盖任务绑定 agent', () => {
   assert.equal(d2.kind, 'chat');
   assert.equal(d2.agentId, 'pi');
 });
+
+/* ===================== 全局默认 Agent（tasks.defaultAgentId） ===================== */
+
+test('TaskService: 默认 agentId 缺省 opencode，setDefaultAgentId 后新用户默认任务用新值', () => {
+  const svc = freshService();
+  assert.equal(svc.getDefaultAgentId(), 'opencode');
+
+  // 先建档一个用户（其 default 是 opencode 快照）
+  const before = svc.load('weixin', 'wx_old');
+  assert.equal(before.tasks[0].agentId, 'opencode');
+
+  assert.equal(svc.setDefaultAgentId(' PI '), 'pi'); // trim + 小写
+  assert.equal(svc.getDefaultAgentId(), 'pi');
+
+  // 之后新建用户的默认任务快照用 pi
+  const after = svc.load('weixin', 'wx_new');
+  assert.equal(after.tasks[0].agentId, 'pi');
+  // 已存在用户的默认任务是独立快照，不被批量改写
+  assert.equal(svc.load('weixin', 'wx_old').tasks[0].agentId, 'opencode');
+
+  assert.throws(() => svc.setDefaultAgentId('   '), /agentId/);
+});
+
+test('persistDefaultTaskAgentId: 就地改值并保留注释/其他键，重启重载可见', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
+  const cfgPath = join(dir, 'gateway.yaml');
+  writeFileSync(
+    cfgPath,
+    [
+      '# 顶部注释应保留',
+      'server:',
+      '  host: 127.0.0.1',
+      '  port: 8787',
+      '# tasks 段注释',
+      'tasks:',
+      '  defaultAgentId: opencode',
+      '  workspaceDir: /tmp/ws',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const written = persistDefaultTaskAgentId(cfgPath, 'pi');
+  assert.equal(written, cfgPath);
+  const out = readFileSync(cfgPath, 'utf8');
+  assert.match(out, /# 顶部注释应保留/);
+  assert.match(out, /# tasks 段注释/);
+  assert.match(out, /defaultAgentId: pi/);
+  assert.match(out, /workspaceDir: \/tmp\/ws/);
+  assert.match(out, /port: 8787/);
+  assert.doesNotMatch(out, /defaultAgentId: opencode/);
+
+  // 重启视角：重新 loadGatewayConfig 读到新值
+  const loaded = loadGatewayConfig(cfgPath);
+  assert.equal(loaded.config.tasks.defaultAgentId, 'pi');
+  assert.equal(loaded.config.tasks.workspaceDir, '/tmp/ws');
+});
+
+test('persistDefaultTaskAgentId: tasks 段缺失则补齐；文件不存在则创建最小段', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
+
+  // 只有 server 段
+  const p1 = join(dir, 'a.yaml');
+  writeFileSync(p1, 'server:\n  port: 9000\n', 'utf8');
+  persistDefaultTaskAgentId(p1, 'codex');
+  assert.match(readFileSync(p1, 'utf8'), /defaultAgentId: codex/);
+
+  // 文件不存在（此前纯默认配置运行）
+  const p2 = join(dir, 'nested', 'gateway.yaml');
+  assert.ok(!existsSync(p2));
+  persistDefaultTaskAgentId(p2, 'pi');
+  assert.match(readFileSync(p2, 'utf8'), /defaultAgentId: pi/);
+
+  assert.throws(() => persistDefaultTaskAgentId(p2, '  '), /不能为空/);
+});
+
+test('PUT /api/tasks/default-agent: 校验 agent、调用持久化回调、内存即时生效', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  const persisted: string[] = [];
+  registerTaskApi(
+    app,
+    svc,
+    () => true,
+    {
+      listAvailableAgents: () => ['opencode', 'pi'],
+      persistDefaultAgent: async (id) => {
+        persisted.push(id);
+      },
+    },
+  );
+  await app.ready();
+  try {
+    const got = await app.inject({ method: 'GET', url: '/api/tasks/default-agent' });
+    assert.equal(got.statusCode, 200);
+    assert.equal(got.json().defaultAgentId, 'opencode');
+
+    const ok = await app.inject({
+      method: 'PUT',
+      url: '/api/tasks/default-agent',
+      payload: { agentId: 'pi' },
+    });
+    assert.equal(ok.statusCode, 200);
+    assert.equal(ok.json().defaultAgentId, 'pi');
+    assert.deepEqual(persisted, ['pi']);
+
+    // 新建用户默认任务即时绑定 pi
+    const st = svc.load('weixin', 'wx_after_put');
+    assert.equal(st.tasks[0].agentId, 'pi');
+
+    // 未启用 / 不存在的 agent → 400，内存与回调均不变
+    const bad = await app.inject({
+      method: 'PUT',
+      url: '/api/tasks/default-agent',
+      payload: { agentId: 'ghost' },
+    });
+    assert.equal(bad.statusCode, 400);
+    assert.equal(svc.getDefaultAgentId(), 'pi');
+    assert.deepEqual(persisted, ['pi']);
+
+    // 缺 agentId → 400
+    const empty = await app.inject({ method: 'PUT', url: '/api/tasks/default-agent', payload: {} });
+    assert.equal(empty.statusCode, 400);
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
+test('PUT /api/tasks/default-agent: 持久化抛错时回滚内存值（不成功即不变）', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  registerTaskApi(
+    app,
+    svc,
+    () => true,
+    {
+      listAvailableAgents: () => ['opencode', 'pi'],
+      persistDefaultAgent: () => {
+        throw new Error('disk full');
+      },
+    },
+  );
+  await app.ready();
+  try {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/tasks/default-agent',
+      payload: { agentId: 'pi' },
+    });
+    assert.equal(res.statusCode, 500);
+    assert.match(res.json().error, /disk full/);
+    // 内存值回滚为原值
+    assert.equal(svc.getDefaultAgentId(), 'opencode');
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
+test('PATCH /api/tasks/:id/agent: 注入 agent 校验后，不存在的 agent 400，合法可改', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  registerTaskApi(
+    app,
+    svc,
+    () => true,
+    { listAvailableAgents: () => ['opencode', 'pi'] },
+  );
+  await app.ready();
+  try {
+    // 先建一个任务
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'weixin', userId: 'wx_v', name: '方案', agentId: 'opencode' },
+    });
+    assert.equal(created.statusCode, 200);
+    const taskId = created.json().id;
+
+    // 不存在 / 停用的 agent → 400，任务绑定不变
+    const bad = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}/agent`,
+      payload: { channel: 'weixin', userId: 'wx_v', agentId: 'ghost' },
+    });
+    assert.equal(bad.statusCode, 400);
+    assert.match(bad.json().error, /Agent 不存在/);
+    const afterBad = await app.inject({ method: 'GET', url: '/api/tasks?channel=weixin&userId=wx_v' });
+    assert.equal(afterBad.json().tasks.find((t: { id: string }) => t.id === taskId).agentId, 'opencode');
+
+    // 合法 agent（大小写/空白归一化）→ 200，绑定变更落盘
+    const ok = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}/agent`,
+      payload: { channel: 'weixin', userId: 'wx_v', agentId: ' PI ' },
+    });
+    assert.equal(ok.statusCode, 200);
+    assert.equal(ok.json().task.agentId, 'pi');
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+

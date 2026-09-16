@@ -15,6 +15,11 @@ import {
   type UserTasks,
 } from './types.js';
 
+/** 任务机制的系统渠道（与任务路由白名单一致，目前仅微信渠道） */
+export const SYSTEM_TASK_CHANNEL = 'weixin';
+/** 系统默认用户：三元素路由 userId 缺省时即该用户（不写 user 就是 default） */
+export const SYSTEM_DEFAULT_USER = 'default';
+
 export interface TaskServiceOptions {
   store: TaskStore;
   /** 默认任务绑定的 agent（gateway.yaml tasks.defaultAgentId，缺省 opencode） */
@@ -44,7 +49,8 @@ export function isTaskCommand(text: string): boolean {
 
 export class TaskService {
   private readonly store: TaskStore;
-  private readonly defaultAgentId: string;
+  /** 默认任务绑定的 agent：构造时取 gateway.yaml tasks.defaultAgentId，可经管理后台运行时修改并持久化 */
+  private defaultAgentId: string;
   private readonly workspaceRoot?: string;
 
   constructor(options: TaskServiceOptions) {
@@ -60,6 +66,32 @@ export class TaskService {
     const dir = join(this.workspaceRoot, safe(userId), taskId);
     mkdirSync(dir, { recursive: true });
     return dir;
+  }
+
+  /**
+   * 确保系统默认用户（weixin/default：三元素路由 userId 缺省即该用户）的默认任务已建档。
+   * 管理后台「任务管理 / 用户管理」页首次打开（尚无任何渠道消息落盘）时调用，
+   * 让开箱状态也能看到并管理系统默认任务；已有建档则为纯读取、无副作用。
+   */
+  ensureSystemDefault(): UserTasks {
+    return this.load(SYSTEM_TASK_CHANNEL, SYSTEM_DEFAULT_USER);
+  }
+
+  /** 全局默认任务绑定的 agentId（gateway.yaml tasks.defaultAgentId 的运行时值） */
+  getDefaultAgentId(): string {
+    return this.defaultAgentId;
+  }
+
+  /**
+   * 更新全局默认 agentId（仅影响之后新建用户的默认任务、删除后重建的默认任务与路由兜底）。
+   * 已存在用户的默认任务是各自的独立快照，不在此批量改写（如需改单个实例，用任务的 setTaskAgent）。
+   * 持久化到 gateway.yaml 由调用方（管理接口）负责，保证内存与文件一致失败时可回滚。
+   */
+  setDefaultAgentId(agentId: string): string {
+    const id = agentId.trim().toLowerCase();
+    if (!id) throw new Error('agentId 必填');
+    this.defaultAgentId = id;
+    return this.defaultAgentId;
   }
 
   /** 读用户状态；不存在则预置 default 任务并落盘（开箱可聊） */

@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse } from 'yaml';
+import { parse, parseDocument } from 'yaml';
 import { gatewayConfigSchema, defaultConfig, type GatewayConfig } from '@linkagent/shared';
 
 /** 从任一子目录向上定位 monorepo 根（含 pnpm-workspace.yaml） */
@@ -74,4 +74,40 @@ function parseConfigFile(p: string): GatewayConfig {
   const raw = readFileSync(p, 'utf8');
   const doc = parse(raw) as unknown;
   return gatewayConfigSchema.parse(doc);
+}
+
+/**
+ * 持久化「默认任务绑定的 agent」到 gateway.yaml 的 tasks.defaultAgentId（重启保留）。
+ * - 用 YAML Document API 就地改值，最大程度保留原有注释 / 键序 / 格式；
+ * - 文件不存在（此前纯默认配置运行）则新建最小 tasks 段；
+ * - tasks 段缺失时补齐为 { defaultAgentId }；
+ * 写回后重新解析校验，确保落盘内容仍是合法网关配置。
+ * 返回写入的绝对路径。
+ */
+export function persistDefaultTaskAgentId(path: string, agentId: string): string {
+  const p = resolve(path);
+  const id = agentId.trim();
+  if (!id) throw new Error('defaultAgentId 不能为空');
+
+  let doc = parseDocument('');
+  if (existsSync(p)) {
+    doc = parseDocument(readFileSync(p, 'utf8'));
+  } else {
+    mkdirSync(dirname(p), { recursive: true });
+  }
+
+  const tasks = doc.get('tasks') as { set?: (key: string, value: unknown) => void } | null;
+  if (tasks && typeof tasks.set === 'function') {
+    tasks.set('defaultAgentId', id);
+  } else {
+    doc.set('tasks', { defaultAgentId: id });
+  }
+
+  writeFileSync(p, doc.toString(), 'utf8');
+
+  const reparsed = gatewayConfigSchema.parse(parse(readFileSync(p, 'utf8')));
+  if (reparsed.tasks.defaultAgentId !== id) {
+    throw new Error(`持久化校验失败：tasks.defaultAgentId 未更新为 ${id}`);
+  }
+  return p;
 }

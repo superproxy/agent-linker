@@ -202,6 +202,7 @@
           <span class="hint">共 {{ filteredTasks.length }} 个任务</span>
           <div class="spacer"></div>
           <el-button size="small" @click="refresh">刷新</el-button>
+          <el-button size="small" @click="openDefaultAgent">默认 Agent</el-button>
           <el-button size="small" type="primary" @click="openNewTask">新建任务</el-button>
         </div>
         <div class="table-wrap">
@@ -209,7 +210,10 @@
             <el-table-column prop="name" label="任务名称" min-width="230">
               <template #default="{ row }">
                 <div class="task-cell">
-                  <span class="cell-main">{{ row.name }}</span>
+                  <span class="cell-main">
+                    {{ row.name }}
+                    <el-tag v-if="row.id === 'default'" size="small" type="warning" effect="plain" style="margin-left:6px">默认</el-tag>
+                  </span>
                   <span class="cell-sub">{{ row.key || '（无 key）' }} · {{ row.id }} · 创建于 {{ relTime(row.createdAt) }}</span>
                 </div>
               </template>
@@ -239,14 +243,15 @@
                 <span v-else class="hint">未设置（Agent 默认）</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="360" fixed="right">
+            <el-table-column label="操作" width="410" fixed="right">
               <template #default="{ row }">
                 <el-button size="small" type="success" link @click="testChat(row)">测试聊天</el-button>
                 <el-button size="small" link @click="activateTask(row)">激活</el-button>
                 <el-button size="small" link @click="openRename(row)">重命名</el-button>
                 <el-button size="small" link @click="openCwd(row)">目录</el-button>
-                <el-button size="small" link @click="openAgent(row)">Agent</el-button>
-                <el-button size="small" type="danger" link @click="removeTask(row)">删除</el-button>
+                <el-button size="small" type="primary" link @click="openAgent(row)">变更 Agent</el-button>
+                <el-button v-if="row.id !== 'default'" size="small" type="danger" link @click="removeTask(row)">删除</el-button>
+                <span v-else class="hint" title="默认任务不可删除">不可删除</span>
               </template>
             </el-table-column>
             <template #empty>
@@ -439,6 +444,25 @@
     </template>
   </el-dialog>
 
+  <!-- ── 全局默认 Agent ── -->
+  <el-dialog v-model="defaultAgentDialog.show" title="默认任务的默认 Agent" width="460px">
+    <el-form label-width="92px">
+      <el-form-item label="默认 Agent">
+        <el-select v-model="defaultAgentDialog.agentId" filterable placeholder="选择 Agent" style="width: 100%">
+          <el-option v-for="a in agents" :key="a.id" :label="a.displayName || a.id" :value="a.id" />
+        </el-select>
+      </el-form-item>
+      <p class="hint" style="margin:0 0 0 92px;font-size:12px;line-height:1.6">
+        新用户首次使用、或默认任务被删除后重建时，绑定此 Agent；设置会写入 gateway.yaml，重启后保留。<br />
+        已存在用户的默认任务是各自的独立快照，不会被批量修改（可在列表逐个「Agent」调整）。
+      </p>
+    </el-form>
+    <template #footer>
+      <el-button size="small" @click="defaultAgentDialog.show = false">取消</el-button>
+      <el-button size="small" type="primary" :loading="defaultAgentDialog.saving" @click="submitDefaultAgent">保存</el-button>
+    </template>
+  </el-dialog>
+
   <!-- ── 重命名任务 ── -->
   <el-dialog v-model="renameDialog.show" title="重命名任务" width="380px">
     <el-form label-width="72px">
@@ -469,17 +493,32 @@
   </el-dialog>
 
   <!-- ── 切换任务 Agent ── -->
-  <el-dialog v-model="agentDialog.show" title="切换任务 Agent" width="380px">
+  <el-dialog v-model="agentDialog.show" title="变更任务 Agent" width="420px">
     <el-form label-width="72px">
+      <el-form-item label="任务">
+        <span class="hint">
+          {{ agentDialog.task ? agentDialog.task.name : '' }}
+          <el-tag v-if="agentDialog.task && agentDialog.task.id === 'default'" size="small" type="warning" effect="plain" style="margin-left:4px">默认</el-tag>
+          <span v-if="agentDialog.task"> · {{ agentDialog.task.userId }}</span>
+        </span>
+      </el-form-item>
       <el-form-item label="Agent">
-        <el-select v-model="agentDialog.agentId" style="width: 100%">
-          <el-option v-for="a in agents" :key="a.id" :label="a.displayName || a.id" :value="a.id" />
+        <el-select v-model="agentDialog.agentId" filterable placeholder="选择 Agent" style="width: 100%">
+          <el-option v-for="a in agents" :key="a.id" :label="a.displayName || a.id" :value="a.id">
+            <span>{{ a.displayName || a.id }}</span>
+            <span style="float:right;font-size:12px;color:var(--text-faint)">
+              {{ a.id }}<el-tag v-if="!a.enabled" size="small" type="info" effect="plain" style="margin-left:6px">停用</el-tag>
+            </span>
+          </el-option>
         </el-select>
       </el-form-item>
+      <p class="hint" style="margin:0 0 0 72px;font-size:12px;line-height:1.6">
+        仅改变该任务的绑定 Agent，不影响其他任务与全局默认；保存后该任务的下一条消息即走新 Agent。
+      </p>
     </el-form>
     <template #footer>
       <el-button size="small" @click="agentDialog.show = false">取消</el-button>
-      <el-button size="small" type="primary" @click="submitAgent">保存</el-button>
+      <el-button size="small" type="primary" :loading="agentDialog.saving" @click="submitAgent">保存</el-button>
     </template>
   </el-dialog>
 </div>
@@ -663,7 +702,33 @@
       const newTaskDialog = reactive({ show: false, userKey: '', name: '', agentId: '', cwd: '', key: '' });
       const renameDialog = reactive({ show: false, task: null, name: '' });
       const cwdDialog = reactive({ show: false, task: null, cwd: '' });
-      const agentDialog = reactive({ show: false, task: null, agentId: '' });
+      const agentDialog = reactive({ show: false, task: null, agentId: '', saving: false });
+      const defaultAgentDialog = reactive({ show: false, agentId: '', saving: false });
+
+      async function openDefaultAgent() {
+        defaultAgentDialog.agentId = '';
+        defaultAgentDialog.show = true;
+        try {
+          const res = await api('/api/tasks/default-agent');
+          defaultAgentDialog.agentId = res.defaultAgentId || '';
+        } catch (e) {
+          ElMessage.error(`读取默认 Agent 失败：${e.message}`);
+        }
+      }
+      async function submitDefaultAgent() {
+        const agentId = defaultAgentDialog.agentId.trim();
+        if (!agentId) { ElMessage.warning('请选择 Agent'); return; }
+        defaultAgentDialog.saving = true;
+        try {
+          await api('/api/tasks/default-agent', { method: 'PUT', body: JSON.stringify({ agentId }) });
+          defaultAgentDialog.show = false;
+          ElMessage.success('默认 Agent 已保存（写入 gateway.yaml，重启保留）');
+        } catch (e) {
+          ElMessage.error(`保存失败：${e.message}`);
+        } finally {
+          defaultAgentDialog.saving = false;
+        }
+      }
 
       function openNewTask() {
         newTaskDialog.userKey = taskFilterUsers.value[0]?.value || '';
@@ -747,16 +812,20 @@
         const task = agentDialog.task;
         if (!task) return;
         if (!agentDialog.agentId.trim()) { ElMessage.warning('请选择 Agent'); return; }
+        if (agentDialog.agentId === task.agentId) { agentDialog.show = false; return; }
+        agentDialog.saving = true;
         try {
           await api(`/api/tasks/${encodeURIComponent(task.id)}/agent`, {
             method: 'PATCH',
             body: JSON.stringify({ channel: task.channel, userId: task.userId, agentId: agentDialog.agentId.trim() }),
           });
           await loadAll();
-          ElMessage.success('已切换 Agent');
+          ElMessage.success(`已将「${task.name}」切换到 ${agentDialog.agentId}`);
           agentDialog.show = false;
         } catch (e) {
           ElMessage.error(`切换 Agent 失败：${e.message}`);
+        } finally {
+          agentDialog.saving = false;
         }
       }
 
@@ -966,9 +1035,10 @@
         keyFilterUser, keyFilterStatus, allKeys, filteredKeys,
         toggleKey, copyKey,
         onMenuSelect, goTasks, removeUser,
-        newTaskDialog, renameDialog, cwdDialog, agentDialog,
+        newTaskDialog, renameDialog, cwdDialog, agentDialog, defaultAgentDialog,
         openNewTask, submitNewTask, openRename, submitRename,
-        openCwd, submitCwd, openAgent, submitAgent, activateTask, removeTask, testChat,
+        openCwd, submitCwd, openAgent, submitAgent, openDefaultAgent, submitDefaultAgent,
+        activateTask, removeTask, testChat,
         toggleAgent, applyAgentModel, addCatalogAgent, refresh, relTime, promptApiKey,
         weixin, weixinQr, loadWeixinStatus, startWeixinQr, refreshWeixinQr,
         cancelWeixinQr, reloadWeixin, fmtTime,

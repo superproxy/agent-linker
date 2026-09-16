@@ -57,6 +57,7 @@
   body.sb-collapsed .side-head { justify-content: center; padding: 12px 4px 8px; }
   body.sb-collapsed .side-head .head-title,
   body.sb-collapsed .side-head .icon-btn,
+  body.sb-collapsed .side-head .task-filter,
   body.sb-collapsed .scroll,
   body.sb-collapsed .task-scroll { display: none; }
   .side-head {
@@ -84,7 +85,16 @@
   .expand-btn { display: none; }
   body.sb-collapsed .side-head .expand-btn { display: inline-block; }
   .task-pane .side-head { padding-bottom: 6px; }
-  .task-scroll { overflow-y: auto; padding: 2px 12px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .task-filter {
+    flex: 1 1 auto; min-width: 0; max-width: 150px;
+    -webkit-appearance: none; appearance: none;
+    background: var(--bg-soft); border: 1px solid var(--line-soft); border-radius: 8px;
+    padding: 4px 8px; color: var(--text); font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0;
+  }
+  .task-filter::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+  .task-filter::placeholder { color: var(--text-faint); }
+  .task-filter:focus { outline: none; border-color: var(--accent); }
+  .task-scroll { overflow-y: auto; overflow-x: hidden; padding: 2px 12px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; scrollbar-width: thin; scrollbar-color: #26304a transparent; }
   .user-group { border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); overflow: hidden; }
   .user-group.open { border-color: var(--line); }
   .user-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; user-select: none; }
@@ -192,6 +202,7 @@
     body.sb-collapsed .side-head { justify-content: space-between; padding: 12px 16px 8px; }
     body.sb-collapsed .side-head .head-title,
     body.sb-collapsed .side-head .icon-btn,
+    body.sb-collapsed .side-head .task-filter,
     body.sb-collapsed .scroll,
     body.sb-collapsed .task-scroll { display: revert; }
     /* 移动端侧栏恢复全宽展示，任务面板展开按钮不再需要 */
@@ -226,6 +237,7 @@
     <div class="task-pane">
       <div class="side-head">
         <span class="head-title">任务 <span class="hint-dot" title="从 /api/tasks/all 读取；点击任务进入该用户持久会话"></span></span>
+        <input type="search" class="task-filter" id="taskFilter" placeholder="搜索用户…" title="按渠道或用户 ID 过滤" autocomplete="off" />
         <span style="display:flex;gap:2px;align-items:center;">
           <button class="icon-btn expand-btn" id="taskExpandBtn" title="展开侧栏">▦</button>
           <button class="icon-btn" id="taskNewBtn" title="新建任务（当前/展开用户）">+</button>
@@ -280,7 +292,7 @@
   const els = {
     agents: $('#agents'), agentsDot: $('#agentsDot'), agentsRefresh: $('#agentsRefresh'),
     collapseBtn: $('#collapseBtn'),
-    taskList: $('#taskList'), taskNewBtn: $('#taskNewBtn'), taskRefreshBtn: $('#taskRefreshBtn'), taskExpandBtn: $('#taskExpandBtn'),
+    taskList: $('#taskList'), taskFilter: $('#taskFilter'), taskNewBtn: $('#taskNewBtn'), taskRefreshBtn: $('#taskRefreshBtn'), taskExpandBtn: $('#taskExpandBtn'),
     health: $('#healthBadge'), ctxBadge: $('#ctxBadge'),
     activeAgentId: $('#activeAgentId'), activeModelValue: $('#activeModelValue'),
     messages: $('#messages'), input: $('#input'), sendBtn: $('#sendBtn'),
@@ -397,15 +409,25 @@
   function renderTasks() {
     const el = els.taskList;
     el.innerHTML = '';
-    const withTasks = state.users.filter((u) => u.tasks && u.tasks.length);
+    const kw = (els.taskFilter?.value || '').trim().toLowerCase();
+    let withTasks = state.users.filter((u) => u.tasks && u.tasks.length);
+    if (kw) withTasks = withTasks.filter((u) => `${u.channel}/${u.userId}`.toLowerCase().includes(kw));
     if (!withTasks.length) {
-      el.innerHTML = `<div class="empty-note"><div class="big">暂无用户任务</div><div>点击右上 + 为展开的用户新建任务</div></div>`;
+      el.innerHTML = kw
+        ? `<div class="empty-note"><div class="big">没有匹配的用户</div><div>关键词：${esc(kw)}</div></div>`
+        : `<div class="empty-note"><div class="big">暂无用户任务</div><div>点击右上 + 为展开的用户新建任务</div></div>`;
       return;
     }
     // 锁定当前任务上下文对应的用户分组；否则保持手动展开状态（未初始化/已失效时默认首个）
     const locked = taskUser();
-    if (locked) {
+    if (locked && withTasks.includes(locked)) {
       state.expanded = userKey(locked);
+    } else if (kw) {
+      // 过滤态：匹配分组较少，自动展开唯一匹配；多个匹配保持各自当前状态，首个默认展开
+      if (withTasks.length === 1) state.expanded = userKey(withTasks[0]);
+      else if (state.expanded === undefined || (state.expanded && !withTasks.some((u) => userKey(u) === state.expanded))) {
+        state.expanded = userKey(withTasks[0]);
+      }
     } else if (state.expanded === undefined || (state.expanded && !withTasks.some((u) => userKey(u) === state.expanded))) {
       state.expanded = withTasks[0] ? userKey(withTasks[0]) : null;
     }
@@ -947,6 +969,8 @@
     if (expanded) { newTask(expanded); return; }
     pushError('请先展开一个用户分组，再新建任务');
   });
+  // 用户过滤：按渠道 / 用户 ID 实时过滤（input 同时覆盖 type=search 的原生清除）
+  els.taskFilter.addEventListener('input', () => renderTasks());
 
   /* ---------- 启动 ---------- */
   async function boot() {

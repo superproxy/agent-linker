@@ -20,8 +20,21 @@ function ensureTaskChannel(channel: string, reply: { code(code: number): unknown
 
 export type AuthCheck = (request: { headers: Record<string, string | string[] | undefined> }) => boolean;
 
+/** 任务管理接口的可选外部依赖（默认 agent 的可用性校验与 gateway.yaml 持久化） */
+export interface TaskApiDeps {
+  /** 当前可用 agent id 列表（配置/已启用）；提供后设置默认 agent 时校验存在性 */
+  listAvailableAgents?: () => string[];
+  /** 把默认 agent 持久化到 gateway.yaml；缺省仅内存生效（重启还原配置文件值） */
+  persistDefaultAgent?: (agentId: string) => void | Promise<void>;
+}
+
 /** 挂载 /api/tasks（鉴权与现有 /api/* 一致：checkAuth 闭包传入） */
-export function registerTaskApi(app: FastifyInstance, service: TaskService, checkAuth: AuthCheck): void {
+export function registerTaskApi(
+  app: FastifyInstance,
+  service: TaskService,
+  checkAuth: AuthCheck,
+  deps: TaskApiDeps = {},
+): void {
   const requireAuth = (
     request: { headers: Record<string, string | string[] | undefined> },
     reply: { code(code: number): unknown },
@@ -53,13 +66,48 @@ export function registerTaskApi(app: FastifyInstance, service: TaskService, chec
   // GET /api/tasks/all —— 全部用户的任务明细（管理后台「任务」页）
   app.get('/api/tasks/all', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    // 开箱状态（尚无渠道消息落盘）也展示系统默认用户（weixin/default）的默认任务
+    service.ensureSystemDefault();
     return { users: service.listAllTasks() };
   });
 
   // GET /api/users —— 全部用户（含任务数），用户列表页
   app.get('/api/users', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    service.ensureSystemDefault();
     return { users: service.listUsers() };
+  });
+
+  // GET /api/tasks/default-agent —— 全局默认任务绑定的 agentId（新建用户默认任务的初始绑定）
+  app.get('/api/tasks/default-agent', async (request, reply) => {
+    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    return { defaultAgentId: service.getDefaultAgentId() };
+  });
+
+  // PUT /api/tasks/default-agent { agentId } —— 修改全局默认 agent，持久化到 gateway.yaml（重启保留）
+  app.put('/api/tasks/default-agent', async (request, reply) => {
+    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    const body = request.body as { agentId?: string } | null | undefined;
+    const agentId = body?.agentId?.trim().toLowerCase();
+    if (!agentId) return reply.code(400).send({ error: 'agentId 必填' });
+    if (deps.listAvailableAgents) {
+      const available = deps.listAvailableAgents();
+      if (!available.includes(agentId)) {
+        return reply.code(400).send({ error: `Agent 不存在: ${agentId}（可用：${available.join('/') || '无'}）` });
+      }
+    }
+    const previous = service.getDefaultAgentId();
+    service.setDefaultAgentId(agentId);
+    if (deps.persistDefaultAgent) {
+      try {
+        await deps.persistDefaultAgent(agentId);
+      } catch (err) {
+        // 持久化失败：回滚内存值，保证「返回成功即已落盘」的一致性
+        service.setDefaultAgentId(previous);
+        return reply.code(500).send({ error: `持久化到 gateway.yaml 失败：${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+    return { defaultAgentId: service.getDefaultAgentId() };
   });
 
   // DELETE /api/users/:channel/:userId —— 删除用户全部状态（任务随用户一起删）
@@ -122,9 +170,16 @@ export function registerTaskApi(app: FastifyInstance, service: TaskService, chec
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
     if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信渠道）` };
     if (!body?.agentId?.trim()) return reply.code(400).send({ error: 'agentId 必填' });
+    const agentId = body.agentId.trim().toLowerCase();
+    if (deps.listAvailableAgents) {
+      const available = deps.listAvailableAgents();
+      if (!available.includes(agentId)) {
+        return reply.code(400).send({ error: `Agent 不存在: ${agentId}（可用：${available.join('/') || '无'}）` });
+      }
+    }
     const state = service.load(body.channel, body.userId);
     try {
-      const task = service.setTaskAgent(state, params.taskId, body.agentId);
+      const task = service.setTaskAgent(state, params.taskId, agentId);
       return { task };
     } catch (err) {
       return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });

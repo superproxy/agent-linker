@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadGatewayConfig, findInstallRoot } from './config.js';
+import { loadGatewayConfig, findInstallRoot, persistDefaultTaskAgentId } from './config.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
 import { collectModelCandidates } from './modelcandidates.js';
@@ -97,7 +97,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   port: number;
   authEnabled: boolean;
 }> {
-  const { config } = loadGatewayConfig(options?.configPath);
+  const { config, path: configPath } = loadGatewayConfig(options?.configPath);
   const definitions = options?.definitions ?? (config.agents.length > 0 ? config.agents : defaultAgentDefinitions());
   const manager = new AgentManager({ definitions, defaultCwd: config.defaultCwd });
   await manager.start();
@@ -129,7 +129,20 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 tasks.workspaceDir 配置
     workspaceRoot: config.tasks?.workspaceDir ?? join(findInstallRoot(), '.runtime-state', 'tasks-workspace'),
   });
-  registerTaskApi(app, taskService, (req) => checkAuth(req as FastifyRequest));
+  registerTaskApi(
+    app,
+    taskService,
+    (req) => checkAuth(req as FastifyRequest),
+    {
+      // 可选范围与管理后台 Agent 下拉一致（已定义的 agent，含临时停用的，便于先设默认后启用）
+      listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
+      // 原子化运行时：先改内存再落盘 gateway.yaml；落盘抛错时接口层回滚内存值
+      persistDefaultAgent: (agentId) => {
+        persistDefaultTaskAgentId(configPath, agentId);
+        config.tasks.defaultAgentId = agentId;
+      },
+    },
+  );
 
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
 
