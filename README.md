@@ -433,6 +433,17 @@ pnpm --filter @linkagent/backend smoke-plugin   # 插件运行时冒烟测试（
 pnpm --filter @linkagent/backend weixin-login   # 微信扫码登录
 ```
 
+## 构建与发布（GitHub Actions）
+
+仓库内置两个 CI 工作流（`.github/workflows/`）：
+
+| 工作流 | 触发 | 作用 |
+|---|---|---|
+| `ci.yml` | push main / PR | 质量门禁：typecheck → 单测 → `build:dist` 构建冒烟 |
+| `release.yml` | 推 `v*` tag（如 `v0.1.0`） | 在 Linux / macOS / Windows 三平台构建 `dist/linkagent` 独立部署包，压缩为 `linkagent-<版本>-<平台>-<架构>.tar.gz` / `.zip`，发布为 GitHub Releases 资产 |
+
+本地手动构建独立部署包：`pnpm build:dist`，产物在 `dist/linkagent/`。
+
 ## 目录结构
 
 ```

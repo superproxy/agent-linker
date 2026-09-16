@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.6.5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build standalone package
+        run: pnpm build:dist
+
+      - name: Archive package
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "${{ runner.os }}" in
+            Linux)   OS="linux";   EXT="tar.gz" ;;
+            macOS)   OS="macos";   EXT="tar.gz" ;;
+            Windows) OS="windows"; EXT="zip" ;;
+          esac
+          ARCH="$(echo "${{ runner.arch }}" | tr 'A-Z' 'a-z')"
+          ASSET="linkagent-${VERSION}-${OS}-${ARCH}.${EXT}"
+          if [ "$EXT" = "tar.gz" ]; then
+            tar -C dist -czf "$ASSET" linkagent
+          else
+            powershell -NoProfile -Command "Compress-Archive -Path dist/linkagent -DestinationPath '$ASSET' -Force"
+          fi
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+          ls -lh "$ASSET"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: linkagent-*
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all assets
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -lh artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
