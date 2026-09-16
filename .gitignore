@@ -6,3 +6,4 @@ dist/
 backend/config/gateway.yaml
 .runtime-state/
 .tmp/
+opencode.json
