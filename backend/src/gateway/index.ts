@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
-import { loadGatewayConfig, findRepoRoot } from './config.js';
+import fastifyStatic from '@fastify/static';
+import { loadGatewayConfig, findInstallRoot } from './config.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
+import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
 import { collectModelCandidates } from './modelcandidates.js';
 import { PluginManager } from './plugins/manager.js';
 import { createJsonStore } from './tasks/store.js';
@@ -16,6 +18,7 @@ import { registerWeixinApi, WeixinLoginService } from './weixin-login.js';
 import {
   formatSseData,
   SSE_DONE,
+  ACP_AGENT_KINDS,
   modelIdFor,
   messagesToText,
   defaultAgentDefinitions,
@@ -102,6 +105,15 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   const app = Fastify({ logger: { level: 'info' } });
   await app.register(cors, { origin: true });
 
+  // ── web 管理端静态资源（独立部署：<installRoot>/web 的 vite 构建产物；未构建时跳过）──
+  const webRoot = join(findInstallRoot(), 'web');
+  if (existsSync(webRoot)) {
+    await app.register(fastifyStatic, { root: webRoot, prefix: '/ui/' });
+    app.log.info({ webRoot }, 'web 管理端已挂载到 /ui');
+  } else {
+    app.log.info('未找到 web 构建产物，跳过 /ui 挂载');
+  }
+
   const checkAuth = (request: FastifyRequest): boolean => {
     if (!config.auth.enabled) return true;
     const h = request.headers.authorization ?? '';
@@ -109,11 +121,13 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     return config.auth.token !== '' && token === config.auth.token;
   };
 
-  // ── 任务公共能力（多渠道共享；state 落在 <repo>/.runtime-state/tasks/）──
-  const taskStateDir = join(findRepoRoot(), '.runtime-state', 'tasks');
+  // ── 任务公共能力（多渠道共享；state 落在 <installRoot>/.runtime-state/tasks/）──
+  const taskStateDir = join(findInstallRoot(), '.runtime-state', 'tasks');
   const taskService = new TaskService({
     store: createJsonStore(taskStateDir),
     defaultAgentId: config.tasks?.defaultAgentId,
+    // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 tasks.workspaceDir 配置
+    workspaceRoot: config.tasks?.workspaceDir ?? join(findInstallRoot(), '.runtime-state', 'tasks-workspace'),
   });
   registerTaskApi(app, taskService, (req) => checkAuth(req as FastifyRequest));
 
@@ -308,6 +322,51 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     return { agents: manager.listAgentDetails() };
   });
 
+  /** 全部支持类型目录 + 配置状态（管理后台「支持 ACP 的 Agent 目录」） */
+  app.get('/api/agents/catalog', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkAuth(request)) {
+      return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    return { agents: manager.listAgentCatalog() };
+  });
+
+  /** 一键添加 agent：body { type }，按内置目录模板创建并热启用（仅内存生效，重启还原 yaml） */
+  app.post('/api/agents', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkAuth(request)) {
+      return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    const body = request.body as Record<string, unknown> | null | undefined;
+    if (!body || typeof body !== 'object') {
+      return reply.code(400).send(openaiError('请求体需为 JSON 对象', 'invalid_request_error', 'invalid_request'));
+    }
+    const type = body.type;
+    if (typeof type !== 'string' || !ACP_AGENT_KINDS.includes(type as AcpAgentKind)) {
+      return reply.code(400).send(openaiError(`未知 agent 类型: ${String(type)}（支持：${ACP_AGENT_KINDS.join('/')}）`, 'invalid_request_error', 'invalid_request'));
+    }
+    const kind = type as AcpAgentKind;
+    if (manager.listAgentCatalog().some((c) => c.kind === kind && c.configured)) {
+      return reply.code(409).send(openaiError(`agent 已配置: ${kind}（可在列表里直接启用）`, 'invalid_request_error', 'agent_exists'));
+    }
+    const entry = AGENT_CATALOG.find((c) => c.kind === kind);
+    if (!entry) {
+      return reply.code(400).send(openaiError(`未知 agent 类型: ${kind}`, 'invalid_request_error', 'invalid_request'));
+    }
+    const def: AgentDefinition = {
+      id: kind,
+      type: kind,
+      displayName: entry.displayName,
+      description: entry.description,
+      command: entry.command,
+    };
+    try {
+      const agent = manager.addAgent(def);
+      return { agent };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send(openaiError(message, 'invalid_request_error', 'invalid_request'));
+    }
+  });
+
   app.get('/api/agents/candidates', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
@@ -362,7 +421,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   // 配置了 channels.<id> 或 plugins[] 时加载插件包；插件缺失 / 加载失败仅告警，不影响 /v1
   let pluginManager: PluginManager | null = null;
   if (Object.keys(config.channels).length > 0 || plugins.length > 0) {
-    const stateDir = join(findRepoRoot(), '.runtime-state', 'plugins');
+    const stateDir = join(findInstallRoot(), '.runtime-state', 'plugins');
     // 微信插件读 OPENCLAW_STATE_DIR 定位 accounts.json / openclaw.json
     process.env.OPENCLAW_STATE_DIR = stateDir;
     pluginManager = new PluginManager({

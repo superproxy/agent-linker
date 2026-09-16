@@ -1,3 +1,5 @@
+import { ACP_AGENT_KINDS } from '@linkagent/shared';
+
 /** 任务（一个任务 = 一个绑定特定 agent 的持久会话） */
 export interface TaskItem {
   id: string;
@@ -44,5 +46,5 @@ export const TASK_KEY_PREFIX = 'k_';
 export const DEFAULT_TASK_ID = 'default';
 export const DEFAULT_TASK_NAME = '默认';
 export const DEFAULT_AGENT_ID = 'opencode';
-/** 命令里可识别的 agent 别名（new 的第二个可选参数） */
-export const KNOWN_AGENT_IDS = ['pi', 'opencode'] as const;
+/** 命令里可识别的 agent 别名（new 的第二个可选参数）：全部支持的 ACP agent 类型 */
+export const KNOWN_AGENT_IDS = ACP_AGENT_KINDS;

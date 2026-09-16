@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { TaskStore } from './store.js';
 import {
   DEFAULT_AGENT_ID,
@@ -17,6 +19,12 @@ export interface TaskServiceOptions {
   store: TaskStore;
   /** 默认任务绑定的 agent（gateway.yaml tasks.defaultAgentId，缺省 opencode） */
   defaultAgentId?: string;
+  /**
+   * 任务工作空间根目录（gateway.yaml tasks.workspaceDir）。
+   * 配置后每个任务默认拥有独立工作目录 <root>/<userId>/<taskId>（显式 cwd 优先），任务间文件系统隔离；
+   * 不配置则不自动分配（任务回落到 agent 默认工作目录）。
+   */
+  workspaceRoot?: string;
 }
 
 /** 短随机任务 id：t_<8 hex> */
@@ -37,16 +45,28 @@ export function isTaskCommand(text: string): boolean {
 export class TaskService {
   private readonly store: TaskStore;
   private readonly defaultAgentId: string;
+  private readonly workspaceRoot?: string;
 
   constructor(options: TaskServiceOptions) {
     this.store = options.store;
     this.defaultAgentId = options.defaultAgentId ?? DEFAULT_AGENT_ID;
+    this.workspaceRoot = options.workspaceRoot?.trim() || undefined;
+  }
+
+  /** 任务独立工作目录 <root>/<userId>/<taskId>（自动创建）；未配 workspaceRoot 返回 undefined */
+  private taskWorkspaceDir(userId: string, taskId: string): string | undefined {
+    if (!this.workspaceRoot) return undefined;
+    const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, '_');
+    const dir = join(this.workspaceRoot, safe(userId), taskId);
+    mkdirSync(dir, { recursive: true });
+    return dir;
   }
 
   /** 读用户状态；不存在则预置 default 任务并落盘（开箱可聊） */
   load(channel: string, userId: string): UserTasks {
     const existing = this.store.read(channel, userId);
     if (existing) return this.ensureKeys(existing);
+    const workspace = this.taskWorkspaceDir(userId, DEFAULT_TASK_ID);
     const fresh: UserTasks = {
       channel,
       userId,
@@ -58,6 +78,7 @@ export class TaskService {
           keyEnabled: true,
           name: DEFAULT_TASK_NAME,
           agentId: this.defaultAgentId,
+          ...(workspace ? { cwd: workspace } : {}),
           createdAt: Date.now(),
         },
       ],
@@ -66,7 +87,7 @@ export class TaskService {
     return fresh;
   }
 
-  /** 旧数据（无 key / keyEnabled 字段）惰性补齐；有变更才落盘（幂等） */
+  /** 旧数据（无 key / keyEnabled / cwd 字段）惰性补齐；有变更才落盘（幂等） */
   private ensureKeys(state: UserTasks): UserTasks {
     let changed = false;
     for (const t of state.tasks) {
@@ -76,6 +97,10 @@ export class TaskService {
       }
       if (t.keyEnabled === undefined) {
         t.keyEnabled = true;
+        changed = true;
+      }
+      if (!t.cwd && this.workspaceRoot) {
+        t.cwd = this.taskWorkspaceDir(state.userId, t.id);
         changed = true;
       }
     }
@@ -88,13 +113,16 @@ export class TaskService {
    * 返回任务（含 key），新建即激活。
    */
   createTask(state: UserTasks, name: string, agentId?: string, customKey?: string, cwd?: string): TaskItem {
+    const id = newTaskId();
+    const explicit = cwd?.trim();
+    const workspace = explicit ? explicit : this.taskWorkspaceDir(state.userId, id);
     const task: TaskItem = {
-      id: newTaskId(),
+      id,
       key: this.keyFor(customKey),
       keyEnabled: true,
       name: name.trim() || `任务 ${state.tasks.length + 1}`,
       agentId: agentId?.trim() || this.agentOf(state),
-      ...(cwd?.trim() ? { cwd: cwd.trim() } : {}),
+      ...(workspace ? { cwd: workspace } : {}),
       createdAt: Date.now(),
     };
     state.tasks.push(task);
@@ -208,12 +236,13 @@ export class TaskService {
     return task;
   }
 
-  /** 设置任务工作目录（agent 会话启动目录）；空串/undefined 清除回退 agent 默认 cwd */
+  /** 设置任务工作目录（agent 会话启动目录）；空串/undefined 清除回退：配了 workspaceRoot 则回落任务自动隔离目录，否则删除 cwd 用 agent 默认 */
   setTaskCwd(state: UserTasks, id: string, cwd?: string): TaskItem {
     const task = state.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`任务不存在: ${id}`);
     const trimmed = cwd?.trim();
     if (trimmed) task.cwd = trimmed;
+    else if (this.workspaceRoot) task.cwd = this.taskWorkspaceDir(state.userId, task.id);
     else delete task.cwd;
     this.store.write(state);
     return task;
@@ -303,7 +332,8 @@ export class TaskService {
       case 'list': {
         const lines = state.tasks.map((t, i) => {
           const mark = t.id === state.activeTaskId ? ' ← 激活' : '';
-          return `[${i + 1}] ${t.name}（${t.id} · ${t.key}）→ ${t.agentId}${mark}`;
+          const cwd = t.cwd ? ` 📂 ${t.cwd}` : '';
+          return `[${i + 1}] ${t.name}（${t.id} · ${t.key}）→ ${t.agentId}${cwd}${mark}`;
         });
         return { text: `📋 任务列表（${state.tasks.length}）：\n${lines.join('\n')}` };
       }
@@ -363,6 +393,18 @@ export class TaskService {
         const set = this.setTaskCwd(state, task.id, path);
         return { text: `📂 已设置 [${set.name}] 工作目录 → ${set.cwd ?? '（agent 默认）'}` };
       }
+      case 'agent': {
+        const ref = parts[1];
+        const agentId = parts[2]?.toLowerCase();
+        if (!ref || !agentId) return { text: '用法：/task agent <id|名称|序号> <agentId>' };
+        if (!known.includes(agentId)) {
+          return { text: `❌ 未知 agent: ${agentId}（可用：${[...KNOWN_AGENT_IDS, this.defaultAgentId].join('/')}）` };
+        }
+        const task = this.findTask(state, ref);
+        if (!task) return { text: `❌ 任务不存在: ${ref}` };
+        const set = this.setTaskAgent(state, task.id, agentId);
+        return { text: `🔀 [${set.name}] agent → ${set.agentId}` };
+      }
       case 'help':
         return {
           text: [
@@ -374,6 +416,7 @@ export class TaskService {
             '/task del <id|key|名称|序号> 删除任务（默认任务不可删）',
             '/task rename <id|key|名称|序号> <新名称>  重命名',
             '/task cwd <id|key|名称|序号> [路径]     查看/设置工作目录（不填路径=查看）',
+            '/task agent <id|key|名称|序号> <agentId>  切换任务绑定 agent（id/key/会话不变）',
             '普通消息自动进入「激活任务」对应的 agent。',
           ].join('\n'),
         };

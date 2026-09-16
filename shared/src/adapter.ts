@@ -1,6 +1,8 @@
 /**
  * AgentAdapter —— 网关对「一个 agent 后端」的统一抽象。
- * 一期有 opencode 与 pi（均经 acpx 连各自 ACP server，pi 走 pi-acp 桥接）。
+ * 支持全部 ACP agent（经 acpx 连各自 ACP server）：
+ * 预置 opencode / pi / workbuddy / trace-cli，以及 acpx 内置 registry 的
+ * codex / claude / gemini / cursor 等其余类型。
  * 领域共享类型集中于此，config 单向依赖本文件。
  */
 import type { ChatMessage } from './openai.js';
@@ -8,6 +10,40 @@ import type { ChatMessage } from './openai.js';
 /** ACP/acpx 的权限模式：写类工具（文件写/终端）在无审批 UI 时一律自动拒绝 */
 export const ACP_PERMISSION_MODES = ['approve-all', 'approve-reads', 'deny-all'] as const;
 export type AcpPermissionMode = (typeof ACP_PERMISSION_MODES)[number];
+
+/**
+ * 支持的 ACP agent 类型（单一事实来源：config 校验、启动命令、管理目录均引用此列表）。
+ * 前 4 个为本项目预置（opencode 原生 ACP；pi 经 pi-acp 桥接；workbuddy 经 `codebuddy --acp`；
+ * trace-cli 经 `traecli acp serve`，即 acpx 内置的 trae）；其余为 acpx@0.15.1 内置 registry
+ * 的类型（对应 CLI 本机安装后才可用，缺 CLI 时仅标记 unhealthy）。
+ * 默认 ACP server 启动命令见 backend acpWrapper DEFAULT_COMMANDS。
+ */
+export const ACP_AGENT_KINDS = [
+  'opencode',
+  'pi',
+  'workbuddy',
+  'trace-cli',
+  'codex',
+  'claude',
+  'gemini',
+  'cursor',
+  'copilot',
+  'droid',
+  'fast-agent',
+  'grok-build',
+  'iflow',
+  'kilocode',
+  'kimi',
+  'kiro',
+  'mcode',
+  'mux',
+  'openclaw',
+  'pool',
+  'qoder',
+  'qwen',
+  'zeroclaw',
+] as const;
+export type AcpAgentKind = (typeof ACP_AGENT_KINDS)[number];
 
 /** 非交互 elicitation（权限请求到达但无人处理）策略 */
 export type NonInteractivePermissionPolicy = 'deny' | 'fail';
@@ -21,10 +57,23 @@ export interface AgentDescriptor {
   description: string;
 }
 
+/** 管理后台「支持 ACP 的 Agent 目录」条目（kind → 展示信息 + 默认命令 + 配置状态） */
+export interface AgentCatalogItem {
+  kind: AcpAgentKind;
+  displayName: string;
+  description: string;
+  /** 默认 ACP server 启动命令（展示 + 一键添加时生成 definition.command） */
+  command: string[];
+  /** 是否已配置（gateway.yaml / 默认定义含该 kind） */
+  configured: boolean;
+  /** 当前是否启用（configured 且未停用） */
+  enabled: boolean;
+}
+
 export interface AgentDefinition {
   id: string;
-  /** agent 后端类型：opencode 原生 ACP server；pi 经 pi-acp ACP 桥接 */
-  type: 'opencode' | 'pi';
+  /** agent 后端类型：opencode/pi/workbuddy/trace-cli 为项目预置，其余为 acpx 内置 registry 的类型（见 ACP_AGENT_KINDS） */
+  type: AcpAgentKind;
   displayName?: string;
   description?: string;
   /** agent 进程工作目录 */
@@ -33,7 +82,7 @@ export interface AgentDefinition {
   permissionMode?: AcpPermissionMode;
   /** 额外环境变量 */
   env?: Record<string, string>;
-  /** ACP server 启动命令；缺省按 type 的内置默认（opencode acp / npx -y pi-acp） */
+  /** ACP server 启动命令；缺省按 type 的内置默认（opencode acp / npx -y pi-acp / codebuddy --acp / traecli acp serve） */
   command?: string[];
   /**
    * 会话默认模型：建会话后经 ACP session/set_config_option（configId "model"）下发。

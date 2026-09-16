@@ -1,12 +1,13 @@
 # LinkAgent Gateway
 
-OpenAI 兼容的本地 Agent 网关：让 **Chatbox / Open WebUI / 任意 OpenAI 客户端** 直接对话本机 agent（opencode / pi），并提供网页后台、内置控制台与**多渠道接入**（个人微信 / 企业微信）。
+OpenAI 兼容的本地 Agent 网关：让 **Chatbox / Open WebUI / 任意 OpenAI 客户端** 直接对话本机 agent（opencode / pi / workbuddy / trace-cli，以及 codex / claude / gemini / cursor 等全部 ACP 类型，见[支持的 agent](#支持的-agent)），并提供网页后台、内置控制台与**多渠道接入**（个人微信 / 企业微信）。
 
 ```
 Chatbox / Open WebUI ─┐
 内置控制台 (GET /)  ───┼──▶ /v1 (OpenAI 兼容) ──▶ ACP(acpx) ──▶ agent
-web 后台 (pnpm web) ──┘                           (opencode acp / pi-acp)
-个人微信 / 企业微信 ───▶ 渠道(插件运行时 or 独立 botAgent) ─┘
+web 后台 (pnpm web) ──┘                           (opencode acp / pi-acp /
+个人微信 / 企业微信 ───▶ 渠道(插件运行时 or 独立 botAgent) ─┘   codebuddy --acp /
+                                                    traecli acp serve)
 ```
 
 ## 快速开始
@@ -32,6 +33,9 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 |---|---|---|
 | opencode | `opencode acp --port 0` | 原生 ACP server，默认只读问答 |
 | pi | `npx -y pi-acp` | pi-coding-agent 的第三方 ACP 桥接（内部 `pi --mode rpc`） |
+| workbuddy | `codebuddy --acp` | 腾讯 CodeBuddy Code CLI 原生 ACP server |
+| trace-cli | `traecli acp serve` | 字节 TraeCode CLI 2.0 原生 ACP server |
+| 更多（codex / claude / gemini / cursor / copilot / qwen / openclaw 等） | 见管理后台「支持 ACP 的 Agent 目录」 | 对应 CLI 本机安装后即可一键添加启用 |
 
 ## 配置
 
@@ -39,7 +43,7 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 
 1. 环境变量 `GATEWAY_CONFIG_PATH` 指向的 yaml（缺失则启动报错）
 2. `backend/config/gateway.yaml`（缺省读取路径）
-3. 内置默认值（127.0.0.1:8787，无鉴权，opencode + pi 两个 agent）
+3. 内置默认值（127.0.0.1:8787，无鉴权，opencode / pi / workbuddy / trace-cli 四个 agent）
 
 `backend/config/gateway.yaml` 示例：
 
@@ -54,10 +58,10 @@ auth:
 # agent 默认工作目录（= 默认工作空间 default）：未显式配 cwd 的 agent 在此运行
 # defaultCwd: /path/to/works
 
-# agents 省略时使用内置默认（opencode + pi）
+# agents 省略时使用内置默认（opencode / pi / workbuddy / trace-cli）
 agents:
   - id: opencode
-    type: opencode              # opencode | pi
+    type: opencode              # 支持全部 ACP 类型：opencode | pi | workbuddy | trace-cli | codex | claude | gemini | ...
     displayName: OpenCode
     description: 本地 opencode
     # cwd: /path/to/workdir     # agent 进程工作目录
@@ -71,6 +75,18 @@ agents:
     displayName: Pi
     model: volcengine/deepseek-v4-flash-ga-260731
 
+  - id: workbuddy
+    type: workbuddy
+    displayName: WorkBuddy
+    # 依赖本机已装 codebuddy（CodeBuddy Code CLI）；可用 env 传 CODEBUDDY_API_KEY / CODEBUDDY_INTERNET_ENVIRONMENT
+    # env: { CODEBUDDY_API_KEY: "xxx", CODEBUDDY_INTERNET_ENVIRONMENT: "internal" }
+
+  - id: trace-cli
+    type: trace-cli
+    displayName: TraeCode CLI
+    # 依赖本机已装 traecli（TraeCode CLI 2.0）；全局参数（如 --profile / --permission-mode）可写在 command 里：
+    # command: ["traecli", "--permission-mode", "auto", "acp", "serve"]
+
 # ── 渠道（可选）──────────────────────────────────────────
 # 企业微信：channels.<id> 配 botId/secret 即启用（默认内置 @wecom/wecom-openclaw-plugin）
 # 个人微信：配 plugins 后先扫码登录，见「多渠道」章节
@@ -82,12 +98,12 @@ plugins:
 
 - 建会话后经 ACP `set_config_option('model')` 下发给 agent；
 - **pi 必需**：pi 自身默认 provider 可能没有可用凭据，需显式指到本机 `~/.pi/agent/models.json` 已注册的模型；
-- opencode 配置了也会生效，未配置则沿用 agent 自身默认；
+- opencode / workbuddy / trace-cli 配置了也会生效，未配置则沿用 agent 自身默认；
 - 模型写法统一为 `providerId/modelId`（如 `volcengine/deepseek-v4-flash-ga-260731`）。
 
 ## OpenAI 兼容 API
 
-模型对外 id 统一形如 `agent:<agentId>`：`agent:opencode`、`agent:pi`。
+模型对外 id 统一形如 `agent:<agentId>`：`agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`；管理后台目录一键添加的类型同样暴露为 `agent:<type>`（如 `agent:codex`）。
 
 ### GET /v1/models
 
@@ -167,6 +183,7 @@ curl -X PATCH http://127.0.0.1:8787/api/agents/opencode \
 
 - opencode：`~/.config/opencode/opencode.json`（或仓库根 `opencode.json`）中 `provider.<id>.models` 的键
 - pi：`~/.pi/agent/models.json` 中 `providers.<id>.models[].id`
+- workbuddy / trace-cli：本地模型配置路径暂无公开文档，暂不自动收集（UI 手动输入）
 
 文件缺失 / 结构不符 / 解析失败一律静默降级为空列表（UI 仍可手动输入模型）。
 
@@ -177,7 +194,7 @@ curl -X PATCH http://127.0.0.1:8787/api/agents/opencode \
 | API 提供方 | OpenAI API 兼容 / Custom Provider |
 | Base URL | `http://127.0.0.1:8787/v1` |
 | API Key | 网关未开鉴权填任意非空即可；开了则填 `auth.token` |
-| 模型 | `agent:opencode`、`agent:pi`（也可先调 `/v1/models` 让客户端自动拉取） |
+| 模型 | `agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`（也可先调 `/v1/models` 让客户端自动拉取） |
 
 ## web 后台（可选）
 
@@ -307,7 +324,7 @@ pnpm bot:wecom
 
 | 命令 | 说明 |
 |---|---|
-| `/task new <名称> [agent]` | 新建任务并激活（agent: pi / opencode） |
+| `/task new <名称> [agent]` | 新建任务并激活（agent: opencode / pi / workbuddy / trace-cli） |
 | `/task list` | 查看全部任务（`← 激活` 标记当前） |
 | `/task use <id>` | 切换到指定任务 |
 | `/task del <id>` | 删除任务（默认任务不可删） |
@@ -404,7 +421,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 ```bash
 pnpm dev                 # 开发模式（watch）
 pnpm start               # 直接运行
-pnpm probe               # 探测 agent 链路（AGENT=pi 或 PI_MODEL=... 可切换/覆盖）
+pnpm probe               # 探测 agent 链路（AGENT=<任意支持类型>，如 pi/workbuddy/trace-cli；PI_MODEL=... 可覆盖 pi 模型）
 pnpm typecheck           # 全仓类型检查
 pnpm server:start        # 后台启动（scripts/server.sh，健康检查通过才报就绪）
 pnpm server:stop / restart / status / log

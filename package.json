@@ -15,6 +15,8 @@
     "bot:weixin": "pnpm --filter @linkagent/backend bot:weixin",
     "bot:wecom": "pnpm --filter @linkagent/backend bot:wecom",
     "web": "pnpm --filter @linkagent/web dev",
+    "build:web": "pnpm --filter @linkagent/web build",
+    "build:dist": "node scripts/build-dist.mjs",
     "server": "bash scripts/server.sh start",
     "server:start": "bash scripts/server.sh start",
     "server:stop": "bash scripts/server.sh stop",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   },

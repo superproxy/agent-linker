@@ -22,7 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { findRepoRoot } from '../gateway/config.js';
+import { findInstallRoot } from '../gateway/config.js';
 import { runChatSession } from './gateway-chat.js';
 import { TaskRouter } from './task-router.js';
 import {
@@ -35,7 +35,7 @@ import {
 } from './ilink-client.js';
 
 // ── 配置默认值 ────────────────────────────────────────────────────────
-const REPO_ROOT = findRepoRoot();
+const REPO_ROOT = findInstallRoot();
 const DEFAULT_GATEWAY_URL = process.env.LINKAGENT_GATEWAY_URL ?? 'http://127.0.0.1:8787';
 const DEFAULT_GATEWAY_MODEL = process.env.LINKAGENT_GATEWAY_MODEL ?? 'agent:pi';
 const DEFAULT_STATE_DIR = process.env.LINKAGENT_STATE_DIR ?? join(REPO_ROOT, '.runtime-state', 'plugins');
@@ -324,7 +324,10 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 }
 
 // ── 独立进程入口（pnpm --filter @linkagent/backend bot:weixin）──
-if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+// 独立运行入口：tsx src/channels/weixin-bot.ts。
+// 注意：esbuild 打包后所有模块共享同一 import.meta.url，不能用 URL 比较；
+// 网关内由 gateway/index.ts 以库方式调用 startWeixinBot，bundle 中 argv[1]=index.mjs 不匹配此守卫。
+if (process.argv[1] && /(^|[\\/])weixin-bot\.(ts|mjs|js)$/.test(process.argv[1])) {
   const consoleLog = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
   const consoleErr = (...args: unknown[]) => console.error(new Date().toISOString(), ...args);
   startWeixinBot({ log: consoleLog, errLog: consoleErr })

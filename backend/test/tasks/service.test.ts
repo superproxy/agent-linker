@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createJsonStore } from '../../src/gateway/tasks/store.js';
@@ -287,4 +287,54 @@ test('旧数据（无 keyEnabled）load 时惰性补齐 true 并落盘，幂等'
   svc.setKeyEnabled(state, 'default', false);
   const again = svc.load('weixin', 'wx_old2');
   assert.equal(again.tasks[0].keyEnabled, false);
+});
+
+test('工作空间隔离：任务默认独立目录 <root>/<userId>/<taskId>，显式 cwd 优先', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-ws-'));
+  const root = join(dir, 'ws');
+  const svc = new TaskService({ store: createJsonStore(dir), workspaceRoot: root });
+  const state = svc.load('weixin', 'wx_1');
+  // default 任务自动分配独立目录
+  const def = state.tasks.find((t) => t.id === DEFAULT_TASK_ID)!;
+  assert.ok(def.cwd);
+  assert.ok(def.cwd!.includes(join('wx_1', DEFAULT_TASK_ID)));
+  // 新建任务自动分配独立目录，且目录真实创建
+  const a = svc.createTask(state, '股票分析');
+  const b = svc.createTask(state, '写周报');
+  assert.ok(a.cwd);
+  assert.ok(b.cwd);
+  assert.notEqual(a.cwd, b.cwd); // 两个任务目录互不相同 → 隔离
+  assert.ok(existsSync(a.cwd!));
+  // 显式 cwd 优先，不落入隔离目录
+  const c = svc.createTask(state, '显式目录', undefined, undefined, '/tmp/explicit');
+  assert.equal(c.cwd, '/tmp/explicit');
+  assert.ok(!c.cwd!.startsWith(root));
+});
+
+test('工作空间隔离：清除 cwd 回落自动隔离目录；旧数据无 cwd 惰性补齐', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-ws2-'));
+  const root = join(dir, 'ws');
+  const store = createJsonStore(dir);
+  const svc = new TaskService({ store, workspaceRoot: root });
+  const state = svc.load('weixin', 'wx_1');
+  // 先设显式目录再清除 → 回落自动隔离目录（含任务 id）
+  const t = svc.setTaskCwd(state, 'default', '/tmp/manual');
+  assert.equal(t.cwd, '/tmp/manual');
+  const cleared = svc.setTaskCwd(state, 'default', '');
+  assert.ok(cleared.cwd);
+  assert.ok(cleared.cwd!.includes(DEFAULT_TASK_ID));
+  // 旧数据（无 cwd）load 时惰性补齐并落盘
+  const svc2 = new TaskService({ store, workspaceRoot: root });
+  const legacy = svc2.load('weixin', 'wx_old3');
+  store.write({
+    channel: 'weixin',
+    userId: 'wx_old3',
+    activeTaskId: 'default',
+    tasks: [{ id: 'default', key: 'k_old3', name: '默认', agentId: 'opencode', createdAt: Date.now() }],
+  } as unknown as UserTasks);
+  const loaded = svc2.load('weixin', 'wx_old3');
+  assert.ok(loaded.tasks[0].cwd);
+  assert.ok(loaded.tasks[0].cwd!.includes(join('wx_old3', 'default')));
+  assert.ok(existsSync(loaded.tasks[0].cwd!));
+  assert.ok(legacy);
 });

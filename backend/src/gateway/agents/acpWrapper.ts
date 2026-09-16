@@ -3,9 +3,10 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntimeError, type AcpxRuntime } from 'acpx/runtime';
 import type { AgentAdapter, AgentDefinition, AgentDescriptor, ChatRequest, ChatResult, StreamCallbacks } from '@linkagent/shared';
+import { ACP_AGENT_KINDS } from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
 
-export type AcpAgentKind = AgentDefinition['type'];
+export type AcpAgentKind = (typeof ACP_AGENT_KINDS)[number];
 
 /** 各 ACP agent 的默认启动命令（definition.command / options.command 可覆盖） */
 const DEFAULT_COMMANDS: Record<AcpAgentKind, string[]> = {
@@ -14,13 +15,73 @@ const DEFAULT_COMMANDS: Record<AcpAgentKind, string[]> = {
   opencode: ['opencode', 'acp', '--port', '0'],
   // pi 本身没有 ACP server：经官方收录的 pi-acp 桥接（内部 spawn `pi --mode rpc`）
   pi: ['npx', '-y', 'pi-acp'],
+  // workbuddy = CodeBuddy Code CLI：官方文档 `codebuddy --acp` 启动 ACP server
+  workbuddy: ['codebuddy', '--acp'],
+  // trace-cli = TraeCode CLI 2.0：官方文档 `traecli acp serve`（或 `traecli --acp`）
+  'trace-cli': ['traecli', 'acp', 'serve'],
+  // ── acpx@0.15.1 内置 registry 其余类型（对应 CLI 本机安装后才可用）──
+  codex: ['npx', '-y', '@agentclientprotocol/codex-acp'],
+  claude: ['npx', '-y', '@agentclientprotocol/claude-agent-acp'],
+  gemini: ['gemini', '--acp'],
+  cursor: ['cursor-agent', 'acp'],
+  copilot: ['copilot', '--acp', '--stdio'],
+  droid: ['droid', 'exec', '--output-format', 'acp'],
+  'fast-agent': ['uvx', 'fast-agent-mcp', 'acp'],
+  'grok-build': ['grok', 'agent', 'stdio'],
+  iflow: ['iflow', '--experimental-acp'],
+  kilocode: ['npx', '-y', '@kilocode/cli', 'acp'],
+  kimi: ['kimi', 'acp'],
+  kiro: ['kiro-cli-chat', 'acp'],
+  mcode: ['mcode', 'acp'],
+  mux: ['npx', '-y', 'mux', 'acp'],
+  openclaw: ['openclaw', 'acp'],
+  pool: ['pool', 'acp'],
+  qoder: ['qodercli', '--acp'],
+  qwen: ['qwen', '--acp'],
+  zeroclaw: ['zeroclaw', 'acp'],
 };
 
 /** 各 ACP agent 的缺省展示信息（definition.displayName/description 可覆盖） */
 const DEFAULT_LABELS: Record<AcpAgentKind, { displayName: string; description: string }> = {
   opencode: { displayName: 'OpenCode', description: '本地 opencode（ACP/acpx），默认只读问答' },
   pi: { displayName: 'Pi', description: '本地 pi（pi-coding-agent，经 pi-acp 桥接），默认只读问答' },
+  workbuddy: { displayName: 'WorkBuddy', description: 'CodeBuddy Code CLI（codebuddy --acp），默认只读问答' },
+  'trace-cli': { displayName: 'TraeCode CLI', description: 'TraeCode CLI（traecli acp serve），默认只读问答' },
+  codex: { displayName: 'Codex', description: 'OpenAI Codex CLI（经 ACP 适配器），默认只读问答' },
+  claude: { displayName: 'Claude', description: 'Claude Code（经 ACP 适配器），默认只读问答' },
+  gemini: { displayName: 'Gemini', description: 'Gemini CLI（gemini --acp），默认只读问答' },
+  cursor: { displayName: 'Cursor', description: 'Cursor CLI（cursor-agent acp），默认只读问答' },
+  copilot: { displayName: 'Copilot', description: 'GitHub Copilot CLI（copilot --acp --stdio），默认只读问答' },
+  droid: { displayName: 'Droid', description: 'Factory Droid（droid exec --output-format acp），默认只读问答' },
+  'fast-agent': { displayName: 'Fast Agent', description: 'Fast Agent（uvx fast-agent-mcp acp），默认只读问答' },
+  'grok-build': { displayName: 'Grok Build', description: 'Grok Build（grok agent stdio），默认只读问答' },
+  iflow: { displayName: 'iFlow', description: 'iFlow CLI（iflow --experimental-acp），默认只读问答' },
+  kilocode: { displayName: 'Kilocode', description: 'Kilocode CLI（npx @kilocode/cli acp），默认只读问答' },
+  kimi: { displayName: 'Kimi', description: 'Kimi CLI（kimi acp），默认只读问答' },
+  kiro: { displayName: 'Kiro', description: 'Kiro CLI（kiro-cli-chat acp），默认只读问答' },
+  mcode: { displayName: 'MCode', description: 'MiniMax MCode（mcode acp），默认只读问答' },
+  mux: { displayName: 'Mux', description: 'Mux / Coder（经 ACP 适配器），默认只读问答' },
+  openclaw: { displayName: 'OpenClaw', description: 'OpenClaw（openclaw acp），默认只读问答' },
+  pool: { displayName: 'Poolside', description: 'Poolside（pool acp），默认只读问答' },
+  qoder: { displayName: 'Qoder', description: 'Qoder CLI（qodercli --acp），默认只读问答' },
+  qwen: { displayName: 'Qwen Code', description: 'Qwen Code（qwen --acp），默认只读问答' },
+  zeroclaw: { displayName: 'ZeroClaw', description: 'ZeroClaw（zeroclaw acp），默认只读问答' },
 };
+
+/** 管理后台目录条目（不含配置状态；configured/enabled 由 AgentManager 组装） */
+export interface AgentCatalogEntry {
+  kind: AcpAgentKind;
+  displayName: string;
+  description: string;
+  command: string[];
+}
+
+/** 全部支持的 ACP agent 目录（管理后台展示 + 一键添加模板） */
+export const AGENT_CATALOG: AgentCatalogEntry[] = ACP_AGENT_KINDS.map((kind) => ({
+  kind,
+  ...DEFAULT_LABELS[kind],
+  command: DEFAULT_COMMANDS[kind],
+}));
 
 export interface AcpWrapperOptions {
   definition: AgentDefinition;
@@ -56,7 +117,8 @@ function isSessionRecoveryRequiredError(err: unknown): boolean {
 
 /**
  * ACP 后端适配器：直接以 acpx runtime 连接目标 agent 的 ACP server 进程
- * （opencode 原生 `opencode acp`；pi 经第三方 `pi-acp` 桥接到 `pi --mode rpc`）。
+ * （opencode 原生 `opencode acp`；pi 经第三方 `pi-acp` 桥接到 `pi --mode rpc`；
+ * workbuddy 经 `codebuddy --acp`；trace-cli 经 `traecli acp serve`）。
  *
  * 会话生命周期：
  * - oneshot（/v1 HTTP 无 sessionKey）：每请求独立会话，用完即弃，避免记忆跨请求串扰；
@@ -83,7 +145,7 @@ export class AcpWrapper implements AgentAdapter {
     this.id = options.definition.id;
   }
 
-  /** agent 后端类型（opencode / pi） */
+  /** agent 后端类型（opencode / pi / workbuddy / trace-cli） */
   get type(): AcpAgentKind {
     return this.agentName;
   }

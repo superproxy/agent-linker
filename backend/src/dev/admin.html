@@ -64,6 +64,19 @@
   .task-cell { display: flex; flex-direction: column; }
   .model-cell { display: flex; gap: 6px; align-items: center; }
   .model-cell .el-select { flex: 1; min-width: 0; }
+  .catalog-wrap { flex: 0 0 auto; max-height: 44%; min-height: 0; display: flex; flex-direction: column; padding: 4px 20px 16px; }
+  .catalog-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+  .catalog-title { font-size: 13px; font-weight: 650; }
+  .catalog-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(21,27,40,.4); }
+  .catalog-item { display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); }
+  .catalog-item:last-child { border-bottom: none; }
+  .catalog-kind { flex: 0 0 150px; }
+  .catalog-info { flex: 1 1 auto; min-width: 0; }
+  .catalog-name { font-size: 12.5px; font-weight: 600; }
+  .catalog-desc { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+  .catalog-cmd { font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .catalog-status { flex: 0 0 auto; }
+  .catalog-ops { flex: 0 0 60px; text-align: right; }
 
   @media (max-width: 820px) {
     .layout { flex-direction: column; }
@@ -220,11 +233,18 @@
                 <el-tag v-else size="small" type="info">未激活</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="330" fixed="right">
+            <el-table-column label="工作目录" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.cwd" class="cell-main">{{ row.cwd }}</span>
+                <span v-else class="hint">未设置（Agent 默认）</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="360" fixed="right">
               <template #default="{ row }">
                 <el-button size="small" type="success" link @click="testChat(row)">测试聊天</el-button>
                 <el-button size="small" link @click="activateTask(row)">激活</el-button>
                 <el-button size="small" link @click="openRename(row)">重命名</el-button>
+                <el-button size="small" link @click="openCwd(row)">目录</el-button>
                 <el-button size="small" link @click="openAgent(row)">Agent</el-button>
                 <el-button size="small" type="danger" link @click="removeTask(row)">删除</el-button>
               </template>
@@ -346,6 +366,32 @@
             </template>
           </el-table>
         </div>
+        <!-- 支持 ACP 的 Agent 目录：全部类型可一键添加（仅内存生效，重启还原 gateway.yaml） -->
+        <div class="catalog-wrap">
+          <div class="catalog-head">
+            <span class="catalog-title">支持 ACP 的 Agent 目录</span>
+            <span class="hint">共 {{ catalog.length }} 种 · 未配置的点击「添加」即可启用（对应 CLI 需本机已安装）</span>
+          </div>
+          <div class="catalog-list">
+            <div v-for="c in catalog" :key="c.kind" class="catalog-item">
+              <div class="catalog-kind"><el-tag size="small" type="warning">{{ c.kind }}</el-tag></div>
+              <div class="catalog-info">
+                <div class="catalog-name">{{ c.displayName }}</div>
+                <div class="catalog-desc">{{ c.description }}</div>
+                <div class="catalog-cmd">{{ c.command.join(' ') }}</div>
+              </div>
+              <div class="catalog-status">
+                <el-tag v-if="c.configured && c.enabled" size="small" type="success">已配置 · 启用</el-tag>
+                <el-tag v-else-if="c.configured" size="small" type="warning">已配置 · 停用</el-tag>
+                <el-tag v-else size="small" type="info">未配置</el-tag>
+              </div>
+              <div class="catalog-ops">
+                <el-button v-if="!c.configured" size="small" type="primary" link @click="addCatalogAgent(c)">添加</el-button>
+              </div>
+            </div>
+            <div v-if="catalog.length === 0" style="padding:18px;text-align:center;color:var(--text-faint);font-size:12px">目录加载中…</div>
+          </div>
+        </div>
       </section>
     </main>
   </div>
@@ -365,7 +411,7 @@
   </el-dialog>
 
   <!-- ── 新建任务 ── -->
-  <el-dialog v-model="newTaskDialog.show" title="新建任务" width="440px">
+  <el-dialog v-model="newTaskDialog.show" title="新建任务" width="460px">
     <el-form label-width="72px">
       <el-form-item label="所属用户" required>
         <el-select v-model="newTaskDialog.userKey" filterable placeholder="选择用户" style="width: 100%">
@@ -379,6 +425,9 @@
         <el-select v-model="newTaskDialog.agentId" clearable placeholder="（继承当前激活任务的 Agent）" style="width: 100%">
           <el-option v-for="a in agents" :key="a.id" :label="a.displayName || a.id" :value="a.id" />
         </el-select>
+      </el-form-item>
+      <el-form-item label="工作目录">
+        <el-input v-model="newTaskDialog.cwd" placeholder="留空由 Agent 决定（配了 workspaceRoot 自动分配）" clearable />
       </el-form-item>
       <el-form-item label="任务 Key">
         <el-input v-model="newTaskDialog.key" placeholder="留空自动生成（字母/数字/._-，全局唯一）" clearable />
@@ -400,6 +449,22 @@
     <template #footer>
       <el-button size="small" @click="renameDialog.show = false">取消</el-button>
       <el-button size="small" type="primary" @click="submitRename">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- ── 设置任务工作目录 ── -->
+  <el-dialog v-model="cwdDialog.show" title="设置任务工作目录" width="480px">
+    <el-form label-width="72px">
+      <el-form-item label="任务">
+        <span class="hint">{{ cwdDialog.task ? `${cwdDialog.task.name} · ${cwdDialog.task.id}` : '' }}</span>
+      </el-form-item>
+      <el-form-item label="工作目录">
+        <el-input v-model="cwdDialog.cwd" placeholder="Agent 会话启动目录；清空保存后回落（自动分配 / Agent 默认）" clearable />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button size="small" @click="cwdDialog.show = false">取消</el-button>
+      <el-button size="small" type="primary" @click="submitCwd">保存</el-button>
     </template>
   </el-dialog>
 
@@ -443,6 +508,7 @@
       const allTasks = ref([]);     // [{ channel, userId, activeTaskId, tasks }]
       const agents = ref([]);       // AgentDetail[]
       const candidates = ref({});   // agentId -> string[]
+      const catalog = ref([]);      // AgentCatalogItem[]（支持 ACP 的 Agent 目录）
       const taskFilterUser = ref('');
       const keyFilterUser = ref('');
       const keyFilterStatus = ref('');
@@ -536,16 +602,18 @@
       }
 
       async function loadAll() {
-        const [u, t, a, c] = await Promise.all([
+        const [u, t, a, c, cat] = await Promise.all([
           api('/api/users'),
           api('/api/tasks/all'),
           api('/api/agents'),
           api('/api/agents/candidates'),
+          api('/api/agents/catalog'),
         ]);
         users.value = u.users || [];
         allTasks.value = t.users || [];
         agents.value = (a.agents || []).map((x) => ({ ...x, _model: x.model || '' }));
         candidates.value = c.candidates || {};
+        catalog.value = cat.agents || [];
       }
 
       async function refresh() {
@@ -592,14 +660,16 @@
       }
 
       /* ---------- 任务管理 ---------- */
-      const newTaskDialog = reactive({ show: false, userKey: '', name: '', agentId: '', key: '' });
+      const newTaskDialog = reactive({ show: false, userKey: '', name: '', agentId: '', cwd: '', key: '' });
       const renameDialog = reactive({ show: false, task: null, name: '' });
+      const cwdDialog = reactive({ show: false, task: null, cwd: '' });
       const agentDialog = reactive({ show: false, task: null, agentId: '' });
 
       function openNewTask() {
         newTaskDialog.userKey = taskFilterUsers.value[0]?.value || '';
         newTaskDialog.name = '';
         newTaskDialog.agentId = '';
+        newTaskDialog.cwd = '';
         newTaskDialog.key = '';
         newTaskDialog.show = true;
       }
@@ -613,6 +683,7 @@
               channel, userId,
               name: newTaskDialog.name.trim(),
               agentId: newTaskDialog.agentId || undefined,
+              cwd: newTaskDialog.cwd.trim() || undefined,
               key: newTaskDialog.key.trim() || undefined,
             }),
           });
@@ -643,6 +714,27 @@
           renameDialog.show = false;
         } catch (e) {
           ElMessage.error(`重命名失败：${e.message}`);
+        }
+      }
+
+      function openCwd(row) {
+        cwdDialog.task = row;
+        cwdDialog.cwd = row.cwd || '';
+        cwdDialog.show = true;
+      }
+      async function submitCwd() {
+        const task = cwdDialog.task;
+        if (!task) return;
+        try {
+          await api(`/api/tasks/${encodeURIComponent(task.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ channel: task.channel, userId: task.userId, cwd: cwdDialog.cwd.trim() || '' }),
+          });
+          await loadAll();
+          ElMessage.success(cwdDialog.cwd.trim() ? '工作目录已设置' : '工作目录已清除');
+          cwdDialog.show = false;
+        } catch (e) {
+          ElMessage.error(`设置目录失败：${e.message}`);
         }
       }
 
@@ -729,6 +821,16 @@
       }
 
       /* ---------- Agent 管理 ---------- */
+      /** 目录一键添加：POST /api/agents { type } → 热添加并启用 */
+      async function addCatalogAgent(c) {
+        try {
+          await api('/api/agents', { method: 'POST', body: JSON.stringify({ type: c.kind }) });
+          await loadAll();
+          ElMessage.success(`已添加 ${c.displayName || c.kind}（可在上表切换模型/启停）`);
+        } catch (e) {
+          ElMessage.error(`添加失败：${e.message}`);
+        }
+      }
       async function toggleAgent(row) {
         try {
           const res = await api(`/api/agents/${encodeURIComponent(row.id)}`, {
@@ -859,15 +961,15 @@
 
       return {
         apiKey, health, healthClass, loading, view,
-        users, allTasks, agents, candidates, taskFilterUser,
+        users, allTasks, agents, candidates, catalog, taskFilterUser,
         taskFilterUsers, filteredTasks, modelOptions,
         keyFilterUser, keyFilterStatus, allKeys, filteredKeys,
         toggleKey, copyKey,
         onMenuSelect, goTasks, removeUser,
-        newTaskDialog, renameDialog, agentDialog,
+        newTaskDialog, renameDialog, cwdDialog, agentDialog,
         openNewTask, submitNewTask, openRename, submitRename,
-        openAgent, submitAgent, activateTask, removeTask, testChat,
-        toggleAgent, applyAgentModel, refresh, relTime, promptApiKey,
+        openCwd, submitCwd, openAgent, submitAgent, activateTask, removeTask, testChat,
+        toggleAgent, applyAgentModel, addCatalogAgent, refresh, relTime, promptApiKey,
         weixin, weixinQr, loadWeixinStatus, startWeixinQr, refreshWeixinQr,
         cancelWeixinQr, reloadWeixin, fmtTime,
       };

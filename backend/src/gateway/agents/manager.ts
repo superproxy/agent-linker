@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import type { AgentAdapter, AgentDefinition, AgentDescriptor } from '@linkagent/shared';
-import { modelIdFor } from '@linkagent/shared';
-import { findRepoRoot } from '../config.js';
-import { AcpWrapper, type AcpAgentKind } from './acpWrapper.js';
+import type { AgentAdapter, AgentCatalogItem, AgentDefinition, AgentDescriptor } from '@linkagent/shared';
+import { ACP_AGENT_KINDS, modelIdFor } from '@linkagent/shared';
+import { findInstallRoot } from '../config.js';
+import { AcpWrapper, AGENT_CATALOG, type AcpAgentKind } from './acpWrapper.js';
 
 export interface ManagerOptions {
   /** agent 定义 */
@@ -37,14 +37,14 @@ export interface AgentPatch {
 export class AgentManager {
   private readonly adapters = new Map<string, AcpWrapper>();
   private readonly descriptors = new Map<string, AgentDescriptor>();
-  private readonly definitions: AgentDefinition[];
+  private definitions: AgentDefinition[];
   private readonly stateDir: string;
   private readonly defaultCwd: string;
   private readonly enabled = new Set<string>();
 
   constructor(options: ManagerOptions) {
     this.definitions = options.definitions;
-    const repo = options.repoRoot ?? findRepoRoot();
+    const repo = options.repoRoot ?? findInstallRoot();
     this.stateDir = options.stateDir ?? join(repo, '.runtime-state', 'acpx');
     this.defaultCwd = options.defaultCwd ?? '';
   }
@@ -120,6 +120,37 @@ export class AgentManager {
     const detail = this.listAgentDetails().find((d) => d.id === id);
     if (!detail) throw new Error(`agent 详情不可用: ${id}`);
     return detail;
+  }
+
+  /**
+   * 运行时热添加一个 agent（仅内存生效，重启还原 config/gateway.yaml）。
+   * id 重复或类型未知抛错；返回新 agent 的详情。
+   */
+  addAgent(def: AgentDefinition): AgentDetail {
+    if (this.adapters.has(def.id)) throw new Error(`agent id 已存在: ${def.id}`);
+    if (!ACP_AGENT_KINDS.includes(def.type)) throw new Error(`未知 agent 类型: ${def.type}`);
+    const adapter = new AcpWrapper({
+      definition: def,
+      stateDir: this.stateDir,
+      defaultCwd: this.defaultCwd,
+    });
+    this.adapters.set(def.id, adapter);
+    this.descriptors.set(modelIdFor(def.id), adapter.descriptor());
+    this.enabled.add(def.id);
+    this.definitions.push(def);
+    const detail = this.listAgentDetails().find((d) => d.id === def.id);
+    if (!detail) throw new Error(`agent 详情不可用: ${def.id}`);
+    return detail;
+  }
+
+  /** 全部支持类型目录 + 配置状态（管理后台「支持 ACP 的 Agent 目录」用） */
+  listAgentCatalog(): AgentCatalogItem[] {
+    return AGENT_CATALOG.map(({ kind, displayName, description, command }) => {
+      const defs = this.definitions.filter((d) => d.type === kind);
+      const configured = defs.length > 0;
+      const enabled = configured && defs.some((d) => this.enabled.has(d.id));
+      return { kind, displayName, description, command, configured, enabled };
+    });
   }
 
   async dispose(): Promise<void> {

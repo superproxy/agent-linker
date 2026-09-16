@@ -1,7 +1,8 @@
 /**
  * 候选模型收集：从本机真实配置尽力读取各 agent 可用的模型列表，供控制台「切换模型」下拉。
- * - opencode：~/.config/opencode/opencode.json（或仓库根 opencode.json）provider.<id>.models 的键
- * - pi：       ~/.pi/agent/models.json provider.<id>.models[].id
+ * - opencode：  ~/.config/opencode/opencode.json（或仓库根 opencode.json）provider.<id>.models 的键
+ * - pi：        ~/.pi/agent/models.json provider.<id>.models[].id
+ * - 其它类型（workbuddy/trace-cli/codex/…）：本地模型配置路径暂无公开文档，暂不收集（返回空列表，UI 可手动输入）
  * 结果统一为 "providerId/modelId"（如 volcengine/deepseek-v4-flash-ga-260731），与
  * AcpWrapper 通过 ACP set_config_option('model') 下发的取值一致。
  * 文件缺失 / 结构不符 / 解析失败一律静默降级为空列表（UI 仍可手动输入模型）。
@@ -9,9 +10,10 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { findRepoRoot } from './config.js';
+import type { AcpAgentKind } from '@linkagent/shared';
+import { findInstallRoot } from './config.js';
 
-export type CandidateKind = 'opencode' | 'pi';
+export type CandidateKind = AcpAgentKind;
 
 type MaybeRecord = Record<string, unknown>;
 
@@ -64,7 +66,7 @@ function collectFromTopLevelModelIds(doc: MaybeRecord | null, knownProviderIds: 
 }
 
 function collectOpencodeCandidates(): string[] {
-  const paths = [join(homedir(), '.config', 'opencode', 'opencode.json'), join(findRepoRoot(), 'opencode.json')];
+  const paths = [join(homedir(), '.config', 'opencode', 'opencode.json'), join(findInstallRoot(), 'opencode.json')];
   for (const p of paths) {
     const doc = tryReadJson(p);
     if (!doc) continue;
@@ -91,6 +93,7 @@ export function collectModelCandidates(kind: CandidateKind): string[] {
   try {
     if (kind === 'opencode') return collectOpencodeCandidates();
     if (kind === 'pi') return collectPiCandidates();
+    // workbuddy / trace-cli：本地模型配置路径暂无公开文档，暂不自动收集（UI 手动输入）
     return [];
   } catch {
     return [];

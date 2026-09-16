@@ -1,18 +1,19 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { AcpWrapper } from '../gateway/agents/acpWrapper.js';
-import { defaultAgentDefinitions } from '@linkagent/shared';
+import { ACP_AGENT_KINDS, defaultAgentDefinitions } from '@linkagent/shared';
 import type { AgentDefinition } from '@linkagent/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..', '..', '..', '..');
 
-const SUPPORTED = ['opencode', 'pi'] as const;
+const SUPPORTED = ACP_AGENT_KINDS;
 
 /**
- * 自检：不经 HTTP，直连 acpx → ACP agent（opencode acp；AGENT=pi 时走 pi-acp 桥接），
+ * 自检：不经 HTTP，直连 acpx → ACP agent（默认 opencode acp；AGENT=<type> 可换任意支持类型，
+ * 如 AGENT=pi 走 pi-acp 桥接、AGENT=workbuddy 走 codebuddy --acp、AGENT=trace-cli 走 traecli acp serve），
  * 发一条读代码库的 prompt，验证「agent 进程可启动 + ACP 会话可建 + 文本可流回 + 读权限放行」整条链路。
- * 用法：pnpm probe；AGENT=pi pnpm probe
+ * 用法：pnpm probe；AGENT=pi pnpm probe；AGENT=trace-cli pnpm probe
  */
 async function main() {
   const agent = (process.env.AGENT ?? 'opencode') as (typeof SUPPORTED)[number];

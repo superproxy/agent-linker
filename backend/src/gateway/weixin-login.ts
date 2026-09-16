@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { findRepoRoot } from './config.js';
+import { findInstallRoot } from './config.js';
 import { loadWeixinAccount } from '../channels/ilink-client.js';
 
 interface LoginGatewayHandle {
@@ -63,7 +63,7 @@ export class WeixinLoginService {
   private channelHandle: WeixinChannelPlugin | null = null;
 
   constructor(deps: { stateDir?: string; log?: (...args: unknown[]) => void } = {}) {
-    this.stateDir = deps.stateDir ?? join(findRepoRoot(), '.runtime-state', 'plugins');
+    this.stateDir = deps.stateDir ?? join(findInstallRoot(), '.runtime-state', 'plugins');
     this.log = deps.log ?? (() => {});
   }
 

@@ -57,7 +57,8 @@
   body.sb-collapsed .side-head { justify-content: center; padding: 12px 4px 8px; }
   body.sb-collapsed .side-head .head-title,
   body.sb-collapsed .side-head .icon-btn,
-  body.sb-collapsed .scroll { display: none; }
+  body.sb-collapsed .scroll,
+  body.sb-collapsed .task-scroll { display: none; }
   .side-head {
     padding: 12px 16px 8px; font-size: 12px; color: var(--text-faint);
     text-transform: uppercase; letter-spacing: .6px;
@@ -72,6 +73,44 @@
   .scroll { overflow-y: auto; padding: 4px 12px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; }
   .empty-note { margin: 18px 10px; text-align: center; color: var(--text-faint); font-size: 12.5px; line-height: 1.7; }
   .empty-note .big { font-size: 14px; color: var(--text-dim); margin-bottom: 4px; }
+
+  /* 任务面板：按用户分组展示持久任务会话 */
+  .task-pane {
+    border-bottom: 1px solid var(--line-soft);
+    display: flex; flex-direction: column;
+    flex: 0 0 auto; max-height: 44%; min-height: 0;
+  }
+  /* 折叠侧栏时任务面板的展开入口（默认隐藏） */
+  .expand-btn { display: none; }
+  body.sb-collapsed .side-head .expand-btn { display: inline-block; }
+  .task-pane .side-head { padding-bottom: 6px; }
+  .task-scroll { overflow-y: auto; padding: 2px 12px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .user-group { border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel); overflow: hidden; }
+  .user-group.open { border-color: var(--line); }
+  .user-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; user-select: none; }
+  .user-head:hover { background: var(--panel-2); }
+  .caret-ico { font-size: 9px; color: var(--text-faint); transition: transform .15s; display: inline-block; }
+  .user-group.open .caret-ico { transform: rotate(90deg); }
+  .u-name { font-family: var(--mono); font-size: 11px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .u-count { font-size: 10.5px; color: var(--text-faint); margin-left: auto; flex: 0 0 auto; }
+  .u-add { font: inherit; font-size: 12px; line-height: 1; color: var(--text-faint); background: none; border: none; cursor: pointer; padding: 2px 5px; border-radius: 6px; flex: 0 0 auto; }
+  .u-add:hover { color: var(--text); background: var(--panel-2); }
+  .user-tasks { display: none; flex-direction: column; gap: 6px; padding: 0 8px 8px; }
+  .user-group.open .user-tasks { display: flex; }
+  .task-item { border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg-soft); padding: 8px 10px; cursor: pointer; transition: border-color .12s, background .12s; }
+  .task-item:hover { border-color: var(--line); background: var(--panel); }
+  .task-item.active { border-color: var(--accent); background: rgba(91,140,255,.08); }
+  .task-item.koff { opacity: .55; }
+  .task-top { display: flex; align-items: center; gap: 6px; }
+  .task-name { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .task-agent { font-family: var(--mono); font-size: 10px; color: var(--accent-2); background: rgba(55,213,201,.1); border: 1px solid rgba(55,213,201,.22); padding: 0 6px; border-radius: 999px; flex: 0 0 auto; }
+  .task-key { font-size: 10px; color: var(--text-faint); margin-left: auto; font-family: var(--mono); flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+  .task-key.off { color: var(--warn); }
+  .task-meta { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-ops { display: flex; gap: 4px; margin-top: 7px; flex-wrap: wrap; }
+  .task-ops button { font: inherit; font-size: 10.5px; color: var(--text-dim); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; cursor: pointer; }
+  .task-ops button:hover { color: var(--text); border-color: var(--accent); }
+  .task-ops button.danger:hover { color: var(--danger); border-color: rgba(255,93,108,.5); }
 
   .agents { overflow-y: auto; padding: 4px 12px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; }
   .agent { border: 1px solid var(--line-soft); background: var(--panel); border-radius: var(--radius); padding: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
@@ -153,7 +192,10 @@
     body.sb-collapsed .side-head { justify-content: space-between; padding: 12px 16px 8px; }
     body.sb-collapsed .side-head .head-title,
     body.sb-collapsed .side-head .icon-btn,
-    body.sb-collapsed .scroll { display: revert; }
+    body.sb-collapsed .scroll,
+    body.sb-collapsed .task-scroll { display: revert; }
+    /* 移动端侧栏恢复全宽展示，任务面板展开按钮不再需要 */
+    body.sb-collapsed .side-head .expand-btn { display: none; }
   }
   @media (max-width: 620px) {
     header { padding: 10px 12px; gap: 10px; }
@@ -181,6 +223,19 @@
 
 <main>
   <aside>
+    <div class="task-pane">
+      <div class="side-head">
+        <span class="head-title">任务 <span class="hint-dot" title="从 /api/tasks/all 读取；点击任务进入该用户持久会话"></span></span>
+        <span style="display:flex;gap:2px;align-items:center;">
+          <button class="icon-btn expand-btn" id="taskExpandBtn" title="展开侧栏">▦</button>
+          <button class="icon-btn" id="taskNewBtn" title="新建任务（当前/展开用户）">+</button>
+          <button class="icon-btn" id="taskRefreshBtn" title="刷新任务列表">↻</button>
+        </span>
+      </div>
+      <div class="task-scroll" id="taskList">
+        <div class="empty-note"><div class="big">加载任务…</div></div>
+      </div>
+    </div>
     <div class="side-head">
       <span class="head-title">Agents <span class="hint-dot" id="agentsDot" title="从 /api/agents 读取，当前启用状态"></span></span>
       <span style="display:flex;gap:2px;align-items:center;">
@@ -225,6 +280,7 @@
   const els = {
     agents: $('#agents'), agentsDot: $('#agentsDot'), agentsRefresh: $('#agentsRefresh'),
     collapseBtn: $('#collapseBtn'),
+    taskList: $('#taskList'), taskNewBtn: $('#taskNewBtn'), taskRefreshBtn: $('#taskRefreshBtn'), taskExpandBtn: $('#taskExpandBtn'),
     health: $('#healthBadge'), ctxBadge: $('#ctxBadge'),
     activeAgentId: $('#activeAgentId'), activeModelValue: $('#activeModelValue'),
     messages: $('#messages'), input: $('#input'), sendBtn: $('#sendBtn'),
@@ -255,6 +311,8 @@
     keys: { apiKey: localStorage.getItem(AGENTS_KEY) || '' },
     ctx,                      // 任务上下文参数（URL 传入，见 parseCtx）
     taskMode,                 // 任务路由模式：/v1 请求带 channel/userId/task/agent
+    users: [],                // 任务面板数据：[{ channel, userId, activeTaskId, tasks }]（/api/tasks/all）
+    expanded: undefined,      // 展开的用户分组 key：`${channel}|${userId}`（undefined=未初始化默认展开首个；null=全部收起）
   };
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -299,15 +357,225 @@
 
   /* ---------- 数据加载 ---------- */
   async function refresh() {
-    const [agentsRes, candRes] = await Promise.all([api('/api/agents'), api('/api/agents/candidates')]);
+    const [agentsRes, candRes, tasksRes] = await Promise.all([api('/api/agents'), api('/api/agents/candidates'), api('/api/tasks/all')]);
     state.agents = agentsRes.agents;
     state.candidates = candRes.candidates || {};
+    state.users = tasksRes.users || [];
     if (!state.agents.find((a) => a.id === state.activeId)) {
       const first = state.agents.find((a) => a.enabled) || state.agents[0];
       state.activeId = first ? first.id : null;
     }
     renderAgents();
+    renderTasks();
     updateContextMeta();
+  }
+
+  /* ---------- 任务面板 ---------- */
+  function userKey(u) { return `${u.channel}|${u.userId}`; }
+
+  /** taskMode 下锁定的用户（与当前 ctx 匹配） */
+  function taskUser() {
+    if (!state.taskMode || !state.ctx.channel) return null;
+    return state.users.find((u) => u.channel === state.ctx.channel && u.userId === state.ctx.userId) || null;
+  }
+
+  /** 当前对话是否正处于该任务会话 */
+  function isActiveTask(u, t) {
+    if (!state.taskMode) return false;
+    return u.channel === state.ctx.channel && u.userId === state.ctx.userId &&
+      (t.id === state.ctx.task || t.key === state.ctx.key);
+  }
+
+  function opBtn(label, fn, cls) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); fn(); });
+    return b;
+  }
+
+  function renderTasks() {
+    const el = els.taskList;
+    el.innerHTML = '';
+    const withTasks = state.users.filter((u) => u.tasks && u.tasks.length);
+    if (!withTasks.length) {
+      el.innerHTML = `<div class="empty-note"><div class="big">暂无用户任务</div><div>点击右上 + 为展开的用户新建任务</div></div>`;
+      return;
+    }
+    // 锁定当前任务上下文对应的用户分组；否则保持手动展开状态（未初始化/已失效时默认首个）
+    const locked = taskUser();
+    if (locked) {
+      state.expanded = userKey(locked);
+    } else if (state.expanded === undefined || (state.expanded && !withTasks.some((u) => userKey(u) === state.expanded))) {
+      state.expanded = withTasks[0] ? userKey(withTasks[0]) : null;
+    }
+    for (const u of withTasks) el.appendChild(userGroup(u));
+  }
+
+  function userGroup(u) {
+    const key = userKey(u);
+    const open = state.expanded === key;
+    const wrap = document.createElement('div');
+    wrap.className = `user-group ${open ? 'open' : ''}`;
+
+    const head = document.createElement('div');
+    head.className = 'user-head';
+    const caret = document.createElement('span');
+    caret.className = 'caret-ico';
+    caret.textContent = '▶';
+    const name = document.createElement('span');
+    name.className = 'u-name';
+    name.textContent = `${u.channel}/${u.userId}`;
+    const count = document.createElement('span');
+    count.className = 'u-count';
+    count.textContent = `${u.tasks.length} 任务`;
+    const add = document.createElement('button');
+    add.className = 'u-add';
+    add.textContent = '+';
+    add.title = '为该用户新建任务';
+    add.addEventListener('click', (ev) => { ev.stopPropagation(); newTask(u); });
+    head.append(caret, name, count, add);
+    head.addEventListener('click', () => {
+      state.expanded = state.expanded === key ? null : key;
+      renderTasks();
+    });
+
+    const list = document.createElement('div');
+    list.className = 'user-tasks';
+    for (const t of u.tasks) list.appendChild(taskItem(u, t));
+
+    wrap.append(head, list);
+    return wrap;
+  }
+
+  function taskItem(u, t) {
+    const active = isActiveTask(u, t);
+    const keyOn = t.keyEnabled !== false;
+    const item = document.createElement('div');
+    item.className = `task-item ${active ? 'active' : ''} ${keyOn ? '' : 'koff'}`;
+
+    const top = document.createElement('div');
+    top.className = 'task-top';
+    const name = document.createElement('span');
+    name.className = 'task-name';
+    name.textContent = t.name;
+    const agent = document.createElement('span');
+    agent.className = 'task-agent';
+    agent.textContent = t.agentId;
+    const key = document.createElement('span');
+    key.className = `task-key ${keyOn ? '' : 'off'}`;
+    key.textContent = keyOn ? t.key : `key 停用 · ${t.key}`;
+    key.title = t.key;
+    top.append(name, agent, key);
+
+    const meta = document.createElement('div');
+    meta.className = 'task-meta';
+    meta.textContent = t.cwd ? `📂 ${t.cwd}` : (active ? '当前会话' : `id:${t.id}`);
+
+    const ops = document.createElement('div');
+    ops.className = 'task-ops';
+    if (!active) ops.appendChild(opBtn('激活', () => activateTask(u, t)));
+    ops.appendChild(opBtn('重命名', () => renameTask(u, t)));
+    ops.appendChild(opBtn('Agent', () => changeAgent(u, t)));
+    ops.appendChild(opBtn(keyOn ? '停用 key' : '启用 key', () => toggleKey(u, t)));
+    ops.appendChild(opBtn('删除', () => removeTask(u, t), 'danger'));
+
+    item.append(top, meta, ops);
+    item.addEventListener('click', () => enterTask(u, t));
+    return item;
+  }
+
+  /** 进入任务会话：更新任务上下文（key 启用时优先 key 直连，否则三元素路由） */
+  function enterTask(u, t) {
+    const keyOn = t.keyEnabled !== false;
+    state.ctx = {
+      channel: u.channel, userId: u.userId,
+      task: t.id, agent: t.agentId,
+      key: keyOn ? t.key : '',
+    };
+    state.taskMode = true;
+    const target = state.agents.find((x) => x.id === t.agentId);
+    if (target && target.enabled) state.activeId = target.id;
+    renderAgents();
+    renderTasks();
+    updateContextMeta();
+    clearMessages(`已进入任务「${t.name}」(${u.channel}/${u.userId}${keyOn ? ' · key 直连' : ' · 三元素路由'})，持久会话有记忆`);
+  }
+
+  async function newTask(u) {
+    const name = window.prompt(`新建任务（${u.channel}/${u.userId}）：输入任务名称`, '');
+    if (name === null) return;
+    const active = u.tasks.find((t) => t.id === u.activeTaskId);
+    const agentId = window.prompt('绑定 Agent（可留空继承激活任务）：', active?.agentId || '');
+    if (agentId === null) return;
+    try {
+      const task = await api('/api/tasks', {
+        method: 'POST',
+        body: JSON.stringify({ channel: u.channel, userId: u.userId, name: name.trim(), agentId: agentId.trim() || undefined }),
+      });
+      await refresh();
+      if (task?.id) {
+        const created = state.users.find((x) => userKey(x) === userKey(u))?.tasks.find((t) => t.id === task.id);
+        if (created) enterTask(u, created);
+      }
+    } catch (e) { pushError(`新建任务失败：${e.message}`); }
+  }
+
+  async function renameTask(u, t) {
+    const v = window.prompt('新任务名称：', t.name);
+    if (v === null || !v.trim()) return;
+    try {
+      await api(`/api/tasks/${encodeURIComponent(t.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ channel: u.channel, userId: u.userId, name: v.trim() }),
+      });
+      await refresh();
+    } catch (e) { pushError(`重命名失败：${e.message}`); }
+  }
+
+  async function changeAgent(u, t) {
+    const names = state.agents.map((a) => `${a.id}${a.enabled ? '' : '(停用)'}`).join('/') || '无';
+    const v = window.prompt(`绑定 Agent（可用：${names}）：`, t.agentId);
+    if (v === null) return;
+    try {
+      await api(`/api/tasks/${encodeURIComponent(t.id)}/agent`, {
+        method: 'PATCH',
+        body: JSON.stringify({ channel: u.channel, userId: u.userId, agentId: v.trim() }),
+      });
+      await refresh();
+    } catch (e) { pushError(`修改 Agent 失败：${e.message}`); }
+  }
+
+  async function toggleKey(u, t) {
+    try {
+      await api(`/api/tasks/${encodeURIComponent(t.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ channel: u.channel, userId: u.userId, keyEnabled: !(t.keyEnabled !== false) }),
+      });
+      await refresh();
+    } catch (e) { pushError(`切换 key 失败：${e.message}`); }
+  }
+
+  async function activateTask(u, t) {
+    try {
+      await api(`/api/tasks/${encodeURIComponent(t.id)}/activate`, {
+        method: 'PATCH',
+        body: JSON.stringify({ channel: u.channel, userId: u.userId }),
+      });
+      await refresh();
+    } catch (e) { pushError(`激活失败：${e.message}`); }
+  }
+
+  async function removeTask(u, t) {
+    if (!window.confirm(`确定删除任务「${t.name}」？此操作不可恢复。`)) return;
+    try {
+      await api(`/api/tasks/${encodeURIComponent(t.id)}?${new URLSearchParams({ channel: u.channel, userId: u.userId })}`, { method: 'DELETE' });
+      if (isActiveTask(u, t)) {
+        state.taskMode = false;
+        state.ctx = { channel: '', userId: '', task: '', agent: '', key: '' };
+      }
+      await refresh();
+    } catch (e) { pushError(`删除失败：${e.message}`); }
   }
 
   /* ---------- 渲染 ---------- */
@@ -436,7 +704,7 @@
     els.activeAgentId.textContent = a.id;
     els.activeModelValue.textContent = a.model || 'agent 默认';
     els.composerHint.textContent = state.taskMode
-      ? (a.enabled ? '任务路由：消息发往持久任务会话（URL 传入 key 或 channel/userId/task/agent，有记忆）' : '该 Agent 已停用，请选择其他 Agent')
+      ? (a.enabled ? '任务路由：消息发往持久任务会话（侧栏任务或 URL key/三元素，有记忆）' : '该 Agent 已停用，请选择其他 Agent')
       : (a.enabled ? 'oneshot 无状态会话：消息发往所选 Agent（不带 channel/userId）' : '该 Agent 已停用，请选择其他 Agent');
     els.sendBtn.disabled = !a.enabled;
   }
@@ -666,6 +934,19 @@
     try { await refresh(); } catch (e) { pushError(`刷新失败：${e.message}`); }
     finally { els.agentsRefresh.disabled = false; }
   });
+  els.taskExpandBtn.addEventListener('click', () => setCollapsed(false));
+  els.taskRefreshBtn.addEventListener('click', async () => {
+    els.taskRefreshBtn.disabled = true;
+    try { await refresh(); } catch (e) { pushError(`刷新任务失败：${e.message}`); }
+    finally { els.taskRefreshBtn.disabled = false; }
+  });
+  els.taskNewBtn.addEventListener('click', () => {
+    const u = taskUser();
+    if (u) { newTask(u); return; }
+    const expanded = state.users.find((x) => userKey(x) === state.expanded);
+    if (expanded) { newTask(expanded); return; }
+    pushError('请先展开一个用户分组，再新建任务');
+  });
 
   /* ---------- 启动 ---------- */
   async function boot() {
@@ -673,11 +954,28 @@
     els.health.className = 'badge';
     try {
       await refresh();
+      // 任务上下文：URL 为单 key 直连时，反查归属用户以锁定任务面板
+      if (state.taskMode && state.ctx.key && !state.ctx.channel) {
+        try {
+          const ref = await api(`/api/tasks/by-key/${encodeURIComponent(state.ctx.key)}`);
+          if (ref?.channel) {
+            state.ctx.channel = ref.channel;
+            state.ctx.userId = ref.userId;
+            if (ref.task) { state.ctx.task = ref.task.id; state.ctx.agent = ref.task.agentId; }
+          }
+        } catch { /* 反查失败保持原样，发送时服务端会返回明确错误 */ }
+      }
       // 任务上下文：URL 指定了 agent 时预选该 agent（优先启用中的）
       if (state.taskMode && state.ctx.agent) {
         const target = state.agents.find((x) => x.id === state.ctx.agent && x.enabled);
         if (target) { state.activeId = target.id; renderAgents(); }
       }
+      // 任务上下文：锁定任务面板到归属用户分组
+      if (state.taskMode && state.ctx.channel) {
+        const lock = state.users.find((u) => u.channel === state.ctx.channel && u.userId === state.ctx.userId);
+        if (lock) state.expanded = userKey(lock);
+      }
+      renderTasks();
       updateContextMeta();
       if (state.taskMode) {
         const hint = state.ctx.key
