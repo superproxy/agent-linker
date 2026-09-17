@@ -64,7 +64,7 @@ export interface AgentCatalogItem {
   description: string;
   /** 默认 ACP server 启动命令（展示 + 一键添加时生成 definition.command） */
   command: string[];
-  /** 是否已配置（gateway.yaml / 默认定义含该 kind） */
+  /** 是否已配置（config.yaml / 默认定义含该 kind） */
   configured: boolean;
   /** 当前是否启用（configured 且未停用） */
   enabled: boolean;

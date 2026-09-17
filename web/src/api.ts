@@ -261,7 +261,7 @@ export class AdminClient {
     return data.agents;
   }
 
-  /** 运行时热更新 agent（启停 / 切换模型，仅内存生效，重启还原 gateway.yaml） */
+  /** 运行时热更新 agent（启停 / 切换模型，仅内存生效，重启还原 config.yaml） */
   async patchAgent(id: string, patch: { model?: string | null; enabled?: boolean }): Promise<AgentDetail> {
     const data = (await this.request(`/api/agents/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -270,13 +270,13 @@ export class AdminClient {
     return data.agent;
   }
 
-  /** 全局默认任务绑定的 agentId（gateway.yaml tasks.defaultAgentId） */
+  /** 全局默认任务绑定的 agentId（config.yaml tasks.defaultAgentId） */
   async getDefaultAgent(): Promise<string> {
     const data = (await this.request('/api/tasks/default-agent')) as { defaultAgentId: string };
     return data.defaultAgentId;
   }
 
-  /** 设置全局默认 agent，持久化到 gateway.yaml（重启保留） */
+  /** 设置全局默认 agent，持久化到 config.yaml（重启保留） */
   async setDefaultAgent(agentId: string): Promise<string> {
     const data = (await this.request('/api/tasks/default-agent', {
       method: 'PUT',
@@ -291,7 +291,7 @@ export class AdminClient {
     return data.agents;
   }
 
-  /** 按目录类型一键添加 agent（热启用，仅内存生效，重启还原 gateway.yaml） */
+  /** 按目录类型一键添加 agent（热启用，仅内存生效，重启还原 config.yaml） */
   async addAgentByType(type: string): Promise<AgentDetail> {
     const data = (await this.request('/api/agents', {
       method: 'POST',
@@ -325,6 +325,8 @@ export interface MeInfo {
   authEnabled: boolean;
   user?: UserPublic | null;
   tokenAuth?: boolean;
+  /** local 模式：回环免登录的「本机默认用户」或持 gateway token */
+  local?: boolean;
 }
 
 export class AuthClient {
@@ -369,6 +371,54 @@ export class AuthClient {
     });
     if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
   }
+
+  // ── 个人 API token（pat_，OpenAI 客户端直连 /v1）──
+
+  /** 查看自己的 token（仅预览；尚无则返回 null） */
+  async personalToken(token: string): Promise<PersonalTokenInfo | null> {
+    const res = await fetch(this.url('/api/personal-tokens'), {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    const data = (await res.json()) as { token: PersonalTokenInfo | null };
+    return data.token;
+  }
+
+  /** 获取或签发自己的 token（幂等），返回完整 token */
+  async ensurePersonalToken(token: string): Promise<string> {
+    const res = await fetch(this.url('/api/personal-tokens/ensure'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return ((await res.json()) as { token: string }).token;
+  }
+
+  /** 轮换：旧 token 立即失效，返回新的完整 token */
+  async rotatePersonalToken(token: string): Promise<string> {
+    const res = await fetch(this.url('/api/personal-tokens/rotate'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return ((await res.json()) as { token: string }).token;
+  }
+
+  /** 吊销自己的 token */
+  async revokePersonalToken(token: string): Promise<void> {
+    const res = await fetch(this.url('/api/personal-tokens'), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+  }
+}
+
+/** 个人 token 视图（仅预览，不含全文） */
+export interface PersonalTokenInfo {
+  tokenPreview: string;
+  createdAt: string;
+  lastUsedAt?: string;
 }
 
 export class UserAdminClient {

@@ -43,7 +43,7 @@ export interface PluginRuntimeDeps {
   logger: RuntimeLogger;
   /** agent 调度桥（linkagent AgentManager + AcpWrapper） */
   agentDispatch: ChannelAgentDispatch;
-  /** writeConfigFile 是否真实写回 gateway.yaml；缺省仅内存合并 */
+  /** writeConfigFile 是否真实写回 config.yaml；缺省仅内存合并 */
   persistConfig?: (next: Record<string, unknown>) => boolean | Promise<boolean>;
 }
 
@@ -126,7 +126,7 @@ export function createPluginRuntime(deps: PluginRuntimeDeps): PluginRuntime {
     Object.assign(configRef, next);
     if (deps.persistConfig) {
       const ok = await deps.persistConfig(next);
-      if (!ok) logger.warn('[plugin-runtime] config-runtime 写入已同步内存，未落盘 gateway.yaml');
+      if (!ok) logger.warn('[plugin-runtime] config-runtime 写入已同步内存，未落盘 config.yaml');
     }
   });
 
@@ -155,7 +155,7 @@ export function createPluginRuntime(deps: PluginRuntimeDeps): PluginRuntime {
         Object.assign(configRef, next);
         if (deps.persistConfig) {
           const ok = await deps.persistConfig(next);
-          if (!ok) logger.warn('[plugin-runtime] writeConfigFile 已合并到内存，未落盘 gateway.yaml');
+          if (!ok) logger.warn('[plugin-runtime] writeConfigFile 已合并到内存，未落盘 config.yaml');
         } else {
           logger.warn('[plugin-runtime] writeConfigFile 仅更新内存配置（未配置持久化）');
         }

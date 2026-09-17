@@ -10,6 +10,7 @@ import {
 import { validatePassword } from './password.js';
 import { AuthError, type UserStore } from './store.js';
 import { type AuthGuard } from './auth.js';
+import type { PersonalTokenStore } from './personal-token-store.js';
 
 type HeaderCarrier = { headers: Record<string, string | string[] | undefined> };
 
@@ -61,9 +62,9 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
   const throttle = new LoginThrottle();
 
   app.post('/api/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
-    // 未开启鉴权时登录无意义（本地开发模式所有接口直接放行）
+    // open 模式不鉴权，登录无意义；local 模式回环免登录，账号登录仅用于非回环/多用户场景
     if (!guard.enabled) {
-      return reply.code(400).send(errBody('网关未开启鉴权（auth.enabled=false），无需登录', 'auth_disabled'));
+      return reply.code(400).send(errBody('网关未开启鉴权（auth.mode=open），无需登录', 'auth_disabled'));
     }
     const body = request.body as { username?: unknown; password?: unknown } | null | undefined;
     const username = typeof body?.username === 'string' ? body.username.trim() : '';
@@ -103,13 +104,21 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
     if (state.status === 'none') {
       return reply.code(401).send(errBody('未登录或凭据已失效', 'unauthorized'));
     }
-    if (state.status === 'session') {
+    if (state.status === 'session' || state.status === 'personal') {
+      // 会话 / 个人 API token 都对应一个登录账号，返回该账号本人
       return reply.send({ authEnabled: true, user: toUserPublic(state.user) });
+    }
+    if (state.status === 'local') {
+      // 本机默认用户（回环免登录 / gateway token）
+      return reply.send({ authEnabled: true, user: toUserPublic(state.user), local: true });
     }
     if (state.status === 'token') {
       return reply.send({ authEnabled: true, user: null, tokenAuth: true });
     }
-    return reply.send({ authEnabled: false, user: null });
+    if (state.status === 'disabled') {
+      return reply.send({ authEnabled: false, user: null });
+    }
+    return reply.send({ authEnabled: true, user: null });
   });
 
   app.post('/api/auth/change-password', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -117,9 +126,9 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
     if (state.status === 'none') {
       return reply.code(401).send(errBody('未登录或凭据已失效', 'unauthorized'));
     }
-    // 仅登录用户可改自己的密码；静态 token（机器凭据）不对应具体用户
+    // 仅登录用户可改自己的密码；静态 token / 本机默认用户不对应可改密的账号
     if (state.status !== 'session') {
-      return reply.code(403).send(errBody('静态 API key 不支持改密，请用账号登录后操作', 'not_session'));
+      return reply.code(403).send(errBody('当前凭据不支持改密，请用账号登录后操作', 'not_session'));
     }
     const body = request.body as { oldPassword?: unknown; newPassword?: unknown } | null | undefined;
     const oldPassword = typeof body?.oldPassword === 'string' ? body.oldPassword : '';
@@ -151,7 +160,12 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
  *   DELETE /api/admin/users/:username             删除账号（禁止删自己 / 最后一个 admin）
  *   POST   /api/admin/users/:username/reset-password  管理员重置密码
  */
-export function registerUserApi(app: FastifyInstance, store: UserStore, guard: AuthGuard): void {
+export function registerUserApi(
+  app: FastifyInstance,
+  store: UserStore,
+  guard: AuthGuard,
+  personalTokens?: PersonalTokenStore,
+): void {
   const requireAdmin = (request: FastifyRequest, reply: FastifyReply): boolean => {
     if (!guard.isAdmin(request as HeaderCarrier)) {
       void reply.code(403).send(errBody('需要管理员权限', 'forbidden'));
@@ -211,6 +225,8 @@ export function registerUserApi(app: FastifyInstance, store: UserStore, guard: A
       }
     }
     store.delete(username);
+    // 级联清理该账号的全部个人 API token
+    personalTokens?.revokeForUser(username);
     request.log.info({ user: username, by: current?.username ?? 'token' }, '删除用户');
     return reply.send({ ok: true });
   });

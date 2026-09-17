@@ -481,7 +481,7 @@ test('TaskService: 默认 agentId 缺省 opencode，setDefaultAgentId 后新用�
 
 test('persistDefaultTaskAgentId: 就地改值并保留注释/其他键，重启重载可见', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
-  const cfgPath = join(dir, 'gateway.yaml');
+  const cfgPath = join(dir, 'config.yaml');
   writeFileSync(
     cfgPath,
     [
@@ -523,7 +523,7 @@ test('persistDefaultTaskAgentId: tasks 段缺失则补齐；文件不存在则�
   assert.match(readFileSync(p1, 'utf8'), /defaultAgentId: codex/);
 
   // 文件不存在（此前纯默认配置运行）
-  const p2 = join(dir, 'nested', 'gateway.yaml');
+  const p2 = join(dir, 'nested', 'config.yaml');
   assert.ok(!existsSync(p2));
   persistDefaultTaskAgentId(p2, 'pi');
   assert.match(readFileSync(p2, 'utf8'), /defaultAgentId: pi/);

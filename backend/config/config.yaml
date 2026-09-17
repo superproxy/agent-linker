@@ -1,0 +1,67 @@
+# linkagent 三进程共享配置（gateway / weixin / node 读同一文件）
+# 旧的扁平格式（顶层 server/auth/...）仍被自动识别并迁移，无需手工改动。
+
+# ── gateway 网关进程 ──────────────────────────────────────
+gateway:
+  server:
+    host: 127.0.0.1
+    port: 8787
+  auth:
+    # 鉴权模式：
+    #   local（默认，本机）：回环请求免登录识别为「本机默认用户」；
+    #                        他机/手机/API 必须携带永久 gateway token，否则 401。
+    #   token：强制令牌，任何来源（含本机浏览器）都需 gateway token 或账号会话。
+    #   open ：完全不鉴权（仅建议绑回环）。
+    mode: local
+    # gateway token（默认用户的永久凭据，三进程共享，不过期）：
+    #   留空 → 首次启动自动生成并落盘 .runtime-state/gateway-token（权限 0600）；
+    #   填写 → 以配置为准。Chatbox/远程节点/手机端用它作为 Bearer token。
+    token: ""
+    # 账号登录会话有效期（天），滑动续期；默认 7 天（token/local 模式下账号会话使用）
+    sessionTtlDays: 7
+  # agents 省略：使用内置默认（opencode + pi + workbuddy + trace-cli）
+  # agent 默认工作目录：未显式配 cwd 的 agent 在此目录下运行（缺省回退网关启动目录）
+  # defaultCwd: /Users/yangxuezeng/linkagent/works
+
+  # ── openclaw 渠道插件（可选）────────────────────────────
+  # 企业微信：channels.<id> 配 botId/secret 即启用（默认内置 @wecom/wecom-openclaw-plugin）
+  # 个人微信：配置 plugins 后先扫码登录（pnpm --filter @linkagent/backend weixin-login），
+  #           登录态存 .runtime-state/plugins/openclaw-weixin/，重启自动收消息
+  # 注意：package 以 @ 开头必须加引号（yaml 保留字符）
+  plugins:
+    - package: "@tencent-weixin/openclaw-weixin"
+
+  # openclaw-weixin 插件渠道配置（weixin.mode=openclaw-weixin-plugin 时透传给插件路由；weixin-bot 模式下自动跳过该插件）
+  channels:
+    openclaw-weixin:
+      agentId: pi # 个人微信默认对话 agent（对齐 weixin-bot 模式的 weixin.model）
+
+  # ── 任务公共能力（多渠道共享）────────────────────────────
+  # tasks.defaultAgentId：每个用户首次使用时默认任务绑定的 agent（可经 /task new 切换）
+  # tasks.workspaceDir：任务工作空间根目录（缺省 .runtime-state/tasks-workspace）。
+  #   配置后每个任务默认拥有独立工作目录 <root>/<userId>/<taskId>，任务间文件系统隔离；
+  #   显式 /task cwd 设置的目录优先。
+  tasks:
+    defaultAgentId: opencode
+
+# ── weixin 个人微信进程 ───────────────────────────────────
+# 进程管理器（pm start all）按 enabled 决定是否拉起；gatewayUrl/gatewayToken
+# 缺省由 gateway 段自动推导，环境变量 LINKAGENT_GATEWAY_URL/TOKEN 可覆盖。
+weixin:
+  enabled: true
+  # weixin-bot：gateway 进程内拉起（默认，单跑 gateway 时）
+  # openclaw-weixin-plugin：openclaw 插件运行时
+  # external：独立进程（进程管理器托管时经环境变量自动切换，一般无需手填）
+  mode: weixin-bot
+  # accountId: ""            # 登录态账号 id（缺省取 accounts/ 下第一个）
+  model: agent:pi           # 对话模型（默认 agent:pi）
+  # gatewayUrl: ""           # 缺省由 gateway.server 推导（0.0.0.0/:: 归一化到 127.0.0.1）
+  # gatewayToken: ""         # 缺省取 gateway.auth.token 或自动生成的 gateway-token 文件
+
+# ── node（executor）执行器进程 ────────────────────────────
+node:
+  enabled: true
+  # name: ""                # 节点展示名（缺省 node-<hostname>）
+  # agents: []              # 上报的 agent id（空 = 网关默认 4 种）
+  # gatewayUrl: ""          # 缺省由 gateway.server 推导
+  # gatewayToken: ""        # 缺省取 gateway.auth.token 或 gateway-token 文件

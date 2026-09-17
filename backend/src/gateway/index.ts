@@ -4,7 +4,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadGatewayConfig, persistDefaultTaskAgentId } from './config.js';
+import { loadSharedConfig, persistDefaultTaskAgentId, resolveGatewayAuth } from './config.js';
+import type { SharedConfig } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
@@ -22,8 +23,10 @@ import { registerPmApi } from './pm/api.js';
 import { UserStore } from './users/store.js';
 import { AuthGuard } from './users/auth.js';
 import { ChannelTokenStore } from './users/channel-token-store.js';
+import { PersonalTokenStore } from './users/personal-token-store.js';
 import { registerAuthApi, registerUserApi } from './users/api.js';
 import { registerChannelTokenApi } from './users/channel-token-api.js';
+import { registerPersonalTokenApi } from './users/personal-token-api.js';
 import { startWeixinBot, type WeixinBotHandle } from '../channels/weixin-bot.js';
 import { InProcessUserTokenProvider } from '../channels/user-token.js';
 import { registerWeixinApi, WeixinLoginService } from './weixin-login.js';
@@ -58,7 +61,7 @@ type TaskAwareChatBody = ChatCompletionRequest & {
  * 路由：
  *   GET  /v1/models             列出 agent:opencode / agent:pi 等模型
  *   POST /v1/chat/completions   支持 stream / 非 stream（SSE）；渠道请求可带 channel/userId/agent/task（任务路由）
- * 配置见 backend/config/gateway.yaml（缺省 127.0.0.1:8787，agent 用内置默认）。
+ * 配置见 backend/config/config.yaml（缺省 127.0.0.1:8787，agent 用内置默认）。
  */
 
 interface OpenAiErrorBody {
@@ -107,24 +110,31 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   port: number;
   authEnabled: boolean;
 }> {
-  const { config, path: configPath } = loadGatewayConfig(options?.configPath);
-  // 进程管理器托管微信时注入 LINKAGENT_WEIXIN_MODE=external：gateway 不内嵌 bot，改由独立进程运行
+  const { config: sharedConfig, path: configPath } = loadSharedConfig(options?.configPath);
+  const config: SharedConfig = sharedConfig;
+  // 便捷别名：gateway 段（原扁平配置整体收敛于此）
+  const gw = config.gateway;
   // 进程管理器托管微信时注入 LINKAGENT_WEIXIN_MODE=external：gateway 不内嵌 bot，改由独立进程运行。
   // 注意：zod default() 产出的对象嵌套属性是只读代理，直接赋 config.weixin.mode 会被静默忽略，必须整体替换。
   const envWeixinMode = process.env.LINKAGENT_WEIXIN_MODE;
   if (envWeixinMode === 'external' || envWeixinMode === 'weixin-bot' || envWeixinMode === 'openclaw-weixin-plugin') {
     config.weixin = { ...config.weixin, mode: envWeixinMode };
   }
-  const definitions = options?.definitions ?? (config.agents.length > 0 ? config.agents : defaultAgentDefinitions());
+  const definitions = options?.definitions ?? (gw.agents.length > 0 ? gw.agents : defaultAgentDefinitions());
 
   // 安装布局：形态判定（dev/dist）与所有运行态路径的唯一来源
   const layout = getLayout();
+
+  // ── 鉴权：local/token/open；gateway token 配置优先，空则自动生成落盘（三进程共享）──
+  const auth = resolveGatewayAuth(config, layout.gatewayTokenFile);
+  const authEnabled = auth.mode !== 'open';
 
   // ── 远程节点：注册表落 .runtime-state/nodes，WebSocket 服务在 app.listen 后挂到同一 http server ──
   const nodeRegistry = createNodeRegistry(layout.nodesState);
   const nodeManager = new NodeManager({
     registry: nodeRegistry,
-    expectedToken: config.auth.enabled ? config.auth.token : '',
+    // local/token 模式节点必须携带永久 gateway token（回环也不豁免，确保 WS 准入统一）；open 不校验
+    expectedToken: authEnabled ? auth.token : '',
     logger: {
       info: (m) => console.log(`[nodes] ${m}`),
       warn: (m) => console.warn(`[nodes] ${m}`),
@@ -132,7 +142,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     },
   });
 
-  const manager = new AgentManager({ definitions, defaultCwd: config.defaultCwd, nodeManager });
+  const manager = new AgentManager({ definitions, defaultCwd: gw.defaultCwd, nodeManager });
   await manager.start();
 
   const app = Fastify({ logger: { level: 'info' } });
@@ -157,36 +167,45 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     app.log.info('未找到 web 构建产物（web/dist），跳过 /admin 挂载；可执行 pnpm build:web 生成');
   }
 
-  // ── 用户登录体系：账号密码 + 会话 token（与静态 token 并存，静态 token 供机器/节点调用）──
+  // ── 用户登录体系：账号密码 + 会话 token（与 gateway token 并存）──
   const userStore = new UserStore(layout.usersState);
-  userStore.ensureDefaultAdmin();
+  // token/open 模式保留默认 admin 账号（兼容旧行为）；local 模式以「本机默认用户」免登录，
+  // 仅当已有账号存储时才初始化 admin，避免本机模式强推 admin/admin123 改密流程。
+  if (auth.mode === 'token' || auth.mode === 'open') {
+    userStore.ensureDefaultAdmin();
+  }
   // 渠道终端用户级凭据（微信 bot 代用户直连网关）：.runtime-state/users/channel-tokens/
   const channelTokenStore = new ChannelTokenStore(layout.usersState);
+  // 登录账号个人 API token（用户自助，OpenAI 客户端直连 /v1）：.runtime-state/users/personal-tokens/
+  const personalTokenStore = new PersonalTokenStore(layout.usersState);
 
   // ── 任务公共能力（多渠道共享；state 落在 .runtime-state/tasks/）──
   // 先于 AuthGuard 创建：任务 key 直连鉴权需用 taskService 反查 key → 任务
   const taskStateDir = layout.tasksState;
   const taskService = new TaskService({
     store: createJsonStore(taskStateDir),
-    defaultAgentId: config.tasks?.defaultAgentId,
-    // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 tasks.workspaceDir 配置
-    workspaceRoot: config.tasks?.workspaceDir ?? layout.tasksWorkspace,
+    defaultAgentId: gw.tasks?.defaultAgentId,
+    // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 gateway.tasks.workspaceDir 配置
+    workspaceRoot: gw.tasks?.workspaceDir ?? layout.tasksWorkspace,
   });
 
   const authGuard = new AuthGuard(userStore, {
-    enabled: config.auth.enabled,
-    staticToken: config.auth.token,
-    sessionTtlDays: config.auth.sessionTtlDays,
+    mode: auth.mode,
+    staticToken: auth.token,
+    sessionTtlDays: auth.sessionTtlDays,
     // 任务 key 直连：/v1 接受 Bearer <taskKey> 或 body.taskKey 作为任务级凭据
     taskKeys: taskService,
     // 用户级凭据：微信 bot 按渠道用户携带 ct_ token
     channelTokens: channelTokenStore,
+    // 登录账号个人 API token：pat_ 凭据，等同账号本人
+    personalTokens: personalTokenStore,
   });
   registerAuthApi(app, userStore, authGuard);
-  registerUserApi(app, userStore, authGuard);
+  registerUserApi(app, userStore, authGuard, personalTokenStore);
   registerChannelTokenApi(app, channelTokenStore, authGuard, taskService, {
     listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
   });
+  registerPersonalTokenApi(app, personalTokenStore, authGuard);
 
   const checkAuth = (request: FastifyRequest): boolean => authGuard.checkAuth(request);
 
@@ -199,10 +218,11 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
       // 建/改任务时校验 (节点, agent) 组合当前可路由
       hasRoutingAgent: (nodeId, agentId) => manager.hasRoutingAgent(nodeId, agentId),
-      // 原子化运行时：先改内存再落盘 gateway.yaml；落盘抛错时接口层回滚内存值
+      // 原子化运行时：先改内存再落盘 config.yaml；落盘抛错时接口层回滚内存值
       persistDefaultAgent: (agentId) => {
         persistDefaultTaskAgentId(configPath, agentId);
-        config.tasks.defaultAgentId = agentId;
+        // zod default 产出只读代理：整体替换 gateway 段
+        config.gateway = { ...config.gateway, tasks: { ...config.gateway.tasks, defaultAgentId: agentId } };
       },
     },
     // 渠道用户级凭据：ct_ token 只读自己的 GET /api/tasks（微信 bot 查激活任务用）
@@ -239,11 +259,11 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       return reply.code(403).send({ error: '仅管理员可获取节点接入信息' });
     }
     return {
-      host: config.server.host,
-      port: config.server.port,
-      authEnabled: config.auth.enabled,
-      // 未开启鉴权时为空串：节点连接无需 token
-      token: config.auth.enabled ? config.auth.token : '',
+      host: gw.server.host,
+      port: gw.server.port,
+      authEnabled,
+      // open 模式为空串：节点连接无需 token；local/token 返回永久 gateway token
+      token: authEnabled ? auth.token : '',
       defaultAgents: defaultAgentDefinitions().map((d) => ({
         id: d.id,
         ...(d.displayName ? { displayName: d.displayName } : {}),
@@ -257,10 +277,11 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     pm,
     authGuard,
     server: {
-      host: config.server.host,
-      port: config.server.port,
-      authEnabled: config.auth.enabled,
-      sessionTtlDays: config.auth.sessionTtlDays,
+      host: gw.server.host,
+      port: gw.server.port,
+      authEnabled,
+      authMode: auth.mode,
+      sessionTtlDays: auth.sessionTtlDays,
     },
   });
 
@@ -284,7 +305,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   });
 
   app.post('/v1/chat/completions', async (request: FastifyRequest<{ Body: TaskAwareChatBody }>, reply: FastifyReply) => {
-    // /v1 专用鉴权：除静态 token / 会话外，还接受任务 key（任务级直连）与渠道用户 token（用户级直连）
+    // /v1 专用鉴权：除静态 token / 会话 / 个人 API token 外，还接受任务 key（任务级直连）与渠道用户 token（用户级直连）
     const authState = authGuard.resolveChat(request, request.body as { taskKey?: unknown });
     if (authState.status === 'none') {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
@@ -613,15 +634,17 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   if (weixinMode === 'external') {
     app.log.info('个人微信走 external 模式：由外部进程管理器单独拉起 weixin 进程，网关不内嵌 adapter');
   }
-  const plugins = (config.plugins ?? []).filter(
-    (p) => !(skipWeixinPlugin && p.package === '@tencent-weixin/openclaw-weixin'),
+  const plugins = gw.plugins.filter(
+    (p: { package: string; enabled: boolean }) =>
+      !(skipWeixinPlugin && p.package === '@tencent-weixin/openclaw-weixin'),
   );
-  const effectiveConfig = { ...config, plugins };
+  // 插件运行时读取扁平 config.channels / config.plugins：用 gateway 段构造等价视图
+  const effectiveConfig = { ...gw, plugins };
 
   // ── openclaw 插件运行时（企业微信 / 个人微信渠道）──
   // 配置了 channels.<id> 或 plugins[] 时加载插件包；插件缺失 / 加载失败仅告警，不影响 /v1
   let pluginManager: PluginManager | null = null;
-  if (Object.keys(config.channels).length > 0 || plugins.length > 0) {
+  if (Object.keys(gw.channels).length > 0 || plugins.length > 0) {
     const stateDir = layout.pluginsState;
     // 微信插件读 OPENCLAW_STATE_DIR 定位 accounts.json / openclaw.json
     process.env.OPENCLAW_STATE_DIR = stateDir;
@@ -651,10 +674,12 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     ? {
         async start(): Promise<void> {
           weixinBotHandle = await startWeixinBot({
-            gatewayUrl: `http://127.0.0.1:${config.server.port}`,
-            model: config.weixin?.model,
-            accountId: config.weixin?.accountId,
-            // 内嵌模式：直接在进程内为每个微信用户签发/复用用户级 token（无需 HTTP 引导、无需静态 token）
+            gatewayUrl: `http://127.0.0.1:${gw.server.port}`,
+            model: config.weixin?.model || undefined,
+            accountId: config.weixin?.accountId || undefined,
+            // 内嵌模式回连本机网关：local/token 模式携带永久 gateway token（回环免登录亦可，但显式带 token 更稳）
+            ...(auth.token ? { gatewayToken: auth.token } : {}),
+            // 内嵌模式：直接在进程内为每个微信用户签发/复用用户级 token（无需 HTTP 引导）
             userTokenProvider: new InProcessUserTokenProvider((channel, userId) =>
               channelTokenStore.ensure(channel, userId).token,
             ),
@@ -690,7 +715,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     },
   );
 
-  return { app, manager, nodeManager, pluginManager, taskService, weixinBot, host: config.server.host, port: config.server.port, authEnabled: config.auth.enabled };
+  return { app, manager, nodeManager, pluginManager, taskService, weixinBot, host: gw.server.host, port: gw.server.port, authEnabled };
 }
 
 async function main(): Promise<void> {

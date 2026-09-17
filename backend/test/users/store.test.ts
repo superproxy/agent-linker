@@ -100,11 +100,11 @@ test('AuthGuard：disabled / 静态 token / 会话 / 无效凭据 四态', () =>
   const adminSession = store.createSession('admin', 10_000);
   const userSession = store.createSession('alice', 10_000);
 
-  const off = new AuthGuard(store, { enabled: false, staticToken: '', sessionTtlDays: 7 });
-  assert.equal(off.checkAuth({ headers: {} }), true, '未开启鉴权一律放行');
+  const off = new AuthGuard(store, { mode: 'open', staticToken: '', sessionTtlDays: 7 });
+  assert.equal(off.checkAuth({ headers: {} }), true, 'open 模式一律放行');
   assert.equal(off.isAdmin({ headers: {} }), true);
 
-  const guard = new AuthGuard(store, { enabled: true, staticToken: 'static-secret', sessionTtlDays: 7 });
+  const guard = new AuthGuard(store, { mode: 'token', staticToken: 'static-secret', sessionTtlDays: 7 });
   assert.equal(guard.checkAuth({ headers: {} }), false, '无凭据拒绝');
   assert.equal(guard.checkAuth({ headers: { authorization: 'Bearer wrong' } }), false);
   assert.equal(guard.checkAuth({ headers: { authorization: 'Bearer static-secret' } }), true);

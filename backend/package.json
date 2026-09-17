@@ -23,8 +23,8 @@
     "pm:logs": "tsx src/supervisor/cli.ts logs",
     "pm:fg": "tsx src/supervisor/cli.ts foreground",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts",
-    "test:watch": "tsx --test --watch test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts"
+    "test": "tsx --test test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts test/gateway/*.test.ts",
+    "test:watch": "tsx --test --watch test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts test/gateway/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

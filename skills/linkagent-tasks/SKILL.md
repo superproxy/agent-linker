@@ -11,7 +11,7 @@ metadata:
 作为 linkagent 网关的任务管理智能体，通过 `/api/tasks` HTTP API 对指定渠道用户的**任务**做创建、切换、列出、重命名、删除，保持网关为单一事实源。
 
 ## 前置：服务与身份
-- 网关运行在 `http://localhost:8787`（仓库根 `backend/config/gateway.yaml` 的 `server.port`，auth.enabled=false 时免鉴权）。
+- 网关运行在 `http://localhost:8787`（仓库根 `backend/config/config.yaml` 的 `server.port`，auth.enabled=false 时免鉴权）。
 - 每个用户身份由 `channel` + `userId` 唯一确定。示例身份（微信单聊）：
   - `channel=weixin`
   - `userId=o9cq806l8TCt_qAKvyMjvJa5yq7k@im.wechat`（URL 中 `@` 建议用 `%40`）

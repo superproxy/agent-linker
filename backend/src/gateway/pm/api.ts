@@ -44,7 +44,7 @@ export function normalizeTargets(input: unknown, opts: { allowGateway?: boolean 
 export interface PmApiDeps {
   pm: ProcessManager;
   authGuard: AuthGuard;
-  server: { host: string; port: number; authEnabled: boolean; sessionTtlDays: number };
+  server: { host: string; port: number; authEnabled: boolean; authMode?: string; sessionTtlDays: number };
 }
 
 export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
@@ -69,6 +69,7 @@ export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
       host: server.host,
       port: server.port,
       authEnabled: server.authEnabled,
+      authMode: server.authMode ?? (server.authEnabled ? 'token' : 'open'),
       sessionTtlDays: server.sessionTtlDays,
       local: isLoopbackIp(request.ip),
     };

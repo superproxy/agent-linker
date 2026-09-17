@@ -6,7 +6,7 @@ import { decideTaskRouting } from '../../src/gateway/tasks/api.js';
 type Built = Awaited<ReturnType<typeof buildServer>>;
 
 /**
- * 用无插件的干净配置构建网关：避免默认 gateway.yaml 里的 openclaw-weixin 插件
+ * 用无插件的干净配置构建网关：避免默认 config.yaml 里的 openclaw-weixin 插件
  * 拉起 ilink 长轮询网络句柄，导致测试进程无法退出（process 永不 exit 而挂起）。
  * definitions 覆盖 config.agents，控制台/模型列表等能力不受影响。
  */

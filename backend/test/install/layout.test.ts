@@ -19,8 +19,8 @@ test('dev 形态：无 marker 时 kind=dev，配置/入口/页面走 backend 源
   assert.equal(layout.kind, 'dev');
   assert.equal(layout.root, root);
   // 配置候选：dev 优先 backend/config，兜底 server/config
-  assert.equal(layout.configCandidates[0], join(root, 'backend', 'config', 'gateway.yaml'));
-  assert.equal(layout.configCandidates[1], join(root, 'server', 'config', 'gateway.yaml'));
+  assert.equal(layout.configCandidates[0], join(root, 'backend', 'config', 'config.yaml'));
+  assert.equal(layout.configCandidates[1], join(root, 'server', 'config', 'config.yaml'));
   // 无配置文件时 configFile 回退形态默认（首个候选）
   assert.equal(layout.configFile, layout.configCandidates[0]);
   // dev 入口走 tsx TS 源码
@@ -43,7 +43,7 @@ test('dist 形态：有 .linkagent-root 时 kind=dist，配置/入口/页面走�
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
   const layout = createInstallLayout(root);
   assert.equal(layout.kind, 'dist');
-  assert.equal(layout.configCandidates[0], join(root, 'server', 'config', 'gateway.yaml'));
+  assert.equal(layout.configCandidates[0], join(root, 'server', 'config', 'config.yaml'));
   assert.ok(layout.entry('gateway').endsWith(join('server', 'gateway.mjs')));
   assert.ok(layout.entry('weixin').endsWith(join('server', 'weixin.mjs')));
   assert.ok(layout.entry('node').endsWith(join('server', 'node.mjs')));
@@ -59,9 +59,9 @@ test('configFile：存在时选中形态优先的真实文件（dist 选中 serv
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
   mkdirSync(join(root, 'server', 'config'), { recursive: true });
-  writeFileSync(join(root, 'server', 'config', 'gateway.yaml'), 'server: { port: 8787 }\n');
+  writeFileSync(join(root, 'server', 'config', 'config.yaml'), 'server: { port: 8787 }\n');
   const layout = createInstallLayout(root);
-  assert.equal(layout.configFile, join(root, 'server', 'config', 'gateway.yaml'));
+  assert.equal(layout.configFile, join(root, 'server', 'config', 'config.yaml'));
 });
 
 test('运行态目录：state() 与语义化快捷方式一致', () => {

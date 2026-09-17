@@ -201,7 +201,7 @@ export class AgentManager {
   }
 
   /**
-   * 运行时热更新某个 agent（模型 / 启停）。仅内存生效，重启还原 config/gateway.yaml。
+   * 运行时热更新某个 agent（模型 / 启停）。仅内存生效，重启还原 config/config.yaml。
    * 未知 agent 抛错；返回更新后的详情。
    */
   updateAgent(id: string, patch: AgentPatch): AgentDetail {
@@ -218,7 +218,7 @@ export class AgentManager {
   }
 
   /**
-   * 运行时热添加一个 agent（仅内存生效，重启还原 config/gateway.yaml）。
+   * 运行时热添加一个 agent（仅内存生效，重启还原 config/config.yaml）。
    * id 重复或类型未知抛错；返回新 agent 的详情。
    */
   addAgent(def: AgentDefinition): AgentDetail {

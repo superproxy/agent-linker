@@ -8,7 +8,7 @@
  *   server/weixin.mjs    个人微信 bot 独立进程（external 模式）
  *   server/node.mjs      本机 node 节点连接器
  *   server/pm.mjs        单机进程管理器（编排三进程）
- *   server/config/       默认 gateway.yaml（可改）
+ *   server/config/       默认 config.yaml（可改）
  *   dev/                 内置聊天页（网关按相对路径 readFileSync）
  *   web/                 vite 构建的后台管理端（TS/React，网关挂载到 /admin）
  *   vendor/openclaw/     openclaw plugin-sdk shim（产物 package.json 以 file: 依赖安装）
@@ -106,9 +106,9 @@ step('3/6 esbuild 打包（gateway / weixin / node / pm 四入口）', async () 
 });
 
 step('4/6 复制运行资源', () => {
-  // 默认配置（server/config/gateway.yaml，产物布局路径）
+  // 默认配置（server/config/config.yaml，产物布局路径）
   mkdirSync(join(DIST, 'server', 'config'), { recursive: true });
-  cpSync(join(REPO, 'backend', 'config', 'gateway.yaml'), join(DIST, 'server', 'config', 'gateway.yaml'));
+  cpSync(join(REPO, 'backend', 'config', 'config.yaml'), join(DIST, 'server', 'config', 'config.yaml'));
 
   // 内置页面（网关 new URL('../dev/*.html', import.meta.url) 相对 server/ 读取）
   // 仅聊天页；管理后台为 web/ 下的 TS/React 构建产物（挂 /admin），不再内置 admin.html。
@@ -212,7 +212,7 @@ linkagent/
 │   ├── weixin.mjs        个人微信 bot（独立进程，external 模式）
 │   ├── node.mjs          本机 node 节点连接器（反向 WS 连入网关）
 │   ├── pm.mjs            单机进程管理器（编排上面三进程）
-│   └── config/gateway.yaml   网关配置（改完需重启）
+│   └── config/config.yaml    网关配置（改完需重启）
 ├── dev/                  内置聊天页
 ├── web/                  后台管理端（TS/React，挂载 /admin）
 ├── node_modules/         运行时依赖
@@ -232,7 +232,7 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 \`\`\`
 
 进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；进程崩溃后重新执行 \`./start.sh start\` 即可。
-网关开启 \`auth\` 时，管理器会自动把 \`gateway.yaml\` 的静态 token 注入微信/node 进程，无需单独配置。
+网关开启 \`auth\` 时，微信/node 进程自动读取同一 \`config.yaml\` 的静态 token 回连，无需单独配置。
 微信首次使用需先在后台 \`/admin\` 扫码登录。
 
 启动后：
@@ -244,12 +244,14 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 安装根可用 \`LINKAGENT_HOME\` 显式指定。
 
 ## 配置
-编辑 \`server/config/gateway.yaml\`，修改后 \`./start.sh restart\`：
-- \`server.host/port\`：监听地址
-- \`auth\`：开启后所有 /v1 与后台 API 需 \`Authorization: Bearer <token>\`
-- \`agents\`：覆盖内置默认 agent（id/type/displayName/description/cwd/command/model/...）
-- \`tasks\`：任务路由默认 agent、任务工作空间目录
-- \`plugins\` / \`channels\` / \`weixin\`：微信/企业微信渠道。单机包由进程管理器托管，网关以 \`weixin.mode: external\` 运行（微信在独立进程，后台 /admin 扫码登录后自动收消息）
+编辑 \`server/config/config.yaml\`（gateway / weixin / node 三进程共享同一文件），修改后 \`./start.sh restart\`：
+- \`gateway.server.host/port\`：监听地址
+- \`gateway.auth.mode\`：\`local\`（默认，本机浏览器免登录，他机/API 需永久 gateway token）/ \`token\`（强制令牌）/ \`open\`（不鉴权）
+- \`gateway.auth.token\`：留空则首启自动生成并落盘 \`.runtime-state/gateway-token\`（三进程共享）
+- \`gateway.agents\`：覆盖内置默认 agent（id/type/displayName/description/cwd/command/model/...）
+- \`gateway.tasks\`：任务路由默认 agent、任务工作空间目录
+- \`gateway.plugins\` / \`gateway.channels\` 与 \`weixin\`：微信/企业微信渠道。单机包由进程管理器托管，网关以 \`weixin.mode: external\` 运行（微信在独立进程，后台 /admin 扫码登录后自动收消息）
+- \`weixin.enabled\` / \`node.enabled\`：\`pm start all\` 时是否拉起对应进程
 
 ## 重新构建
 在源码仓库执行 \`pnpm build:dist\`，产物在 \`dist/linkagent/\`。

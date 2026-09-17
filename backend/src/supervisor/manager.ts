@@ -16,12 +16,13 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { parse } from 'yaml';
 import {
   createInstallLayout,
   type InstallLayout,
   type ProcessTargetId,
 } from '../install/layout.js';
+import { loadSharedConfig, resolveChildRuntime, loopbackHost } from '../gateway/config.js';
+import type { SharedConfig } from '@linkagent/shared';
 import {
   IS_WINDOWS,
   killTree,
@@ -70,37 +71,33 @@ export interface ManagerPaths {
   logDir: string;
 }
 
-/** 从 gateway.yaml 读取网关端口与静态 token（供微信/节点进程注入，免单独配置） */
+/** 从共享 config.yaml 解析网关地址 / 鉴权模式 / 永久 token（供微信/节点进程回连，免单独配置） */
 export interface GatewayRuntimeConfig {
   port: number;
   host: string;
   authEnabled: boolean;
   token: string;
+  /** 三进程共享配置（含 weixin/node 段 enabled 开关） */
+  shared: SharedConfig;
 }
 
 export function loadGatewayRuntimeConfig(layout: InstallLayout): GatewayRuntimeConfig {
-  const file = layout.configCandidates.find((p) => existsSync(p));
-  let port = 8787;
-  let host = '127.0.0.1';
-  let authEnabled = false;
-  let token = '';
-  if (file) {
-    try {
-      const doc = parse(readFileSync(file, 'utf8')) as {
-        server?: { host?: string; port?: number };
-        auth?: { enabled?: boolean; token?: string };
-      };
-      port = doc.server?.port ?? port;
-      host = doc.server?.host ?? host;
-      authEnabled = doc.auth?.enabled ?? false;
-      token = doc.auth?.token ?? '';
-    } catch {
-      /* 配置非法时用默认值 */
-    }
-  }
-  // 0.0.0.0 / :: 不能作为子进程回连地址，回环用 127.0.0.1
-  const connectHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host;
-  return { port, host: connectHost, authEnabled, token };
+  // 子进程自行读同一配置文件推导回连参数；supervisor 仅需端口做健康检查、enabled 决定是否拉起。
+  // token 文件由 gateway 进程首启时生成；supervisor 这里只读（resolveChildRuntime 内部只读不创建）。
+  // 显式按传入 layout 的候选路径加载（测试/多实例隔离），找不到候选文件时回退三段式默认。
+  const configFile = layout.configCandidates.find((p) => existsSync(p));
+  const { config } = loadSharedConfig(configFile);
+  const { host: rawHost, port } = config.gateway.server;
+  const mode = config.gateway.auth.mode;
+  // 透传 layout 的 token 文件路径，确保测试/多实例隔离（不回退读全局安装布局的 token）
+  const runtime = resolveChildRuntime(config, {}, {}, layout.gatewayTokenFile);
+  return {
+    port,
+    host: loopbackHost(rawHost),
+    authEnabled: mode !== 'open',
+    token: runtime.gatewayToken,
+    shared: config,
+  };
 }
 
 export class ProcessManager {
@@ -141,13 +138,11 @@ export class ProcessManager {
     return { command: process.execPath, args, env };
   }
 
-  /** 微信/节点回连网关的公共环境变量 */
-  private gatewayClientEnv(): Record<string, string> {
-    const env: Record<string, string> = {
-      LINKAGENT_GATEWAY_URL: this.baseUrl,
-    };
-    if (this.gw.authEnabled && this.gw.token) env.LINKAGENT_GATEWAY_TOKEN = this.gw.token;
-    return env;
+  /** 某进程在共享配置段里是否启用（pm start all 时 enabled:false 跳过；显式单起不拦截） */
+  isEnabled(id: TargetId): boolean {
+    if (id === 'weixin') return this.gw.shared.weixin.enabled;
+    if (id === 'node') return this.gw.shared.node.enabled;
+    return true;
   }
 
   private envFor(id: TargetId): Record<string, string> {
@@ -156,12 +151,11 @@ export class ProcessManager {
         // 管理器托管微信：强制 gateway 走 external，不在进程内内嵌 bot（避免同账号重复收消息）
         return { LINKAGENT_WEIXIN_MODE: 'external' };
       case 'weixin':
-        return { ...this.gatewayClientEnv() };
+        // 回连 URL/token 由 weixin 进程自行读共享配置推导，supervisor 不再当二传手
+        return {};
       case 'node':
-        return {
-          ...this.gatewayClientEnv(),
-          LINKAGENT_NODE_NAME: `node-${hostname()}`,
-        };
+        // 节点名 env 仍注入（配置段 name 缺省时兜底 node-<hostname>）
+        return { LINKAGENT_NODE_NAME: this.gw.shared.node.name || `node-${hostname()}` };
     }
   }
 
@@ -177,6 +171,10 @@ export class ProcessManager {
 
   private async startOne(id: TargetId): Promise<void> {
     const spec = TARGETS[id];
+    if (!this.isEnabled(id)) {
+      console.log(`⏭️  ${spec.label} 在配置中已禁用（${id}.enabled=false），跳过`);
+      return;
+    }
     const existing = readPid(this.pidFile(id));
     if (existing) {
       console.log(`ℹ️  ${spec.label} 已在运行 (pid ${existing})，跳过`);

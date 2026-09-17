@@ -2,7 +2,7 @@
  * 用户登录体系共享类型（网关 / Web UI 唯一类型源）。
  *
  * 两套凭据并存：
- * - 静态 token（gateway.yaml auth.token）：给 Chatbox / 节点连接器等机器调用；
+ * - 静态 token（config.yaml auth.token）：给 Chatbox / 节点连接器等机器调用；
  * - 会话 token（登录后签发）：给 Web UI 浏览器调用。
  */
 
@@ -95,4 +95,14 @@ export interface ResetPasswordRequest {
   newPassword: string;
   /** 重置后是否要求该用户首次登录改密，默认 true */
   mustChangePassword?: boolean;
+}
+
+// ── 个人 API token（登录账号自助管理，pat_ 前缀，用于 OpenAI 客户端直连 /v1）──
+
+/** 个人 token 视图（不含 token 全文，仅预览前缀）；账号尚无 token 时为 null */
+export interface PersonalTokenPublic {
+  /** token 本体前缀（pat_xxxx…），完整 token 仅在 ensure/rotate 当次返回 */
+  tokenPreview: string;
+  createdAt: string;
+  lastUsedAt?: string;
 }

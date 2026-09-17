@@ -12,5 +12,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          antd: ['antd', '@ant-design/icons'],
+        },
+      },
+    },
   },
 });

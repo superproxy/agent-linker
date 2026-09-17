@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import type { GatewayToNode, NodeAgentInfo, NodeToGateway, NodeTurnEvent } from '@linkagent/shared';
 import { defaultAgentDefinitions } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
+import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { AcpEngine, DEFAULT_LABELS, type AcpAgentKind } from '../gateway/agents/acpEngine.js';
 
 /**
@@ -270,16 +271,33 @@ function main(): void {
   const args = parseArgs(process.argv.slice(2));
   const stateDir = process.env.LINKAGENT_NODE_STATE_DIR?.trim() || nodeStateDir();
   const envNodeId = process.env.LINKAGENT_NODE_ID?.trim();
-  const agents = (process.env.LINKAGENT_NODE_AGENTS
+
+  // 读三进程共享配置的 node 段（env > 配置段 > gateway 段推导）
+  const { config } = loadSharedConfig();
+  const runtime = resolveChildRuntime(
+    config,
+    { gatewayUrl: config.node.gatewayUrl, gatewayToken: config.node.gatewayToken },
+    { url: process.env.LINKAGENT_GATEWAY_URL, token: process.env.LINKAGENT_GATEWAY_TOKEN },
+  );
+
+  const envAgents = process.env.LINKAGENT_NODE_AGENTS
     ? process.env.LINKAGENT_NODE_AGENTS.split(',').map((s) => s.trim()).filter(Boolean)
-    : defaultAgentDefinitions().map((d) => d.id));
+    : null;
+  const agents =
+    envAgents ??
+    (config.node.agents.length > 0 ? config.node.agents : defaultAgentDefinitions().map((d) => d.id));
+
+  const token = runtime.gatewayToken || undefined;
   const connector = new NodeConnector({
-    gatewayUrl: args.gatewayUrl ?? process.env.LINKAGENT_GATEWAY_URL ?? 'ws://127.0.0.1:8787',
-    ...(process.env.LINKAGENT_GATEWAY_TOKEN ? { token: process.env.LINKAGENT_GATEWAY_TOKEN } : {}),
-    name: args.name ?? process.env.LINKAGENT_NODE_NAME ?? `node-${hostname()}`,
+    gatewayUrl: args.gatewayUrl ?? runtime.gatewayUrl,
+    ...(token ? { token } : {}),
+    name:
+      args.name ??
+      process.env.LINKAGENT_NODE_NAME ??
+      (config.node.name || `node-${hostname()}`),
     nodeId: envNodeId || loadPersistedNodeId(stateDir),
-    // 配置了静态令牌时无需 secret；否则读取审批模式持久化的节点凭证
-    ...(process.env.LINKAGENT_GATEWAY_TOKEN ? {} : { secret: loadPersistedSecret(stateDir) }),
+    // 配置了网关令牌时无需 secret；否则读取审批模式持久化的节点凭证
+    ...(token ? {} : { secret: loadPersistedSecret(stateDir) }),
     agents,
     stateDir,
   });

@@ -24,10 +24,10 @@ export const SYSTEM_DEFAULT_USER = 'default';
 
 export interface TaskServiceOptions {
   store: TaskStore;
-  /** 默认任务绑定的 agent（gateway.yaml tasks.defaultAgentId，缺省 opencode） */
+  /** 默认任务绑定的 agent（config.yaml tasks.defaultAgentId，缺省 opencode） */
   defaultAgentId?: string;
   /**
-   * 任务工作空间根目录（gateway.yaml tasks.workspaceDir）。
+   * 任务工作空间根目录（config.yaml tasks.workspaceDir）。
    * 配置后每个任务默认拥有独立工作目录 <root>/<userId>/<taskId>（显式 cwd 优先），任务间文件系统隔离；
    * 不配置则不自动分配（任务回落到 agent 默认工作目录）。
    */
@@ -51,7 +51,7 @@ export function isTaskCommand(text: string): boolean {
 
 export class TaskService {
   private readonly store: TaskStore;
-  /** 默认任务绑定的 agent：构造时取 gateway.yaml tasks.defaultAgentId，可经管理后台运行时修改并持久化 */
+  /** 默认任务绑定的 agent：构造时取 config.yaml tasks.defaultAgentId，可经管理后台运行时修改并持久化 */
   private defaultAgentId: string;
   private readonly workspaceRoot?: string;
 
@@ -79,7 +79,7 @@ export class TaskService {
     return this.load(SYSTEM_TASK_CHANNEL, SYSTEM_DEFAULT_USER);
   }
 
-  /** 全局默认任务绑定的 agentId（gateway.yaml tasks.defaultAgentId 的运行时值） */
+  /** 全局默认任务绑定的 agentId（config.yaml tasks.defaultAgentId 的运行时值） */
   getDefaultAgentId(): string {
     return this.defaultAgentId;
   }
@@ -87,7 +87,7 @@ export class TaskService {
   /**
    * 更新全局默认 agentId（仅影响之后新建用户的默认任务、删除后重建的默认任务与路由兜底）。
    * 已存在用户的默认任务是各自的独立快照，不在此批量改写（如需改单个实例，用任务的 setTaskAgent）。
-   * 持久化到 gateway.yaml 由调用方（管理接口）负责，保证内存与文件一致失败时可回滚。
+   * 持久化到 config.yaml 由调用方（管理接口）负责，保证内存与文件一致失败时可回滚。
    */
   setDefaultAgentId(agentId: string): string {
     const id = agentId.trim().toLowerCase();

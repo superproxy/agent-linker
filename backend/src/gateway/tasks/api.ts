@@ -24,13 +24,13 @@ export type ChannelScopeResolver = (request: {
   headers: Record<string, string | string[] | undefined>;
 }) => { channel: string; userId: string } | null;
 
-/** 任务管理接口的可选外部依赖（默认 agent 的可用性校验与 gateway.yaml 持久化） */
+/** 任务管理接口的可选外部依赖（默认 agent 的可用性校验与 config.yaml 持久化） */
 export interface TaskApiDeps {
   /** 当前可用 agent id 列表（配置/已启用）；提供后设置默认 agent 时校验存在性 */
   listAvailableAgents?: () => string[];
   /** 校验 (节点, agent) 组合当前可路由（local 配置项或在线节点自报项）；提供后建/改任务时校验 */
   hasRoutingAgent?: (nodeId: string, agentId: string) => boolean;
-  /** 把默认 agent 持久化到 gateway.yaml；缺省仅内存生效（重启还原配置文件值） */
+  /** 把默认 agent 持久化到 config.yaml；缺省仅内存生效（重启还原配置文件值） */
   persistDefaultAgent?: (agentId: string) => void | Promise<void>;
 }
 
@@ -97,7 +97,7 @@ export function registerTaskApi(
     return { defaultAgentId: service.getDefaultAgentId() };
   });
 
-  // PUT /api/tasks/default-agent { agentId } —— 修改全局默认 agent，持久化到 gateway.yaml（重启保留）
+  // PUT /api/tasks/default-agent { agentId } —— 修改全局默认 agent，持久化到 config.yaml（重启保留）
   app.put('/api/tasks/default-agent', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const body = request.body as { agentId?: string } | null | undefined;
@@ -117,7 +117,7 @@ export function registerTaskApi(
       } catch (err) {
         // 持久化失败：回滚内存值，保证「返回成功即已落盘」的一致性
         service.setDefaultAgentId(previous);
-        return reply.code(500).send({ error: `持久化到 gateway.yaml 失败：${err instanceof Error ? err.message : String(err)}` });
+        return reply.code(500).send({ error: `持久化到 config.yaml 失败：${err instanceof Error ? err.message : String(err)}` });
       }
     }
     return { defaultAgentId: service.getDefaultAgentId() };

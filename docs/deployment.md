@@ -77,7 +77,7 @@ pnpm typecheck          # 可选：环境自检
 
 ### 4.1 配置
 
-编辑 `backend/config/gateway.yaml`（或用环境变量 `GATEWAY_CONFIG_PATH` 指向自定义配置）：
+编辑 `backend/config/config.yaml`（或用环境变量 `GATEWAY_CONFIG_PATH` 指向自定义配置）：
 
 ```yaml
 server:
@@ -90,16 +90,17 @@ auth:
 # tasks.defaultAgentId: pi
 ```
 
-> 配置优先级：`GATEWAY_CONFIG_PATH` → `backend/config/gateway.yaml` → 内置默认值。
+> 配置优先级：`GATEWAY_CONFIG_PATH` → `backend/config/config.yaml` → 内置默认值。
 
 #### 4.1.1 两套凭据与登录账号
 
-开启鉴权后存在两套并存的凭据：
+开启鉴权后存在多套并存的凭据：
 
 | 凭据 | 用途 | 来源 |
 |---|---|---|
-| 静态 token（`auth.token`） | Chatbox / Open WebUI 的 `Authorization: Bearer`、节点连接器 `LINKAGENT_GATEWAY_TOKEN` | gateway.yaml 配置，留空则不启用 |
+| 静态 token（`auth.token`） | Chatbox / Open WebUI 的 `Authorization: Bearer`、节点连接器 `LINKAGENT_GATEWAY_TOKEN` | config.yaml 配置，留空则不启用 |
 | 会话 token | Web 管理后台（浏览器）登录后自动携带 | 账号密码登录 `/api/auth/login` 签发 |
+| 个人 API token（`pat_` 前缀） | 登录账号本人用 OpenAI 兼容客户端（Chatbox 等）以 `Authorization: Bearer pat_…` 直连 `/v1`，权限等同该账号 | 后台「我的 Token」自助获取/轮换/吊销，落盘 `.runtime-state/users/personal-tokens/` |
 
 - 首次启动且账号库为空时，自动创建默认管理员 **admin / admin123**，**首次登录强制改密**；
 - 账号数据落盘 `.runtime-state/users/`（密码用 scrypt + 随机 salt 哈希，禁止明文）；
@@ -241,7 +242,7 @@ pnpm dev:all n1             # 网关 + 命名节点
 
 ```mermaid
 flowchart TD
-  A["1. 网关机安装 Node/pnpm，拉代码或解压发布包"] --> B["2. 配置 gateway.yaml<br/>host=0.0.0.0 · auth.enabled=true · 强 token"]
+  A["1. 网关机安装 Node/pnpm，拉代码或解压发布包"] --> B["2. 配置 config.yaml<br/>host=0.0.0.0 · auth.enabled=true · 强 token"]
   B --> C["3.（跨机）配置 Nginx TLS，放行 WS 升级"]
   C --> D["4. pnpm server:start<br/>curl /healthz 验证"]
   D --> E["5. 执行机安装 agent CLI + 部署代码/包"]

@@ -15,7 +15,7 @@ web 后台 (pnpm web) ──┘                           (opencode acp / pi-acp
 ```bash
 pnpm install
 
-# 启动网关（监听 backend/config/gateway.yaml 的 host:port，缺省 0.0.0.0:8787）
+# 启动网关（监听 backend/config/config.yaml 的 host:port，缺省 0.0.0.0:8787）
 pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，改代码自动重启）
 # 生产方式：pnpm start；后台启停：pnpm server:start / stop / status / log
 ```
@@ -42,10 +42,10 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 配置读取优先级：
 
 1. 环境变量 `GATEWAY_CONFIG_PATH` 指向的 yaml（缺失则启动报错）
-2. `backend/config/gateway.yaml`（缺省读取路径）
+2. `backend/config/config.yaml`（缺省读取路径）
 3. 内置默认值（127.0.0.1:8787，无鉴权，opencode / pi / workbuddy / trace-cli 四个 agent）
 
-`backend/config/gateway.yaml` 示例：
+`backend/config/config.yaml` 示例：
 
 ```yaml
 server:
@@ -157,7 +157,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 - **对话**：流式渲染正文与思考过程，按钮兼作「停止」
 - **鉴权**：网关开启 auth 时，右上角「API Key」填写 Bearer token（存 localStorage，key: `linkagent.gw.apikey`）
 
-> 切换模型 / 启停均为**运行时内存热更新**，重启 gateway 后还原为 `backend/config/gateway.yaml` 的值。
+> 切换模型 / 启停均为**运行时内存热更新**，重启 gateway 后还原为 `backend/config/config.yaml` 的值。
 
 ## 控制 API（网关自定义，非 OpenAI 标准）
 
@@ -193,7 +193,7 @@ curl -X PATCH http://127.0.0.1:8787/api/agents/opencode \
 |---|---|
 | API 提供方 | OpenAI API 兼容 / Custom Provider |
 | Base URL | `http://127.0.0.1:8787/v1` |
-| API Key | 网关未开鉴权填任意非空即可；开了则填 `auth.token` |
+| API Key | 网关未开鉴权填任意非空即可；开了可填 `auth.token`，或登录后台在「我的 Token」获取本人的个人 token（`pat_` 前缀） |
 | 模型 | `agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`（也可先调 `/v1/models` 让客户端自动拉取） |
 
 ## web 后台（可选）
@@ -220,7 +220,7 @@ pnpm web         # 开发用：vite build --watch，改代码自动重建，刷�
 
 ### 路线 A：openclaw 插件运行时
 
-在 `backend/config/gateway.yaml` 配置 `channels.<id>` 或 `plugins[]` 后，gateway 启动时由 `PluginManager` 动态加载插件包（默认 `@wecom/wecom-openclaw-plugin`），插件注册渠道 / HTTP 路由 / 工具，然后对每个账号调 `startAccount()`。插件缺失或加载失败**仅告警，不影响 /v1**。
+在 `backend/config/config.yaml` 配置 `channels.<id>` 或 `plugins[]` 后，gateway 启动时由 `PluginManager` 动态加载插件包（默认 `@wecom/wecom-openclaw-plugin`），插件注册渠道 / HTTP 路由 / 工具，然后对每个账号调 `startAccount()`。插件缺失或加载失败**仅告警，不影响 /v1**。
 
 ```yaml
 plugins:
@@ -360,7 +360,7 @@ pnpm bot:wecom
 
 #### 鉴权开关（系统设置）
 
-网关鉴权可在配置里整体启用/禁用（`backend/config/gateway.yaml`）：
+网关鉴权可在配置里整体启用/禁用（`backend/config/config.yaml`）：
 
 ```yaml
 auth:
@@ -370,7 +370,8 @@ auth:
 
 - 关闭时 `/v1` 与 `/api/*` 全部免鉴权直通（默认行为）；
 - 启用后所有请求要求 `Authorization: Bearer <token>`，无/错 token 返回 `401`；
-- 网页控制台右上角「API Key」可填写 Bearer token 继续使用。
+- 网页控制台右上角「API Key」可填写 Bearer token 继续使用；
+- 登录账号还可在后台「我的 Token」自助获取一枚长期个人 token（`pat_` 前缀），等同账号本人直连 `/v1`，支持幂等获取 / 轮换 / 吊销。
 
 #### 1. 任务 Key 直接访问 API（`taskKey` 单参数直连）
 
@@ -518,10 +519,10 @@ pnpm --filter @linkagent/backend weixin-login   # 微信扫码登录
 
 ```
 backend/                      # 网关包（@linkagent/backend）
-  config/gateway.yaml         # 网关配置（默认读取路径）
+  config/config.yaml         # 网关配置（默认读取路径）
   src/gateway/
     index.ts                  # HTTP 入口：/v1、/api/*、GET / 控制台、插件加载
-    config.ts                 # 配置加载（GATEWAY_CONFIG_PATH / backend/config/gateway.yaml）
+    config.ts                 # 配置加载（GATEWAY_CONFIG_PATH / backend/config/config.yaml）
     agents/                   # AgentManager + ACP(acpx) 适配器 + 远程节点适配器(remoteWrapper)
     nodes/                    # 远程节点：WS 接入/心跳/turn 多路复用(manager)、注册落盘(store)、REST(api)
     prefs/                    # 用户默认节点+agent 偏好（KV JSON 落盘，仅预填不鉴权）

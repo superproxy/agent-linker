@@ -189,6 +189,64 @@ test('登出后会话 token 立即失效', async () => {
   );
 });
 
+test('个人 API token：未登录 401；ensure 幂等；rotate 换发；DELETE 吊销；pat_ 可直连受保护接口', async () => {
+  // 未登录 → 401
+  assert.equal((await app.inject({ method: 'GET', url: '/api/personal-tokens' })).statusCode, 401);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/personal-tokens/ensure' })).statusCode, 401);
+
+  const token = ((await login('admin', 'new-pass-123')).json() as { token: string }).token;
+  const auth = { authorization: `Bearer ${token}` };
+
+  // 初始无 token
+  const empty = await app.inject({ method: 'GET', url: '/api/personal-tokens', headers: auth });
+  assert.equal(empty.statusCode, 200);
+  assert.equal((empty.json() as { token: null }).token, null);
+
+  // ensure 签发一枚并回显全文（pat_ 前缀）
+  const ensured = await app.inject({ method: 'POST', url: '/api/personal-tokens/ensure', headers: auth });
+  assert.equal(ensured.statusCode, 200, ensured.body);
+  const pat = (ensured.json() as { token: string }).token;
+  assert.ok(pat.startsWith('pat_'));
+
+  // ensure 幂等：同一枚
+  const again = await app.inject({ method: 'POST', url: '/api/personal-tokens/ensure', headers: auth });
+  assert.equal((again.json() as { token: string }).token, pat);
+
+  // 列表只回显预览，不回显全文
+  const listed = await app.inject({ method: 'GET', url: '/api/personal-tokens', headers: auth });
+  const view = (listed.json() as { token: { tokenPreview: string; createdAt: string } }).token;
+  assert.ok(view.tokenPreview.startsWith('pat_'));
+  assert.ok(!JSON.stringify(view).includes(pat));
+
+  // pat_ 可直接作为 Bearer 访问受保护接口（等同本人）
+  const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${pat}` } });
+  assert.equal(me.statusCode, 200);
+  assert.equal((me.json() as { user: { username: string } }).user.username, 'admin');
+
+  // rotate：旧 token 失效，新 token 生效
+  const rotated = await app.inject({ method: 'POST', url: '/api/personal-tokens/rotate', headers: auth });
+  const pat2 = (rotated.json() as { token: string }).token;
+  assert.notEqual(pat2, pat);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${pat}` } })).statusCode, 401);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${pat2}` } })).statusCode, 200);
+
+  // DELETE 吊销：pat2 立即失效，列表回到 null
+  const revoked = await app.inject({ method: 'DELETE', url: '/api/personal-tokens', headers: auth });
+  assert.equal(revoked.statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${pat2}` } })).statusCode, 401);
+  const after = await app.inject({ method: 'GET', url: '/api/personal-tokens', headers: auth });
+  assert.equal((after.json() as { token: null }).token, null);
+});
+
+test('个人 API token：静态 gateway token 无账号实体，不能管理个人 token', async () => {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/personal-tokens/ensure',
+    headers: { authorization: 'Bearer test-static-token' },
+  });
+  assert.equal(res.statusCode, 401);
+});
+
 test('未开启鉴权模式：登录接口返回 400 auth_disabled（登录无意义）', async () => {
   process.env.LINKAGENT_HOME = mkdtempSync(join(tmpdir(), 'linkagent-noauth-home-'));
   const b2 = await buildServer({

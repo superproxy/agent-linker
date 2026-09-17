@@ -75,10 +75,12 @@ export interface InstallLayout {
   readonly kind: InstallKind;
   /** 安装根（dist）或 monorepo 根（dev），绝对路径 */
   readonly root: string;
-  /** gateway.yaml 的有序候选路径（形态优先，均不存在时取首个作为报告路径） */
+  /** config.yaml 的有序候选路径（形态优先，均不存在时取首个作为报告路径） */
   readonly configCandidates: string[];
   /** 选中的配置文件路径（不存在时回退形态默认，由加载层决定是否用默认值） */
   readonly configFile: string;
+  /** 自动生成的永久 gateway token 落盘路径 <root>/.runtime-state/gateway-token（三进程共享，0600） */
+  readonly gatewayTokenFile: string;
   /** 运行态根目录 <root>/.runtime-state */
   readonly stateRoot: string;
   /** 拼接 <root>/.runtime-state/<...segments> */
@@ -120,8 +122,8 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
   // 配置候选：形态优先，另一形态作为兜底（两形态目录互不存在，结果与历史双候选一致）
   const configCandidates =
     kind === 'dist'
-      ? [join(root, 'server', 'config', 'gateway.yaml'), join(root, 'backend', 'config', 'gateway.yaml')]
-      : [join(root, 'backend', 'config', 'gateway.yaml'), join(root, 'server', 'config', 'gateway.yaml')];
+      ? [join(root, 'server', 'config', 'config.yaml'), join(root, 'backend', 'config', 'config.yaml')]
+      : [join(root, 'backend', 'config', 'config.yaml'), join(root, 'server', 'config', 'config.yaml')];
   const configFile = configCandidates.find((p) => existsSync(p)) ?? configCandidates[0]!;
 
   // web 管理端：dist 为 <root>/web；dev 为 vite 产物 <root>/web/dist（兜底 <root>/web）
@@ -148,6 +150,7 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
     root,
     configCandidates,
     configFile,
+    gatewayTokenFile: state('gateway-token'),
     stateRoot: state(),
     state,
     pluginsState: state('plugins'),

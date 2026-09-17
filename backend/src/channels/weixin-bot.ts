@@ -10,7 +10,7 @@
  *
  * 运行方式：
  *   1. 独立进程：pnpm --filter @linkagent/backend bot:weixin
- *   2. gateway 内嵌：gateway.yaml 里 weixin.mode=weixin-bot（默认），gateway 启动后自动拉起本模块，
+ *   2. gateway 内嵌：config.yaml 里 weixin.mode=weixin-bot（默认），gateway 启动后自动拉起本模块，
  *      与插件方式二选一，避免同时跑两套个人微信通道。
  *
  * 环境变量（独立进程模式）：
@@ -24,6 +24,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getLayout } from '../install/layout.js';
+import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { runChatSession, GatewayUnauthorizedError } from './gateway-chat.js';
 import { TaskRouter } from './task-router.js';
 import { HttpUserTokenProvider, type UserTokenProvider } from './user-token.js';
@@ -389,7 +390,25 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 if (process.argv[1] && /(^|[\\/])(weixin-bot|weixin)\.(ts|mjs|js|cjs)$/.test(process.argv[1])) {
   const consoleLog = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
   const consoleErr = (...args: unknown[]) => console.error(new Date().toISOString(), ...args);
-  startWeixinBot({ log: consoleLog, errLog: consoleErr })
+
+  // 独立进程：读三进程共享配置的 weixin 段（env 优先级最高，配置段其次，再由 gateway 段推导）
+  const { config } = loadSharedConfig();
+  const runtime = resolveChildRuntime(
+    config,
+    { gatewayUrl: config.weixin.gatewayUrl, gatewayToken: config.weixin.gatewayToken },
+    { url: process.env.LINKAGENT_GATEWAY_URL, token: process.env.LINKAGENT_GATEWAY_TOKEN },
+  );
+  const model = process.env.LINKAGENT_GATEWAY_MODEL ?? config.weixin.model ?? 'agent:pi';
+  const accountId = process.env.LINKAGENT_ACCOUNT_ID ?? config.weixin.accountId ?? undefined;
+
+  startWeixinBot({
+    gatewayUrl: runtime.gatewayUrl,
+    ...(runtime.gatewayToken ? { gatewayToken: runtime.gatewayToken } : {}),
+    model,
+    ...(accountId ? { accountId } : {}),
+    log: consoleLog,
+    errLog: consoleErr,
+  })
     .then(async (bot) => {
       const shutdown = (signal: string) => {
         consoleLog(`[bot] 收到 ${signal}，优雅退出…`);

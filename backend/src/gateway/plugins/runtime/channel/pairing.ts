@@ -3,7 +3,7 @@
  *
  * openclaw 把「已授权用户/群」列表存盘（dmPolicy=pairing / groupPolicy=pairing 时
  * 插件先查 allowFrom 再放行，未匹配则写入配对请求等待 host 审批）。
- * linkagent shim：允许列表以 JSON 文件持久化；host 可在 gateway.yaml 的
+ * linkagent shim：允许列表以 JSON 文件持久化；host 可在 config.yaml 的
  * channels.<id>.allowFrom 直接配置静态放行（更简单，无需配对流程）。
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
