@@ -5,9 +5,8 @@
   "type": "module",
   "description": "linkagent 后台管理（网关状态 / 模型 / 聊天测试台）",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite build --watch",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

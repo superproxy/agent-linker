@@ -80,6 +80,46 @@ test('active 无激活任务回落 default，不指定 agent（由网关权威�
   );
 });
 
+test('resolveToken：按用户携带用户级 token；401 时强制刷新后重试一次', async () => {
+  const seen: string[] = [];
+  let attempt = 0;
+  await withTaskApi(
+    (req, res) => {
+      // 记录每次请求的 Authorization
+      const auth = (req as unknown as { headers: Record<string, string | undefined> }).headers.authorization ?? '';
+      seen.push(auth.replace('Bearer ', ''));
+      attempt += 1;
+      if (attempt === 1) {
+        res.writeHead(401);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ activeTaskId: 't_9', tasks: [{ id: 't_9', agentId: 'pi' }] }));
+    },
+    async (base) => {
+      const calls: { userId: string; force: boolean }[] = [];
+      const router = new TaskRouter({
+        gatewayUrl: base,
+        channel: 'weixin',
+        resolveToken: async (userId, force = false) => {
+          calls.push({ userId, force });
+          return force ? 'ct_fresh' : 'ct_stale';
+        },
+      });
+      const r = await router.active('wx_user');
+      assert.equal(r.task, 't_9');
+      assert.equal(r.agent, 'pi');
+      // 第一次用旧 token，401 后强制刷新（force=true）再用新 token
+      assert.deepEqual(seen, ['ct_stale', 'ct_fresh']);
+      assert.deepEqual(calls, [
+        { userId: 'wx_user', force: false },
+        { userId: 'wx_user', force: true },
+      ]);
+    },
+  );
+});
+
 test('active 对 HTTP 500 回落 default，不指定 agent（由网关权威兜底）', async () => {
   await withTaskApi(
     (_req, res) => {

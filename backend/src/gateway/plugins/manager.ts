@@ -10,6 +10,7 @@
  * 5. agent 派发桥：core.channel.reply.dispatch → AgentManager → AcpWrapper（持久会话）
  */
 import type { FastifyInstance } from 'fastify';
+import { getLayout } from '../../install/layout.js';
 import type { AgentManager } from '../agents/manager.js';
 import { createPluginRuntime, type PluginRuntime, type RuntimeLogger } from './runtime/core.js';
 import { createPluginApi, type OpenClawPluginApi, type PluginApiCollector, type PluginChannelRegistration } from './runtime/api.js';
@@ -263,7 +264,7 @@ export class PluginManager {
       }
       if (!configApi?.isConfigured?.(account)) {
         this.logger.warn(
-          `[plugins] ${channelId}[${accountId}] 未配置或未登录，跳过（企业微信需 channels.<id>.botId+secret；个人微信需先扫码登录：pnpm --filter @linkagent/backend weixin-login）`,
+          `[plugins] ${channelId}[${accountId}] 未配置或未登录，跳过（企业微信需 channels.<id>.botId+secret；个人微信需先扫码登录：${getLayout().loginHint}）`,
         );
         continue;
       }

@@ -14,17 +14,19 @@
  *      与插件方式二选一，避免同时跑两套个人微信通道。
  *
  * 环境变量（独立进程模式）：
- *   LINKAGENT_GATEWAY_URL   网关 base（默认 http://127.0.0.1:8787）
- *   LINKAGENT_GATEWAY_MODEL 模型（默认 agent:pi）
- *   LINKAGENT_ACCOUNT_ID    微信登录态账号 id（缺省取 accounts/ 下第一个）
- *   LINKAGENT_STATE_DIR     登录态目录（默认 <repo>/.runtime-state/plugins）
+ *   LINKAGENT_GATEWAY_URL    网关 base（默认 http://127.0.0.1:8787）
+ *   LINKAGENT_GATEWAY_MODEL  模型（默认 agent:pi）
+ *   LINKAGENT_GATEWAY_TOKEN  网关静态 token（网关开启 auth 时必填，进程管理器会自动注入）
+ *   LINKAGENT_ACCOUNT_ID     微信登录态账号 id（缺省取 accounts/ 下第一个）
+ *   LINKAGENT_STATE_DIR      登录态目录（默认 <repo>/.runtime-state/plugins）
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { findInstallRoot } from '../gateway/config.js';
-import { runChatSession } from './gateway-chat.js';
+import { getLayout } from '../install/layout.js';
+import { runChatSession, GatewayUnauthorizedError } from './gateway-chat.js';
 import { TaskRouter } from './task-router.js';
+import { HttpUserTokenProvider, type UserTokenProvider } from './user-token.js';
 import {
   extractText,
   getUpdates,
@@ -35,10 +37,10 @@ import {
 } from './ilink-client.js';
 
 // ── 配置默认值 ────────────────────────────────────────────────────────
-const REPO_ROOT = findInstallRoot();
 const DEFAULT_GATEWAY_URL = process.env.LINKAGENT_GATEWAY_URL ?? 'http://127.0.0.1:8787';
 const DEFAULT_GATEWAY_MODEL = process.env.LINKAGENT_GATEWAY_MODEL ?? 'agent:pi';
-const DEFAULT_STATE_DIR = process.env.LINKAGENT_STATE_DIR ?? join(REPO_ROOT, '.runtime-state', 'plugins');
+const DEFAULT_GATEWAY_TOKEN = process.env.LINKAGENT_GATEWAY_TOKEN ?? '';
+const DEFAULT_STATE_DIR = process.env.LINKAGENT_STATE_DIR ?? getLayout().pluginsState;
 const DEFAULT_ACCOUNT_ID = process.env.LINKAGENT_ACCOUNT_ID;
 
 /** 单条微信消息体长度上限（ilink 文本消息建议 <=2000 字符，超出分段发送） */
@@ -106,12 +108,20 @@ function getContextToken(accountId: string, userId: string): string | undefined 
 export interface WeixinBotOptions {
   /** 网关 base（默认 http://127.0.0.1:8787） */
   gatewayUrl?: string;
+  /** 网关静态 token（开启 auth 时必填） */
+  gatewayToken?: string;
   /** 对话模型（默认 agent:pi） */
   model?: string;
   /** 登录态账号 id（缺省取 accounts/ 下第一个） */
   accountId?: string;
   /** 登录态目录（默认 <repo>/.runtime-state/plugins） */
   stateDir?: string;
+  /**
+   * 用户级 token 解析器（内嵌模式由网关注入，按微信用户签发 ct_ token）。
+   * 提供后 bot 按每个用户携带其专属 token；不提供则 external 模式自建 HTTP 引导解析器
+   * （用 gatewayToken 调 /api/bot/channel-token 换取），再退化为全局静态 token。
+   */
+  userTokenProvider?: UserTokenProvider;
   /** 日志回调（缺省 console.log） */
   log?: (...args: unknown[]) => void;
   /** 错误日志回调（缺省 console.error） */
@@ -153,13 +163,29 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  */
 export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<WeixinBotHandle> {
   const gatewayUrl = options.gatewayUrl ?? DEFAULT_GATEWAY_URL;
+  const gatewayToken = options.gatewayToken ?? DEFAULT_GATEWAY_TOKEN;
   const model = options.model ?? DEFAULT_GATEWAY_MODEL;
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
   const account = loadWeixinAccount(stateDir, options.accountId ?? DEFAULT_ACCOUNT_ID);
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
-  // bot 路由层：选中任务缓存（网关 /api/tasks 为单一事实源）
-  const router = new TaskRouter({ gatewayUrl, channel: 'weixin' });
+
+  // 用户级 token：内嵌模式用网关注入的签发器；external 独立进程用静态 token 经引导接口换取（落盘缓存）
+  const tokenProvider: UserTokenProvider | undefined =
+    options.userTokenProvider ??
+    (gatewayToken
+      ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: account.id, log })
+      : undefined);
+
+  // bot 路由层：选中任务缓存（网关 /api/tasks 为单一事实源），按用户携带用户级 token
+  const router = new TaskRouter({
+    gatewayUrl,
+    channel: 'weixin',
+    ...(gatewayToken ? { gatewayToken } : {}),
+    ...(tokenProvider
+      ? { resolveToken: (userId: string, force?: boolean) => tokenProvider.resolve('weixin', userId, force) }
+      : {}),
+  });
 
   const syncBufPath = join(stateDir, 'openclaw-weixin', 'accounts', `${account.id}.sync.json`);
 
@@ -210,31 +236,63 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 
     const isCmd = TaskRouter.isCommand(text);
     const route = isCmd ? null : await router.active(from);
-    const out = await runChatSession({
-      gatewayUrl,
-      model,
-      channel: 'weixin',
-      userId: from,
-      message: text,
-      // 命令：网关本地解析回文本；普通消息：按激活任务路由（agent/task 透传）
-      ...(!isCmd && route ? { agent: route.agent, task: route.task } : {}),
-      send: async (chunk) => {
-        await sendText({
-          baseUrl: account.baseUrl,
-          token: account.token,
-          to: from,
-          text: chunk,
-          // 回推 token 取该用户最新已存值（收消息时已刷新），兜底用当前消息自带的
-          contextToken: getContextToken(account.id, from) ?? msg.context_token,
-          // 对齐旧 openclaw 插件：每次回推携带随机 run_id
-          runId: randomUUID(),
+
+    // 该用户的网关凭据：优先用户级 token（ct_），无 provider 时回退全局静态 token
+    const resolveBearer = async (force: boolean): Promise<string> => {
+      if (tokenProvider) {
+        const t = await tokenProvider.resolve('weixin', from, force).catch((err) => {
+          errLog('[bot] 解析用户 token 失败，回退静态 token:', err instanceof Error ? err.message : err);
+          return '';
         });
-      },
-      split: (t) => splitChunks(t, MAX_MSG_LEN),
-      // 快速返回：正文累计达到 512 字符即中断请求，用户只收到前 512 字符
-      maxTextChars: 512,
-      log,
-    });
+        if (t) return t;
+      }
+      return gatewayToken;
+    };
+
+    const send = async (chunk: string) => {
+      await sendText({
+        baseUrl: account.baseUrl,
+        token: account.token,
+        to: from,
+        text: chunk,
+        // 回推 token 取该用户最新已存值（收消息时已刷新），兜底用当前消息自带的
+        contextToken: getContextToken(account.id, from) ?? msg.context_token,
+        // 对齐旧 openclaw 插件：每次回推携带随机 run_id
+        runId: randomUUID(),
+      });
+    };
+
+    const runOnce = async (forceToken: boolean) => {
+      const bearer = await resolveBearer(forceToken);
+      return runChatSession({
+        gatewayUrl,
+        model,
+        channel: 'weixin',
+        userId: from,
+        message: text,
+        ...(bearer ? { gatewayToken: bearer } : {}),
+        // 命令：网关本地解析回文本；普通消息：按激活任务路由（agent/task 透传）
+        ...(!isCmd && route ? { agent: route.agent, task: route.task } : {}),
+        send,
+        split: (t) => splitChunks(t, MAX_MSG_LEN),
+        // 快速返回：正文累计达到 512 字符即中断请求，用户只收到前 512 字符
+        maxTextChars: 512,
+        log,
+      });
+    };
+
+    let out;
+    try {
+      out = await runOnce(false);
+    } catch (err) {
+      // 用户级 token 被吊销/轮换（401）：强制刷新一次后重试；仍失败则由 runChatSession 推 ⚠️
+      if (err instanceof GatewayUnauthorizedError && tokenProvider) {
+        log(`[bot] 用户 token 401，刷新后重试 from=${from}`);
+        out = await runOnce(true);
+      } else {
+        throw err;
+      }
+    }
     if (isCmd) router.invalidate(from); // 命令改过任务状态，失效缓存
     if (out.text.trim()) {
       log(`[bot] outbound to=${from} len=${out.text.length}`);
@@ -324,10 +382,11 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 }
 
 // ── 独立进程入口（pnpm --filter @linkagent/backend bot:weixin）──
-// 独立运行入口：tsx src/channels/weixin-bot.ts。
+// 独立运行入口：tsx src/channels/weixin-bot.ts；dist 打包为 server/weixin.mjs。
 // 注意：esbuild 打包后所有模块共享同一 import.meta.url，不能用 URL 比较；
-// 网关内由 gateway/index.ts 以库方式调用 startWeixinBot，bundle 中 argv[1]=index.mjs 不匹配此守卫。
-if (process.argv[1] && /(^|[\\/])weixin-bot\.(ts|mjs|js)$/.test(process.argv[1])) {
+// 网关内由 gateway/index.ts 以库方式调用 startWeixinBot，bundle 中 argv[1]=gateway.mjs 不匹配此守卫。
+// 文件名同时兼容源码 weixin-bot.ts 与 dist 产物 weixin.mjs。
+if (process.argv[1] && /(^|[\\/])(weixin-bot|weixin)\.(ts|mjs|js|cjs)$/.test(process.argv[1])) {
   const consoleLog = (...args: unknown[]) => console.log(new Date().toISOString(), ...args);
   const consoleErr = (...args: unknown[]) => console.error(new Date().toISOString(), ...args);
   startWeixinBot({ log: consoleLog, errLog: consoleErr })

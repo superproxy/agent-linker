@@ -1,6 +1,6 @@
-import { ACP_AGENT_KINDS } from '@linkagent/shared';
+import { ACP_AGENT_KINDS, LOCAL_NODE_ID } from '@linkagent/shared';
 
-/** 任务（一个任务 = 一个绑定特定 agent 的持久会话） */
+/** 任务（一个任务 = 一个绑定「节点 + agent」的持久会话） */
 export interface TaskItem {
   id: string;
   /** 全局唯一任务 key（跨用户反查/直连路由用，k_ 前缀）；旧数据读取时惰性补齐 */
@@ -9,9 +9,20 @@ export interface TaskItem {
   keyEnabled?: boolean;
   name: string;
   agentId: string;
+  /**
+   * 执行节点：任务始终在该节点机上拉起 agent，持久会话与 cwd 都落在该节点。
+   * 缺省（旧数据）归一化为内建本机节点 'local'（见 normalizeNodeId）。
+   */
+  nodeId?: string;
   /** 任务工作目录：agent 会话在此目录下启动；缺省用 agent 默认 cwd */
   cwd?: string;
   createdAt: number;
+}
+
+/** 节点 id 归一化：空值/旧数据 → 内建本机节点 local */
+export function normalizeNodeId(nodeId?: string): string {
+  const id = nodeId?.trim();
+  return id || LOCAL_NODE_ID;
 }
 
 /** 单个渠道用户的全部任务状态（网关为单一事实源，落盘） */
@@ -23,13 +34,23 @@ export interface UserTasks {
   tasks: TaskItem[];
 }
 
-/** 路由解析结果：普通消息发往的 agent + 会话任务 */
+/** 路由解析结果：普通消息发往的节点 + agent + 会话任务 */
 export interface TaskRoute {
+  nodeId: string;
   agentId: string;
   taskId: string;
   taskName: string;
   /** 任务配置的工作目录（agent 会话启动目录） */
   cwd?: string;
+}
+
+/** 用户默认偏好（仅用于新建任务预填节点+agent，不做鉴权） */
+export interface UserPreference {
+  channel: string;
+  userId: string;
+  defaultNodeId?: string;
+  defaultAgentId?: string;
+  updatedAt: number;
 }
 
 /** /task 命令处理结果 */

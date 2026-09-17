@@ -11,7 +11,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { findInstallRoot } from './config.js';
+import { getLayout } from '../install/layout.js';
 import { loadWeixinAccount } from '../channels/ilink-client.js';
 
 interface LoginGatewayHandle {
@@ -54,6 +54,8 @@ export interface QrWaitResult {
 export interface WeixinLoginDeps {
   /** weixin-bot adapter 热重启句柄（weixin.mode=weixin-bot 时可用） */
   reloadBot?: () => Promise<void>;
+  /** 无内嵌 adapter（external/插件模式）时 reload 接口返回的提示文案 */
+  reloadUnavailableMessage?: string;
   log?: (...args: unknown[]) => void;
 }
 
@@ -63,7 +65,7 @@ export class WeixinLoginService {
   private channelHandle: WeixinChannelPlugin | null = null;
 
   constructor(deps: { stateDir?: string; log?: (...args: unknown[]) => void } = {}) {
-    this.stateDir = deps.stateDir ?? join(findInstallRoot(), '.runtime-state', 'plugins');
+    this.stateDir = deps.stateDir ?? getLayout().pluginsState;
     this.log = deps.log ?? (() => {});
   }
 
@@ -201,7 +203,11 @@ export function registerWeixinApi(
 
   app.post('/api/weixin/reload', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    if (!deps.reloadBot) return reply.code(400).send({ error: '当前模式无 weixin-bot adapter，不支持热重启' });
+    if (!deps.reloadBot) {
+      return reply
+        .code(400)
+        .send({ error: deps.reloadUnavailableMessage ?? '当前模式无 weixin-bot adapter，不支持热重启' });
+    }
     try {
       await deps.reloadBot();
       return { ok: true };

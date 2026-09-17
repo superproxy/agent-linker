@@ -21,6 +21,14 @@ export interface StreamOutput {
   reasoning: string;
 }
 
+/** 网关返回 401（用户级 token 被吊销/轮换）：bot 据此强制刷新 token 后重试一次 */
+export class GatewayUnauthorizedError extends Error {
+  constructor(message = '网关鉴权失败（401）') {
+    super(message);
+    this.name = 'GatewayUnauthorizedError';
+  }
+}
+
 export interface StreamChatParams {
   gatewayUrl: string;
   model: string;
@@ -32,6 +40,8 @@ export interface StreamChatParams {
   agent?: string;
   task?: string;
   message: string;
+  /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
+  gatewayToken?: string;
   signal?: AbortSignal;
   onReasoning?: (delta: string) => void;
   onText?: (delta: string) => void;
@@ -41,7 +51,10 @@ export interface StreamChatParams {
 export async function streamChat(params: StreamChatParams): Promise<StreamOutput> {
   const res = await fetch(`${params.gatewayUrl}/v1/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(params.gatewayToken ? { Authorization: `Bearer ${params.gatewayToken}` } : {}),
+    },
     body: JSON.stringify({
       model: params.model,
       messages: [{ role: 'user', content: params.message }],
@@ -56,6 +69,7 @@ export async function streamChat(params: StreamChatParams): Promise<StreamOutput
   });
   if (!res.ok || !res.body) {
     const bodyText = await res.text().catch(() => '');
+    if (res.status === 401) throw new GatewayUnauthorizedError(bodyText.slice(0, 300) || '网关鉴权失败（401）');
     throw new Error(`网关 HTTP ${res.status}: ${bodyText.slice(0, 300) || res.statusText}`);
   }
 
@@ -132,6 +146,8 @@ export interface RunChatSessionOptions {
   agent?: string;
   task?: string;
   message: string;
+  /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
+  gatewayToken?: string;
   /** 底层发送一条消息（已切块）。重试由本模块处理 */
   send: (chunk: string) => Promise<void>;
   /** 切块策略：返回分段（微信按字符，企微按字节） */
@@ -154,7 +170,8 @@ export interface RunChatSessionResult {
  * 返回累积文本供调用方记日志。任何阶段失败 → 推送 ⚠️ 摘要（send 失败除外，尽力而为）。
  */
 export async function runChatSession(opts: RunChatSessionOptions): Promise<RunChatSessionResult> {
-  const { gatewayUrl, model, sessionKey, message, send, split } = opts;  const log = opts.log ?? (() => {});
+  const { gatewayUrl, model, sessionKey, message, send, split } = opts;
+  const log = opts.log ?? (() => {});
 
   let reasoning = '';
   let reasoningFlushed = false;
@@ -200,6 +217,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       gatewayUrl,
       model,
       message,
+      ...(opts.gatewayToken ? { gatewayToken: opts.gatewayToken } : {}),
       ...(opts.sessionKey ? { sessionKey: opts.sessionKey } : {}),
       ...(opts.channel ? { channel: opts.channel } : {}),
       ...(opts.userId ? { userId: opts.userId } : {}),
@@ -230,6 +248,8 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
     }
     return { text: opts.maxTextChars ? out.text.trim().slice(0, opts.maxTextChars) : out.text, reasoning: out.reasoning };
   } catch (err) {
+    // 401（用户级 token 失效）直接上抛：由 bot 强制刷新 token 后重试一次，不向用户推 ⚠️
+    if (err instanceof GatewayUnauthorizedError) throw err;
     // 主动截断（abort）不算失败：把已收到的前 N 字符发给用户即可
     if (truncated) {
       if (reasoning && !reasoningFlushed) await flushReasoningNow().catch(() => {});

@@ -7,11 +7,18 @@
  * 回到默认智能体"）。因此缓存带 TTL：外部切换后最迟 CACHE_TTL_MS 内生效；
  * 查询失败时不写缓存（下次消息重试），避免网关抖动把 fallback 路由钉死。
  */
+/** 按渠道用户解析网关凭据：返回该用户的用户级 token（force=刷新）；无用户级凭据时可回退空串 */
+export type TokenResolver = (userId: string, force?: boolean) => Promise<string>;
+
 export interface TaskRouterOptions {
   /** 网关 base（http://127.0.0.1:8787） */
   gatewayUrl: string;
   /** 渠道标识（目前仅 weixin 使用任务路由；wecom 等渠道无任务机制） */
   channel: string;
+  /** 网关静态 token（未提供用户级 token 解析器时的回退，开启 auth 时透传 Authorization） */
+  gatewayToken?: string;
+  /** 用户级 token 解析器（提供后按每个渠道用户携带其专属 token，而非全局静态 token） */
+  resolveToken?: TokenResolver;
 }
 
 export interface ActiveRoute {
@@ -26,17 +33,47 @@ const CACHE_TTL_MS = 2_000;
 export class TaskRouter {
   private readonly gatewayUrl: string;
   private readonly channel: string;
+  private readonly gatewayToken?: string;
+  private readonly resolveToken?: TokenResolver;
   private readonly cache = new Map<string, { route: ActiveRoute; at: number }>();
 
   constructor(options: TaskRouterOptions) {
     this.gatewayUrl = options.gatewayUrl.replace(/\/$/, '');
     this.channel = options.channel;
+    this.gatewayToken = options.gatewayToken;
+    this.resolveToken = options.resolveToken;
+  }
+
+  /** 取该用户的鉴权 token：优先用户级 token，回退全局静态 token */
+  private async tokenFor(userId: string, force = false): Promise<string> {
+    if (this.resolveToken) {
+      const t = await this.resolveToken(userId, force);
+      if (t) return t;
+    }
+    return this.gatewayToken ?? '';
   }
 
   /** 是否任务命令（/task 前缀；与网关 isTaskCommand 对齐） */
   static isCommand(text: string): boolean {
     const t = text.trim().toLowerCase();
     return t === '/task' || t.startsWith('/task ');
+  }
+
+  /** 单次查询 /api/tasks；401 抛错交由调用方刷新 token 后重试 */
+  private async fetchActive(userId: string, forceToken: boolean): Promise<ActiveRoute | null> {
+    const url = `${this.gatewayUrl}/api/tasks?channel=${encodeURIComponent(this.channel)}&userId=${encodeURIComponent(userId)}`;
+    const token = await this.tokenFor(userId, forceToken);
+    const res = await fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+    if (res.status === 401) throw new Error('TASK_ROUTER_UNAUTHORIZED');
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      activeTaskId?: string;
+      tasks?: Array<{ id: string; agentId: string }>;
+    };
+    const activeId = data.activeTaskId || data.tasks?.[0]?.id || 'default';
+    const active = data.tasks?.find((t) => t.id === activeId);
+    // agent 取任务真实绑定；tasks 为空/activeId 不在列表时为 undefined（网关权威兜底 defaultAgentId）
+    return { agent: active?.agentId, task: activeId };
   }
 
   /** 当前选中任务（缓存未过期直接返回；过期/未命中查 /api/tasks，取激活任务及其绑定的 agent） */
@@ -46,17 +83,19 @@ export class TaskRouter {
     // 查询失败/无任务：只回落默认任务 id，不指定 agent（网关按 defaultAgentId 权威兜底）
     let route: ActiveRoute = { task: 'default' };
     try {
-      const url = `${this.gatewayUrl}/api/tasks?channel=${encodeURIComponent(this.channel)}&userId=${encodeURIComponent(userId)}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = (await res.json()) as {
-          activeTaskId?: string;
-          tasks?: Array<{ id: string; agentId: string }>;
-        };
-        const activeId = data.activeTaskId || data.tasks?.[0]?.id || 'default';
-        const active = data.tasks?.find((t) => t.id === activeId);
-        // agent 取任务真实绑定；tasks 为空/activeId 不在列表时为 undefined（网关权威兜底 defaultAgentId）
-        route = { agent: active?.agentId, task: activeId };
+      let fetched: ActiveRoute | null = null;
+      try {
+        fetched = await this.fetchActive(userId, false);
+      } catch (err) {
+        // 用户级 token 失效：强制刷新后重试一次
+        if (err instanceof Error && err.message === 'TASK_ROUTER_UNAUTHORIZED' && this.resolveToken) {
+          fetched = await this.fetchActive(userId, true);
+        } else {
+          throw err;
+        }
+      }
+      if (fetched) {
+        route = fetched;
         // 仅成功结果入缓存；失败回落默认路由但不缓存，下次消息重试
         this.cache.set(userId, { route, at: Date.now() });
       }

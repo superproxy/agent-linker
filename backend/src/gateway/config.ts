@@ -1,51 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { parse, parseDocument } from 'yaml';
 import { gatewayConfigSchema, defaultConfig, type GatewayConfig } from '@linkagent/shared';
+import { findInstallRoot, findRepoRoot, getLayout } from '../install/layout.js';
 
-/** 从任一子目录向上定位 monorepo 根（含 pnpm-workspace.yaml） */
-export function findRepoRoot(start: string = process.cwd()): string {
-  let dir = resolve(start);
-  for (;;) {
-    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return dir;
-    dir = parent;
-  }
-}
+// 根目录定位统一收敛到 install/layout；此处 re-export 以兼容既有 import 路径。
+export { findInstallRoot, findRepoRoot };
 
-/**
- * 定位「安装根」：独立部署产物（dist/linkagent）或仓库根（开发模式）。
- * 优先级：
- * 1. 环境变量 LINKAGENT_HOME（显式指定安装目录）
- * 2. 从本模块文件位置向上找部署 marker `.linkagent-root`（产物布局：<root>/server/index.mjs）
- * 3. 回退 monorepo 根（开发模式，含 pnpm-workspace.yaml）
- *
- * 产物内所有运行态目录（.runtime-state/、web/、config/）都相对此根解析，
- * 因此 dist 目录可整体拷贝到任意机器运行。
- */
-export function findInstallRoot(): string {
-  const env = process.env.LINKAGENT_HOME;
-  if (env) return resolve(env);
-  let dir = dirname(fileURLToPath(import.meta.url));
-  for (;;) {
-    if (existsSync(join(dir, '.linkagent-root'))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return findRepoRoot();
-}
-
-/** 配置路径：独立部署（<root>/server/config/gateway.yaml）与开发模式（<root>/backend/config/gateway.yaml）兼容 */
-const defaultConfigPath = () => {
-  const root = findInstallRoot();
-  for (const p of [join(root, 'server', 'config', 'gateway.yaml'), join(root, 'backend', 'config', 'gateway.yaml')]) {
-    if (existsSync(p)) return p;
-  }
-  return join(root, 'server', 'config', 'gateway.yaml');
-};
+/** 配置路径：形态优先（dist→server/config，dev→backend/config），由 layout 统一解析 */
+const defaultConfigPath = () => getLayout().configFile;
 
 export interface LoadedConfig {
   config: GatewayConfig;

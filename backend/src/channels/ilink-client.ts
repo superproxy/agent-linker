@@ -11,6 +11,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { getLayout } from '../install/layout.js';
 
 export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
 
@@ -45,7 +46,7 @@ export interface WeixinAccount {
 export function loadWeixinAccount(accountsRootDir: string, accountId?: string): WeixinAccount {
   const dir = join(accountsRootDir, 'openclaw-weixin', 'accounts');
   if (!existsSync(dir)) {
-    throw new Error(`未找到微信登录态目录 ${dir}；请先运行 pnpm --filter @linkagent/backend weixin-login 扫码登录`);
+    throw new Error(`未找到微信登录态目录 ${dir}；${getLayout().loginHint}`);
   }
   const files = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'accounts.json');
   const candidates = accountId ? files.filter((f) => f === `${accountId}.json`) : files;
@@ -70,7 +71,7 @@ export function loadWeixinAccount(accountsRootDir: string, accountId?: string): 
     }
   }
   throw new Error(
-    `登录态目录 ${dir} 中没有可用账号${accountId ? `（找不到 ${accountId}.json）` : ''}；请先运行 pnpm --filter @linkagent/backend weixin-login 扫码登录`,
+    `登录态目录 ${dir} 中没有可用账号${accountId ? `（找不到 ${accountId}.json）` : ''}；${getLayout().loginHint}`,
   );
 }
 

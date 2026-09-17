@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadGatewayConfig, findInstallRoot, persistDefaultTaskAgentId } from './config.js';
+import { loadGatewayConfig, persistDefaultTaskAgentId } from './config.js';
+import { getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
 import { collectModelCandidates } from './modelcandidates.js';
@@ -13,7 +13,19 @@ import { PluginManager } from './plugins/manager.js';
 import { createJsonStore } from './tasks/store.js';
 import { TaskService } from './tasks/service.js';
 import { decideTaskRouting, registerTaskApi } from './tasks/api.js';
+import { NodeManager } from './nodes/manager.js';
+import { createNodeRegistry } from './nodes/store.js';
+import { createPreferenceStore } from './prefs/store.js';
+import { registerNodeApi } from './nodes/api.js';
+import { ProcessManager } from '../supervisor/manager.js';
+import { registerPmApi } from './pm/api.js';
+import { UserStore } from './users/store.js';
+import { AuthGuard } from './users/auth.js';
+import { ChannelTokenStore } from './users/channel-token-store.js';
+import { registerAuthApi, registerUserApi } from './users/api.js';
+import { registerChannelTokenApi } from './users/channel-token-api.js';
 import { startWeixinBot, type WeixinBotHandle } from '../channels/weixin-bot.js';
+import { InProcessUserTokenProvider } from '../channels/user-token.js';
 import { registerWeixinApi, WeixinLoginService } from './weixin-login.js';
 import {
   formatSseData,
@@ -28,11 +40,7 @@ import {
   type ChatCompletionRequest,
 } from '@linkagent/shared';
 
-/** 内置聊天页（默认，GET / 打开即可切换 agent/模型并对话测试） */
-const CHAT_PAGE = readFileSync(new URL('../dev/chat.html', import.meta.url), 'utf8');
 
-/** 内置管理后台页（GET /admin 打开，用户/任务/Agent 管理） */
-const ADMIN_PAGE = readFileSync(new URL('../dev/admin.html', import.meta.url), 'utf8');
 
 /** 请求体扩展：linkagent 任务路由字段（OpenAI 兼容字段保持原样，多出的字段透明透传） */
 type TaskAwareChatBody = ChatCompletionRequest & {
@@ -91,6 +99,8 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   pluginManager: PluginManager | null;
   /** 任务公共能力（多渠道共享，/v1 命令/路由 + /api/tasks 管理） */
   taskService: TaskService;
+  /** 远程节点管理（WebSocket 连接、心跳、turn 多路复用） */
+  nodeManager: NodeManager;
   /** 个人微信渠道实现句柄（weixin.mode=weixin-bot 时非空，server listen 后由 main 调 start） */
   weixinBot: { start(): Promise<void>; stop(): Promise<void>; reload(): Promise<void> } | null;
   host: string;
@@ -98,37 +108,88 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   authEnabled: boolean;
 }> {
   const { config, path: configPath } = loadGatewayConfig(options?.configPath);
+  // 进程管理器托管微信时注入 LINKAGENT_WEIXIN_MODE=external：gateway 不内嵌 bot，改由独立进程运行
+  // 进程管理器托管微信时注入 LINKAGENT_WEIXIN_MODE=external：gateway 不内嵌 bot，改由独立进程运行。
+  // 注意：zod default() 产出的对象嵌套属性是只读代理，直接赋 config.weixin.mode 会被静默忽略，必须整体替换。
+  const envWeixinMode = process.env.LINKAGENT_WEIXIN_MODE;
+  if (envWeixinMode === 'external' || envWeixinMode === 'weixin-bot' || envWeixinMode === 'openclaw-weixin-plugin') {
+    config.weixin = { ...config.weixin, mode: envWeixinMode };
+  }
   const definitions = options?.definitions ?? (config.agents.length > 0 ? config.agents : defaultAgentDefinitions());
-  const manager = new AgentManager({ definitions, defaultCwd: config.defaultCwd });
+
+  // 安装布局：形态判定（dev/dist）与所有运行态路径的唯一来源
+  const layout = getLayout();
+
+  // ── 远程节点：注册表落 .runtime-state/nodes，WebSocket 服务在 app.listen 后挂到同一 http server ──
+  const nodeRegistry = createNodeRegistry(layout.nodesState);
+  const nodeManager = new NodeManager({
+    registry: nodeRegistry,
+    expectedToken: config.auth.enabled ? config.auth.token : '',
+    logger: {
+      info: (m) => console.log(`[nodes] ${m}`),
+      warn: (m) => console.warn(`[nodes] ${m}`),
+      error: (m) => console.error(`[nodes] ${m}`),
+    },
+  });
+
+  const manager = new AgentManager({ definitions, defaultCwd: config.defaultCwd, nodeManager });
   await manager.start();
 
   const app = Fastify({ logger: { level: 'info' } });
   await app.register(cors, { origin: true });
 
-  // ── web 管理端静态资源（独立部署：<installRoot>/web 的 vite 构建产物；未构建时跳过）──
-  const webRoot = join(findInstallRoot(), 'web');
-  if (existsSync(webRoot)) {
-    await app.register(fastifyStatic, { root: webRoot, prefix: '/ui/' });
-    app.log.info({ webRoot }, 'web 管理端已挂载到 /ui');
+  // ── web 管理端静态资源（只在网关 8787 单端口提供，不再有独立 vite dev server）──
+  // 布局层按形态探测：dist→<root>/web，dev→web/dist（index.html + assets 同时存在才算产物）。
+  const webRoot = layout.webRoot;
+  if (webRoot) {
+    // 管理后台（TS/React 构建产物）统一挂到 /admin/。vite base='./'，资源为相对路径，可直接挂子前缀。
+    // /admin 无尾斜杠时 302 到 /admin/，避免 fastify-static 前缀匹配导致 404。
+    app.get('/admin', async (_req, reply) => reply.redirect('/admin/'));
+    // 兼容旧入口 /ui：整体 302 到 /admin（含子路径）。
+    app.get('/ui', async (_req, reply) => reply.redirect('/admin/'));
+    app.get('/ui/*', async (request, reply) => {
+      const wildcard = (request.params as { '*'?: string })['*'] ?? '';
+      return reply.redirect(`/admin/${wildcard}`);
+    });
+    await app.register(fastifyStatic, { root: webRoot, prefix: '/admin/' });
+    app.log.info({ webRoot }, 'web 管理端已挂载到 /admin');
   } else {
-    app.log.info('未找到 web 构建产物，跳过 /ui 挂载');
+    app.log.info('未找到 web 构建产物（web/dist），跳过 /admin 挂载；可执行 pnpm build:web 生成');
   }
 
-  const checkAuth = (request: FastifyRequest): boolean => {
-    if (!config.auth.enabled) return true;
-    const h = request.headers.authorization ?? '';
-    const token = h.startsWith('Bearer ') ? h.slice('Bearer '.length) : '';
-    return config.auth.token !== '' && token === config.auth.token;
-  };
+  // ── 用户登录体系：账号密码 + 会话 token（与静态 token 并存，静态 token 供机器/节点调用）──
+  const userStore = new UserStore(layout.usersState);
+  userStore.ensureDefaultAdmin();
+  // 渠道终端用户级凭据（微信 bot 代用户直连网关）：.runtime-state/users/channel-tokens/
+  const channelTokenStore = new ChannelTokenStore(layout.usersState);
 
-  // ── 任务公共能力（多渠道共享；state 落在 <installRoot>/.runtime-state/tasks/）──
-  const taskStateDir = join(findInstallRoot(), '.runtime-state', 'tasks');
+  // ── 任务公共能力（多渠道共享；state 落在 .runtime-state/tasks/）──
+  // 先于 AuthGuard 创建：任务 key 直连鉴权需用 taskService 反查 key → 任务
+  const taskStateDir = layout.tasksState;
   const taskService = new TaskService({
     store: createJsonStore(taskStateDir),
     defaultAgentId: config.tasks?.defaultAgentId,
     // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 tasks.workspaceDir 配置
-    workspaceRoot: config.tasks?.workspaceDir ?? join(findInstallRoot(), '.runtime-state', 'tasks-workspace'),
+    workspaceRoot: config.tasks?.workspaceDir ?? layout.tasksWorkspace,
   });
+
+  const authGuard = new AuthGuard(userStore, {
+    enabled: config.auth.enabled,
+    staticToken: config.auth.token,
+    sessionTtlDays: config.auth.sessionTtlDays,
+    // 任务 key 直连：/v1 接受 Bearer <taskKey> 或 body.taskKey 作为任务级凭据
+    taskKeys: taskService,
+    // 用户级凭据：微信 bot 按渠道用户携带 ct_ token
+    channelTokens: channelTokenStore,
+  });
+  registerAuthApi(app, userStore, authGuard);
+  registerUserApi(app, userStore, authGuard);
+  registerChannelTokenApi(app, channelTokenStore, authGuard, taskService, {
+    listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
+  });
+
+  const checkAuth = (request: FastifyRequest): boolean => authGuard.checkAuth(request);
+
   registerTaskApi(
     app,
     taskService,
@@ -136,13 +197,75 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     {
       // 可选范围与管理后台 Agent 下拉一致（已定义的 agent，含临时停用的，便于先设默认后启用）
       listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
+      // 建/改任务时校验 (节点, agent) 组合当前可路由
+      hasRoutingAgent: (nodeId, agentId) => manager.hasRoutingAgent(nodeId, agentId),
       // 原子化运行时：先改内存再落盘 gateway.yaml；落盘抛错时接口层回滚内存值
       persistDefaultAgent: (agentId) => {
         persistDefaultTaskAgentId(configPath, agentId);
         config.tasks.defaultAgentId = agentId;
       },
     },
+    // 渠道用户级凭据：ct_ token 只读自己的 GET /api/tasks（微信 bot 查激活任务用）
+    (req) => {
+      const s = authGuard.resolve(req as FastifyRequest);
+      return s.status === 'channelUser' ? { channel: s.channel, userId: s.userId } : null;
+    },
   );
+
+  // 删除渠道用户时级联吊销其用户级 token（覆盖 tasks api 内同名路由，先注册者优先）
+  app.delete('/api/users/:channel/:userId', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
+    const params = request.params as { channel: string; userId: string };
+    if (!params.channel || !params.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
+    taskService.deleteUser(params.channel, params.userId);
+    channelTokenStore.revokeForUser(params.channel, params.userId);
+    return { ok: true };
+  });
+
+  // ── 节点管理 REST + 用户偏好（鉴权同 /api/*）──
+  const preferenceStore = createPreferenceStore(layout.prefsState);
+  registerNodeApi(
+    app,
+    nodeManager,
+    manager,
+    preferenceStore,
+    (req) => checkAuth(req as FastifyRequest),
+    (req) => authGuard.isAdmin(req as FastifyRequest),
+  );
+
+  // ── 节点接入指引（仅管理员）：回显网关地址/静态 token/默认 agent，供后台生成 env 与启动命令 ──
+  app.get('/api/nodes/enroll', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send({ error: '仅管理员可获取节点接入信息' });
+    }
+    return {
+      host: config.server.host,
+      port: config.server.port,
+      authEnabled: config.auth.enabled,
+      // 未开启鉴权时为空串：节点连接无需 token
+      token: config.auth.enabled ? config.auth.token : '',
+      defaultAgents: defaultAgentDefinitions().map((d) => ({
+        id: d.id,
+        ...(d.displayName ? { displayName: d.displayName } : {}),
+      })),
+    };
+  });
+
+  // ── 本机进程管理（仅回环 + 管理员）：/api/system/info + /api/pm/* ──
+  const pm = new ProcessManager(layout.root);
+  registerPmApi(app, {
+    pm,
+    authGuard,
+    server: {
+      host: config.server.host,
+      port: config.server.port,
+      authEnabled: config.auth.enabled,
+      sessionTtlDays: config.auth.sessionTtlDays,
+    },
+  });
+
+  // WebSocket 升级：节点连接器连 /api/nodes/ws（复用同一 8787 端口）
+  app.server.on('upgrade', (req, socket, head) => nodeManager.handleUpgrade(req, socket, head));
 
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
 
@@ -161,13 +284,27 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   });
 
   app.post('/v1/chat/completions', async (request: FastifyRequest<{ Body: TaskAwareChatBody }>, reply: FastifyReply) => {
-    if (!checkAuth(request)) {
+    // /v1 专用鉴权：除静态 token / 会话外，还接受任务 key（任务级直连）与渠道用户 token（用户级直连）
+    const authState = authGuard.resolveChat(request, request.body as { taskKey?: unknown });
+    if (authState.status === 'none') {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
 
     const body = request.body;
     if (!body || typeof body.model !== 'string' || !Array.isArray(body.messages)) {
       return reply.code(400).send(openaiError('请求体需含 model(string) 与 messages(array)', 'invalid_request_error', 'invalid_request'));
+    }
+
+    // 用户级凭据作用域校验：ct_ token 只能代表它自己（channel/userId 必须一致），防伪造他人身份
+    if (authState.status === 'channelUser') {
+      const claimedChannel = typeof body.channel === 'string' ? body.channel.trim() : '';
+      const claimedUser = typeof body.userId === 'string' ? body.userId.trim() : '';
+      if (claimedChannel && claimedChannel !== authState.channel) {
+        return reply.code(403).send(openaiError('该凭据无权访问其他渠道', 'invalid_request_error', 'scope_forbidden'));
+      }
+      if (claimedUser && claimedUser !== authState.userId) {
+        return reply.code(403).send(openaiError('该凭据无权代表其他用户', 'invalid_request_error', 'scope_forbidden'));
+      }
     }
 
     // oneshot 无状态会话：把客户端全量多轮历史拼成一段完整上下文一次性下发。
@@ -185,12 +322,19 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       body.messages
         .filter((m): m is { role: 'user'; content: string } => m.role === 'user' && typeof m.content === 'string')
         .at(-1)?.content ?? '';
+    // 用户级凭据：强制以凭据归属身份路由（即便 body 没写 channel/userId 也补齐为本人）
+    const scopeChannel = authState.status === 'channelUser' ? authState.channel : body.channel;
+    const scopeUserId = authState.status === 'channelUser' ? authState.userId : body.userId;
     const routing = decideTaskRouting(taskService, {
-      channel: body.channel,
-      userId: body.userId,
+      channel: scopeChannel,
+      userId: scopeUserId,
       agent: body.agent,
       task: body.task,
-      taskKey: body.taskKey,
+      // 任务级凭据：body.taskKey 仅在常规凭据下作为路由字段；Bearer 命中任务时以锁定为准
+      taskKey: authState.status === 'task' ? undefined : body.taskKey,
+      ...(authState.status === 'task'
+        ? { lockedTask: { channel: authState.channel, userId: authState.userId, taskId: authState.taskId } }
+        : {}),
       model: body.model,
       text: lastUserText || prompt,
     });
@@ -235,12 +379,29 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       ? routing.sessionKey
       : (typeof body.sessionKey === 'string' ? body.sessionKey.trim() : '');
 
-    const adapter = manager.resolve(modelForChat);
-    if (!adapter) {
-      const known = manager.listDescriptors().map((d) => modelIdFor(d.id)).join(', ');
-      return reply
-        .code(404)
-        .send(openaiError(`未知模型 "${modelForChat}"；可用: ${known}`, 'invalid_request_error', 'model_not_found'));
+    // 任务路由按 (nodeId, agentId) 解析；非任务（legacy）仍按 model 解析内建 local agent
+    let adapter;
+    if (routing.kind === 'chat') {
+      const resolved = manager.resolveForRouting(routing.nodeId, routing.agentId);
+      if (resolved.kind === 'offline') {
+        return reply
+          .code(503)
+          .send(openaiError(`节点离线，任务暂不可用：${resolved.nodeId}（请等待节点重连后重试）`, 'service_unavailable', 'node_offline'));
+      }
+      if (resolved.kind === 'unknown') {
+        return reply
+          .code(404)
+          .send(openaiError(`节点 ${routing.nodeId} 上没有可用 agent: ${routing.agentId}`, 'invalid_request_error', 'agent_unavailable'));
+      }
+      adapter = resolved.adapter;
+    } else {
+      adapter = manager.resolve(modelForChat);
+      if (!adapter) {
+        const known = manager.listDescriptors().map((d) => modelIdFor(d.id)).join(', ');
+        return reply
+          .code(404)
+          .send(openaiError(`未知模型 "${modelForChat}"；可用: ${known}`, 'invalid_request_error', 'model_not_found'));
+      }
     }
 
     const chatRequest = {
@@ -309,9 +470,16 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       res.write(SSE_DONE);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const offline = err instanceof Error && (err as { code?: string }).code === 'node_offline';
       request.log.error({ err }, 'agent chat failed (stream)');
       // 流已开启，无法改状态码：以 SSE error 事件结束
-      res.write(formatSseData(openaiError(message, 'server_error', 'agent_error')));
+      res.write(
+        formatSseData(
+          offline
+            ? openaiError(message, 'service_unavailable', 'node_offline')
+            : openaiError(message, 'server_error', 'agent_error'),
+        ),
+      );
       res.write(SSE_DONE);
     } finally {
       res.removeListener('close', onAbort);
@@ -319,13 +487,13 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     }
   });
 
-  // ── 页面与运行态控制 API（GET / 聊天页；GET /admin 管理后台；/api/agents 供切换 agent/模型）──
-  app.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(CHAT_PAGE);
-  });
+  // 内置聊天页（布局层按形态定位：dev→backend/src/dev，dist→dev），启动时读一次。
+  // 管理后台已迁移到 TS/React 构建产物，由上方 /admin/ 静态服务提供，不再有内置 admin.html。
+  const chatPage = readFileSync(layout.page('chat'), 'utf8');
 
-  app.get('/admin', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(ADMIN_PAGE);
+  // ── 页面与运行态控制 API（GET / 聊天页；管理后台见 /admin/；/api/agents 供切换 agent/模型）──
+  app.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(chatPage);
   });
 
   app.get('/api/agents', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -333,6 +501,20 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
     return { agents: manager.listAgentDetails() };
+  });
+
+  /** 节点 + 其上可路由 agent（任务弹窗级联选择用）：local 配置项 + 在线节点自报项 */
+  app.get('/api/node-agents', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkAuth(request)) {
+      return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    const nodes = nodeManager.list();
+    return {
+      // local 仅暴露已启用 agent（停用的 agent 不能被任务绑定，与 hasRoutingAgent 校验一致）
+      local: { nodeId: 'local', name: '本机（网关）', online: true, agents: manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })) },
+      nodes: nodes.map((n) => ({ nodeId: n.nodeId, name: n.name, online: n.online, agents: n.agents })),
+      agents: manager.listRoutingAgents(),
+    };
   });
 
   /** 全部支持类型目录 + 配置状态（管理后台「支持 ACP 的 Agent 目录」） */
@@ -420,11 +602,17 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     }
   });
 
-  // ── 个人微信渠道实现二选一 ──
+  // ── 个人微信渠道实现三选一 ──
   //  mode=openclaw-weixin-plugin：加载 openclaw-weixin 插件运行时（登录态复用 accounts/）
   //  mode=weixin-bot（默认）：跳过该插件，改由网关进程内拉起独立 adapter（少跑一套插件运行时）
+  //  mode=external：跳过插件且网关不内嵌 adapter，由外部进程管理器单独拉起 weixin 进程
   const weixinMode = config.weixin?.mode ?? 'weixin-bot';
-  const skipWeixinPlugin = weixinMode === 'weixin-bot';
+  const skipWeixinPlugin = weixinMode === 'weixin-bot' || weixinMode === 'external';
+  // 仅 weixin-bot（网关内嵌）才创建句柄；external 由外部进程管理器单独拉起，网关不内嵌
+  const embedWeixinBot = weixinMode === 'weixin-bot';
+  if (weixinMode === 'external') {
+    app.log.info('个人微信走 external 模式：由外部进程管理器单独拉起 weixin 进程，网关不内嵌 adapter');
+  }
   const plugins = (config.plugins ?? []).filter(
     (p) => !(skipWeixinPlugin && p.package === '@tencent-weixin/openclaw-weixin'),
   );
@@ -434,7 +622,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   // 配置了 channels.<id> 或 plugins[] 时加载插件包；插件缺失 / 加载失败仅告警，不影响 /v1
   let pluginManager: PluginManager | null = null;
   if (Object.keys(config.channels).length > 0 || plugins.length > 0) {
-    const stateDir = join(findInstallRoot(), '.runtime-state', 'plugins');
+    const stateDir = layout.pluginsState;
     // 微信插件读 OPENCLAW_STATE_DIR 定位 accounts.json / openclaw.json
     process.env.OPENCLAW_STATE_DIR = stateDir;
     pluginManager = new PluginManager({
@@ -459,13 +647,17 @@ export async function buildServer(options?: { configPath?: string; definitions?:
 
   // weixin-bot 句柄：server listen 后由 main 启动（长轮询 monitor 需网关 /v1 已就绪）
   let weixinBotHandle: WeixinBotHandle | null = null;
-  const weixinBot = skipWeixinPlugin
+  const weixinBot = embedWeixinBot
     ? {
         async start(): Promise<void> {
           weixinBotHandle = await startWeixinBot({
             gatewayUrl: `http://127.0.0.1:${config.server.port}`,
             model: config.weixin?.model,
             accountId: config.weixin?.accountId,
+            // 内嵌模式：直接在进程内为每个微信用户签发/复用用户级 token（无需 HTTP 引导、无需静态 token）
+            userTokenProvider: new InProcessUserTokenProvider((channel, userId) =>
+              channelTokenStore.ensure(channel, userId).token,
+            ),
             log: (...args: unknown[]) => app.log.info(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')),
             errLog: (...args: unknown[]) => app.log.error(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')),
           });
@@ -490,19 +682,25 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     app,
     weixinLoginService,
     (req) => checkAuth(req as FastifyRequest),
-    { reloadBot: weixinBot ? () => weixinBot.reload() : undefined },
+    {
+      reloadBot: weixinBot ? () => weixinBot.reload() : undefined,
+      ...(weixinMode === 'external'
+        ? { reloadUnavailableMessage: `微信由进程管理器托管（external 模式），请重启 weixin 进程：${layout.restartWeixinHint}` }
+        : {}),
+    },
   );
 
-  return { app, manager, pluginManager, taskService, weixinBot, host: config.server.host, port: config.server.port, authEnabled: config.auth.enabled };
+  return { app, manager, nodeManager, pluginManager, taskService, weixinBot, host: config.server.host, port: config.server.port, authEnabled: config.auth.enabled };
 }
 
 async function main(): Promise<void> {
-  const { app, manager, pluginManager, weixinBot, host, port, authEnabled } = await buildServer();
+  const { app, manager, nodeManager, pluginManager, weixinBot, host, port, authEnabled } = await buildServer();
 
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'shutting down');
     await weixinBot?.stop().catch(() => {});
     await pluginManager?.dispose().catch(() => {});
+    await nodeManager.dispose().catch(() => {});
     await manager.dispose().catch(() => {});
     await app.close().catch(() => {});
     process.exit(0);
@@ -514,7 +712,7 @@ async function main(): Promise<void> {
   // weixin-bot 模式：listen 后再拉起长轮询 monitor（需网关 /v1 已就绪）
   if (weixinBot) {
     await weixinBot.start().catch((err: unknown) => {
-      app.log.error({ err }, 'weixin-bot 启动失败（/v1 不受影响）；请先扫码登录：pnpm --filter @linkagent/backend weixin-login');
+      app.log.error({ err }, `weixin-bot 启动失败（/v1 不受影响）；${getLayout().loginHint}`);
     });
   }
   app.log.info(

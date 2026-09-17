@@ -4,14 +4,17 @@
  *   pnpm build:dist   （或 node scripts/build-dist.mjs）
  *
  * 产出 dist/linkagent/ —— 自包含目录，整体拷贝到目标机器即可运行：
- *   server/index.mjs     网关 bundle（esbuild；npm 依赖 external，运行时从 node_modules 解析）
+ *   server/gateway.mjs   网关 bundle（esbuild；npm 依赖 external，运行时从 node_modules 解析）
+ *   server/weixin.mjs    个人微信 bot 独立进程（external 模式）
+ *   server/node.mjs      本机 node 节点连接器
+ *   server/pm.mjs        单机进程管理器（编排三进程）
  *   server/config/       默认 gateway.yaml（可改）
- *   dev/                 内置聊天页/管理后台页（网关按相对路径 readFileSync）
- *   web/                 vite 构建的后台管理端（网关挂载到 /ui）
+ *   dev/                 内置聊天页（网关按相对路径 readFileSync）
+ *   web/                 vite 构建的后台管理端（TS/React，网关挂载到 /admin）
  *   vendor/openclaw/     openclaw plugin-sdk shim（产物 package.json 以 file: 依赖安装）
  *   node_modules/        运行时 npm 依赖（脚本内自动 npm install）
  *   .linkagent-root      部署根 marker（findInstallRoot 定位依据）
- *   start.sh / start.bat 启动脚本；README.md 使用说明
+ *   start.sh / start.bat 启动脚本（调 pm.mjs）；README.md 使用说明
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,6 +52,7 @@ const EXTERNAL_PACKAGES = [
   'qrcode',
   'acpx',
   'zod',
+  'ws',
   '@wecom/aibot-node-sdk',
   '@wecom/wecom-openclaw-plugin',
   '@tencent-weixin/openclaw-weixin',
@@ -79,15 +83,23 @@ step('2/6 构建 web 管理端（vite）', () => {
   execFileSync('pnpm', ['--filter', '@linkagent/web', 'build'], { cwd: REPO, stdio: 'inherit' });
 });
 
-step('3/6 esbuild 打包网关', async () => {
+step('3/6 esbuild 打包（gateway / weixin / node / pm 四入口）', async () => {
+  const src = join(REPO, 'backend', 'src');
   await esbuild({
-    entryPoints: [join(REPO, 'backend', 'src', 'gateway', 'index.ts')],
+    entryPoints: {
+      gateway: join(src, 'gateway', 'index.ts'),
+      weixin: join(src, 'channels', 'weixin-bot.ts'),
+      node: join(src, 'node', 'connector.ts'),
+      pm: join(src, 'supervisor', 'cli.ts'),
+    },
     bundle: true,
     platform: 'node',
     format: 'esm',
     target: 'node22',
     external: EXTERNAL_PACKAGES,
-    outfile: join(DIST, 'server', 'index.mjs'),
+    outdir: join(DIST, 'server'),
+    entryNames: '[name]',
+    outExtension: { '.js': '.mjs' },
     sourcemap: true,
     logLevel: 'info',
   });
@@ -99,8 +111,8 @@ step('4/6 复制运行资源', () => {
   cpSync(join(REPO, 'backend', 'config', 'gateway.yaml'), join(DIST, 'server', 'config', 'gateway.yaml'));
 
   // 内置页面（网关 new URL('../dev/*.html', import.meta.url) 相对 server/ 读取）
+  // 仅聊天页；管理后台为 web/ 下的 TS/React 构建产物（挂 /admin），不再内置 admin.html。
   cpSync(join(REPO, 'backend', 'src', 'dev', 'chat.html'), join(DIST, 'dev', 'chat.html'));
-  cpSync(join(REPO, 'backend', 'src', 'dev', 'admin.html'), join(DIST, 'dev', 'admin.html'));
 
   // web 构建产物
   cpSync(join(REPO, 'web', 'dist'), join(DIST, 'web'), { recursive: true });
@@ -125,8 +137,12 @@ step('5/6 生成 package.json / 启停脚本 / README', () => {
     description: 'OpenAI 兼容网关独立部署包：Chatbox/Open WebUI → Gateway → ACP → agent',
     engines: { node: '>=22.13' },
     scripts: {
-      start: 'node server/index.mjs',
-      stop: 'node scripts/stop.mjs',
+      start: 'node server/pm.mjs start',
+      stop: 'node server/pm.mjs stop',
+      restart: 'node server/pm.mjs restart',
+      status: 'node server/pm.mjs status',
+      logs: 'node server/pm.mjs logs',
+      gateway: 'node server/gateway.mjs',
     },
     dependencies: runtimeDependencies(),
   };
@@ -135,79 +151,25 @@ step('5/6 生成 package.json / 启停脚本 / README', () => {
   writeFileSync(
     join(DIST, 'start.sh'),
     `#!/usr/bin/env bash
-# linkagent 独立部署启停脚本
-#   ./start.sh              启动（后台，等待健康检查）
-#   ./start.sh stop         停止
-#   ./start.sh restart      重启
-#   ./start.sh status       查看状态
-#   ./start.sh log          跟随日志
-#   ./start.sh run          前台运行（Ctrl-C 停止）
+# linkagent 单机进程管理器（gateway + 微信 + node 三进程，仅编排拉起不守护）
+#   ./start.sh              后台启动全部三进程（gateway 就绪后再起微信/node）
+#   ./start.sh stop         停止全部
+#   ./start.sh restart      重启全部
+#   ./start.sh status       查看三进程状态
+#   ./start.sh logs         跟随全部日志
+#   ./start.sh foreground   前台联调（Ctrl-C 一起退出）
+#   ./start.sh start gateway|weixin|node   仅操作单个进程
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
-# 端口：LINKAGENT_PORT 优先，否则读 server/config/gateway.yaml 的 server.port，兜底 8787
-PORT="\${LINKAGENT_PORT:-}"
-if [ -z "$PORT" ]; then
-  PORT="$(grep -E '^[[:space:]]+port:' "$DIR/server/config/gateway.yaml" 2>/dev/null | head -1 | grep -oE '[0-9]+')"
-fi
-PORT="\${PORT:-8787}"
-PID_FILE="$DIR/.runtime-state/server.pid"
-LOG_FILE="$DIR/.runtime-state/server.log"
-BASE_URL="http://127.0.0.1:\${PORT}"
-
-is_running() {
-  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null && return 0
-  [ -n "$(lsof -ti:\${PORT} 2>/dev/null)" ] && return 0
-  return 1
-}
-
-do_start() {
-  if is_running; then
-    echo "gateway 已在运行（pid $(cat "$PID_FILE" 2>/dev/null || echo "?")），url=\${BASE_URL}"
-    return 0
-  fi
-  mkdir -p "$(dirname "$LOG_FILE")"
-  echo "→ 后台启动 gateway ..."
-  cd "$DIR"
-  nohup node server/index.mjs >>"$LOG_FILE" 2>&1 &
-  echo $! >"$PID_FILE"
-  for _ in $(seq 1 20); do
-    if curl -sS -m 2 "$BASE_URL/healthz" >/dev/null 2>&1; then
-      echo "✅ gateway 已就绪：\${BASE_URL}（聊天页 / ，管理后台 /ui，OpenAI API /v1）"
-      return 0
-    fi
-    sleep 1
-  done
-  echo "⚠️  启动超时，最近日志："
-  tail -n 15 "$LOG_FILE"
-  return 1
-}
-
-do_stop() {
-  if ! is_running; then
-    echo "gateway 未在运行"
-    rm -f "$PID_FILE"
-    return 0
-  fi
-  local pids
-  pids="$(lsof -ti:\${PORT} 2>/dev/null | tr '\\n' ' ')"
-  # shellcheck disable=SC2086
-  kill $pids 2>/dev/null
-  for _ in $(seq 1 15); do
-    [ -z "$(lsof -ti:\${PORT} 2>/dev/null)" ] && break
-    sleep 1
-  done
-  rm -f "$PID_FILE"
-  echo "gateway 已停止"
-}
-
-case "\${1:-start}" in
-  start) do_start ;;
-  stop) do_stop ;;
-  restart) do_stop && do_start ;;
-  status) if is_running; then echo "运行中 url=\${BASE_URL}"; else echo "未运行"; fi ;;
-  log) tail -f "$LOG_FILE" ;;
-  run) cd "$DIR" && exec node server/index.mjs ;;
-  *) echo "用法: $0 {start|stop|restart|status|log|run}"; exit 1 ;;
+cd "$DIR"
+CMD="\${1:-start}"
+TARGET="\${2:-all}"
+case "$CMD" in
+  start|stop|restart) exec node server/pm.mjs "$CMD" "$TARGET" ;;
+  status) exec node server/pm.mjs status ;;
+  logs) exec node server/pm.mjs logs "$TARGET" ;;
+  foreground|fg|run) exec node server/pm.mjs foreground "$TARGET" ;;
+  *) echo "用法: $0 {start|stop|restart|status|logs|foreground} [all|gateway|weixin|node]"; exit 1 ;;
 esac
 `,
     { mode: 0o755 },
@@ -216,19 +178,19 @@ esac
   writeFileSync(
     join(DIST, 'start.bat'),
     `@echo off
-rem linkagent 独立部署启动脚本（Windows）
-rem 用法: start.bat   启动（后台） / start.bat stop 停止
+rem linkagent 单机进程管理器（gateway + 微信 + node 三进程）
+rem   start.bat            后台启动全部
+rem   start.bat stop       停止全部
+rem   start.bat restart    重启全部
+rem   start.bat status     查看状态
+rem   start.bat logs       跟随日志
+rem   start.bat foreground 前台联调（Ctrl-C 退出）
 cd /d "%~dp0"
-set "PORT=%LINKAGENT_PORT%"
-if "%PORT%"=="" set "PORT=8787"
-if "%1"=="stop" (
-  for /f "tokens=5" %%p in ('netstat -ano ^| findstr :%PORT% ^| findstr LISTENING') do taskkill /PID %%p /F >nul 2>&1
-  echo gateway 已停止
-  exit /b 0
-)
-if not exist ".runtime-state" mkdir ".runtime-state"
-start "linkagent-gateway" /min cmd /c "node server\\index.mjs > .runtime-state\\server.log 2>&1"
-echo gateway 已启动（后台），健康检查 http://127.0.0.1:%PORT%/healthz
+set "CMD=%~1"
+if "%CMD%"=="" set "CMD=start"
+set "TARGET=%~2"
+if "%TARGET%"=="" set "TARGET=all"
+node server\\pm.mjs %CMD% %TARGET%
 `,
   );
 
@@ -246,30 +208,40 @@ OpenAI 兼容网关：Chatbox / Open WebUI → \`/v1\` → ACP(acpx) → 本地 
 \`\`\`
 linkagent/
 ├── server/
-│   ├── index.mjs        网关（可直接 node server/index.mjs 前台运行）
+│   ├── gateway.mjs       网关（OpenAI 兼容 API + 后台 + 节点接入）
+│   ├── weixin.mjs        个人微信 bot（独立进程，external 模式）
+│   ├── node.mjs          本机 node 节点连接器（反向 WS 连入网关）
+│   ├── pm.mjs            单机进程管理器（编排上面三进程）
 │   └── config/gateway.yaml   网关配置（改完需重启）
-├── dev/                 内置聊天页 / 管理页
-├── web/                 后台管理端（挂载 /ui）
-├── node_modules/        运行时依赖
-└── .runtime-state/      运行态（首次启动自动创建：登录态、会话状态、日志、pid）
+├── dev/                  内置聊天页
+├── web/                  后台管理端（TS/React，挂载 /admin）
+├── node_modules/         运行时依赖
+└── .runtime-state/       运行态（登录态、会话、pm 日志/pid）
 \`\`\`
 
-## 启动
+## 启动（单机三进程：gateway + 微信 + node）
 \`\`\`bash
-./start.sh          # Linux/macOS：后台启动并等待健康检查
-./start.sh stop     # 停止；./start.sh log 跟随日志；./start.sh run 前台运行
+./start.sh              # 后台启动全部（gateway 就绪后再起微信/node）
+./start.sh status       # 查看三进程状态
+./start.sh logs         # 跟随全部日志（Ctrl-C 只退出查看，不停进程）
+./start.sh stop         # 停止全部；restart 重启；foreground 前台联调
+./start.sh start weixin # 仅操作单个进程：gateway|weixin|node
 \`\`\`
 \`\`\`bat
-start.bat           # Windows：后台启动；start.bat stop 停止
+start.bat               # Windows：后台启动全部；start.bat stop/status/logs
 \`\`\`
+
+进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；进程崩溃后重新执行 \`./start.sh start\` 即可。
+网关开启 \`auth\` 时，管理器会自动把 \`gateway.yaml\` 的静态 token 注入微信/node 进程，无需单独配置。
+微信首次使用需先在后台 \`/admin\` 扫码登录。
 
 启动后：
 - \`http://127.0.0.1:8787\` 内置聊天页
-- \`http://127.0.0.1:8787/ui\` 后台管理端（agent 目录 / 模型 / 微信扫码登录）
+- \`http://127.0.0.1:8787/admin\` 后台管理端（agent / 任务 / Key / 节点 / 微信扫码 / 进程管理）
 - \`http://127.0.0.1:8787/v1\` OpenAI 兼容 API（Chatbox/Open WebUI 配置 base_url）
 - \`http://127.0.0.1:8787/healthz\` 健康检查
 
-端口可用环境变量 \`LINKAGENT_PORT\` 覆盖（默认 8787）；安装根可用 \`LINKAGENT_HOME\` 显式指定。
+安装根可用 \`LINKAGENT_HOME\` 显式指定。
 
 ## 配置
 编辑 \`server/config/gateway.yaml\`，修改后 \`./start.sh restart\`：
@@ -277,7 +249,7 @@ start.bat           # Windows：后台启动；start.bat stop 停止
 - \`auth\`：开启后所有 /v1 与后台 API 需 \`Authorization: Bearer <token>\`
 - \`agents\`：覆盖内置默认 agent（id/type/displayName/description/cwd/command/model/...）
 - \`tasks\`：任务路由默认 agent、任务工作空间目录
-- \`plugins\` / \`channels\` / \`weixin\`：微信/企业微信渠道（默认 \`weixin.mode: weixin-bot\`，后台 /ui 扫码登录后自动收消息）
+- \`plugins\` / \`channels\` / \`weixin\`：微信/企业微信渠道。单机包由进程管理器托管，网关以 \`weixin.mode: external\` 运行（微信在独立进程，后台 /admin 扫码登录后自动收消息）
 
 ## 重新构建
 在源码仓库执行 \`pnpm build:dist\`，产物在 \`dist/linkagent/\`。
@@ -299,4 +271,4 @@ step('6/6 安装产物运行时依赖', () => {
 });
 
 console.log(`\n✅ 独立部署包已生成：${DIST}`);
-console.log('   启动：cd dist/linkagent && ./start.sh（Windows: start.bat）');
+console.log('   启动三进程：cd dist/linkagent && ./start.sh（Windows: start.bat）');

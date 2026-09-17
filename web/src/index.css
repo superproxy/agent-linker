@@ -23,7 +23,7 @@ body {
 }
 
 .page {
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 20px 16px 48px;
 }
@@ -73,15 +73,70 @@ header h1 {
   font-size: 13px;
 }
 
-main {
+/* ── 侧栏 + 内容布局 ── */
+.shell-body {
   display: grid;
-  grid-template-columns: 280px 240px 1fr;
+  grid-template-columns: 168px 1fr;
   gap: 16px;
   align-items: start;
 }
 
+.side-nav {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.side-nav button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.side-nav button:hover {
+  background: rgba(47, 129, 247, 0.1);
+  color: var(--fg);
+  filter: none;
+}
+
+.side-nav button.active {
+  background: rgba(47, 129, 247, 0.18);
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
 @media (max-width: 900px) {
-  main {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
+  .side-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+/* 概览页保留模型条 + 聊天台两栏 */
+main:has(.chat) {
+  grid-template-columns: 220px 1fr;
+}
+
+@media (max-width: 900px) {
+  main:has(.chat) {
     grid-template-columns: 1fr;
   }
 }
@@ -281,4 +336,567 @@ button.ghost {
 
 .composer input {
   flex: 1;
+}
+
+/* ── Agent 管理卡片 ── */
+.gw-bar .token {
+  flex: 0 0 220px;
+  min-width: 160px;
+}
+
+.agents li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agents li.default {
+  background: rgba(63, 185, 80, 0.08);
+  border: 1px solid rgba(63, 185, 80, 0.35);
+}
+
+.agent-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.agent-main .name {
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.agent-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge {
+  font-size: 11px;
+  color: var(--ok);
+  background: rgba(63, 185, 80, 0.14);
+  border: 1px solid rgba(63, 185, 80, 0.4);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.state {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.state.on {
+  color: var(--ok);
+}
+
+.state.off {
+  color: var(--err);
+}
+
+button.small {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.ok-text {
+  color: var(--ok);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* ── 登录页 ── */
+.login-wrap {
+  min-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.login-card {
+  width: 380px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+}
+
+.login-title {
+  margin: 0 0 4px;
+  font-size: 18px;
+  text-align: center;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  font-family: inherit;
+}
+
+.login-base {
+  display: flex;
+  gap: 8px;
+}
+
+.login-base input {
+  flex: 1;
+}
+
+/* ── 顶栏用户区 ── */
+.gw-bar .spacer {
+  flex: 1;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.role-badge {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(47, 129, 247, 0.14);
+  border: 1px solid rgba(47, 129, 247, 0.4);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.role-badge.muted-role {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+
+/* ── 弹窗 ── */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.modal {
+  width: 400px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+}
+
+.modal h2 {
+  margin: 0;
+  color: var(--fg);
+  justify-content: flex-start;
+}
+
+.modal-ops {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ── 用户管理卡片 ── */
+.user-form {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.user-form input {
+  flex: 1;
+  min-width: 120px;
+  font-family: inherit;
+  padding: 6px 8px;
+}
+
+.user-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.reset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reset-row input {
+  width: 130px;
+  font-family: inherit;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ── 网关设置 / 进程管理 ── */
+.gw-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.gw-meta li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.gw-meta li .muted {
+  flex: 0 0 96px;
+  font-size: 12px;
+}
+
+.pm-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px;
+}
+
+.pm-list li .dot {
+  flex: 0 0 auto;
+}
+
+.pm-log {
+  flex: 1 1 100%;
+  margin: 8px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  background: #010409;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 多页签后台：表格 / 任务 / Key / 节点 ── */
+.card.wide {
+  overflow-x: auto;
+}
+
+.search {
+  width: 100%;
+  margin-bottom: 10px;
+  font-family: inherit;
+}
+
+table.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.grid th,
+table.grid td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+table.grid th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+table.grid tr.active-row {
+  background: rgba(63, 185, 80, 0.07);
+}
+
+table.grid input,
+table.grid select {
+  width: 100%;
+  min-width: 80px;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.row-ops {
+  white-space: nowrap;
+  display: flex;
+  gap: 6px;
+}
+
+.task-group {
+  margin-bottom: 18px;
+}
+
+.task-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+}
+
+.task-group-head .muted {
+  flex: 1;
+}
+
+.small-text {
+  font-size: 11px;
+}
+
+button.primary {
+  background: rgba(47, 129, 247, 0.16);
+  border: 1px solid rgba(47, 129, 247, 0.6);
+  color: var(--accent);
+}
+
+button.primary:hover {
+  background: rgba(47, 129, 247, 0.28);
+  filter: none;
+}
+
+button.danger {
+  background: transparent;
+  border: 1px solid rgba(248, 81, 73, 0.5);
+  color: var(--err);
+}
+
+button.danger:hover {
+  background: rgba(248, 81, 73, 0.12);
+  filter: none;
+}
+
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.inline-form input,
+.inline-form select {
+  flex: 0 1 240px;
+}
+
+.token-reveal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(47, 129, 247, 0.45);
+  border-radius: 8px;
+  background: rgba(47, 129, 247, 0.08);
+}
+
+.token-reveal code {
+  flex: 1 1 auto;
+  word-break: break-all;
+  font-size: 12px;
+}
+
+.modal h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modal label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: -4px;
+}
+
+.modal input,
+.modal select {
+  width: 100%;
+  font-family: inherit;
+}
+
+.modal {
+  width: 440px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+/* ── 节点管理：审批状态与接入指引 ── */
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-head h2 {
+  margin: 0;
+}
+
+.state.pending {
+  color: var(--reason);
+}
+
+.state.blocked {
+  color: var(--err);
+}
+
+tr.row-pending {
+  background: rgba(201, 162, 39, 0.07);
+}
+
+.node-pending-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  background: rgba(201, 162, 39, 0.1);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.enroll-box {
+  margin: 12px 0 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.enroll-form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.enroll-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.enroll-form label.grow {
+  flex: 1;
+  min-width: 240px;
+}
+
+.enroll-form input {
+  width: 200px;
+  font-family: inherit;
+}
+
+.enroll-form label.grow input {
+  width: 100%;
+}
+
+.enroll-agents {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.enroll-agents .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.enroll-steps {
+  margin: 2px 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.enroll-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.enroll-mode {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg);
+}
+
+.enroll-mode-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.enroll-mode pre {
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.enroll-cmd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.enroll-cmd code {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  font-size: 12px;
 }

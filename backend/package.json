@@ -8,15 +8,23 @@
   "scripts": {
     "dev": "tsx watch src/gateway/index.ts",
     "start": "tsx src/gateway/index.ts",
+    "node:connect": "tsx src/node/connector.ts",
     "probe": "tsx src/dev/probe.ts",
     "verify-resume-recovery": "tsx src/dev/verify-resume-recovery.ts",
     "smoke-plugin": "tsx src/dev/smoke-plugin.ts",
     "weixin-login": "tsx src/dev/weixin-login.ts",
     "bot:weixin": "tsx src/channels/weixin-bot.ts",
     "bot:wecom": "tsx src/channels/wecom-bot.ts",
+    "pm": "tsx src/supervisor/cli.ts",
+    "pm:start": "tsx src/supervisor/cli.ts start",
+    "pm:stop": "tsx src/supervisor/cli.ts stop",
+    "pm:restart": "tsx src/supervisor/cli.ts restart",
+    "pm:status": "tsx src/supervisor/cli.ts status",
+    "pm:logs": "tsx src/supervisor/cli.ts logs",
+    "pm:fg": "tsx src/supervisor/cli.ts foreground",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/tasks/*.test.ts test/agents/*.test.ts",
-    "test:watch": "tsx --test --watch test/tasks/*.test.ts test/agents/*.test.ts"
+    "test": "tsx --test test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts",
+    "test:watch": "tsx --test --watch test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
@@ -29,10 +37,12 @@
     "fastify": "^5.2.0",
     "openclaw": "workspace:*",
     "qrcode": "^1.5.4",
+    "ws": "^8.18.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.5.13",
     "qrcode-terminal": "^0.12.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"

@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AcpAgentKind } from '@linkagent/shared';
-import { findInstallRoot } from './config.js';
+import { getLayout } from '../install/layout.js';
 
 export type CandidateKind = AcpAgentKind;
 
@@ -66,7 +66,7 @@ function collectFromTopLevelModelIds(doc: MaybeRecord | null, knownProviderIds: 
 }
 
 function collectOpencodeCandidates(): string[] {
-  const paths = [join(homedir(), '.config', 'opencode', 'opencode.json'), join(findInstallRoot(), 'opencode.json')];
+  const paths = [join(homedir(), '.config', 'opencode', 'opencode.json'), join(getLayout().root, 'opencode.json')];
   for (const p of paths) {
     const doc = tryReadJson(p);
     if (!doc) continue;

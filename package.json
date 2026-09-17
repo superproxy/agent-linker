@@ -23,7 +23,22 @@
     "server:restart": "bash scripts/server.sh restart",
     "server:status": "bash scripts/server.sh status",
     "server:log": "bash scripts/server.sh log",
-    "server:dev": "bash scripts/server.sh foreground"
+    "server:dev": "bash scripts/server.sh foreground",
+    "node": "bash scripts/node.sh start",
+    "node:start": "bash scripts/node.sh start",
+    "node:stop": "bash scripts/node.sh stop",
+    "node:restart": "bash scripts/node.sh restart",
+    "node:status": "bash scripts/node.sh status",
+    "node:log": "bash scripts/node.sh log",
+    "node:dev": "bash scripts/node.sh foreground",
+    "dev:all": "bash scripts/dev-all.sh",
+    "pm": "pnpm --filter @linkagent/backend pm",
+    "start:all": "pnpm --filter @linkagent/backend pm:start",
+    "stop:all": "pnpm --filter @linkagent/backend pm:stop",
+    "restart:all": "pnpm --filter @linkagent/backend pm:restart",
+    "status:all": "pnpm --filter @linkagent/backend pm:status",
+    "logs:all": "pnpm --filter @linkagent/backend pm:logs",
+    "foreground": "pnpm --filter @linkagent/backend pm:fg"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

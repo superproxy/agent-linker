@@ -24,7 +24,7 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 
 - **内置控制台**：浏览器打开 `http://127.0.0.1:8787/`（切换 Agent / 模型 / 启停 / 对话测试）
 - **OpenAI 端点**：`http://127.0.0.1:8787/v1`（Chatbox / Open WebUI 填入 base_url 即可）
-- **web 后台**（可选，React 管理页）：`pnpm web` 后打开 `http://127.0.0.1:5173`（默认连 `http://127.0.0.1:8787`，可在页面改地址）
+- **web 后台**（可选，React 管理页）：先 `pnpm build:web`，再打开 `http://127.0.0.1:8787/ui`（由网关同源提供，单端口；开发时 `pnpm web` 以 build --watch 自动重建，刷新即可）
 - 健康检查：`GET http://127.0.0.1:8787/healthz`
 
 依赖本机已安装 agent 运行命令：
@@ -198,13 +198,14 @@ curl -X PATCH http://127.0.0.1:8787/api/agents/opencode \
 
 ## web 后台（可选）
 
-独立 React 管理页（`web/`，Vite 构建，独立于网关进程）：
+React 管理页（`web/`，Vite 构建为静态文件，由网关同源挂载到 `/ui`，不单独占用端口）：
 
 ```bash
-pnpm web     # vite dev，默认 http://127.0.0.1:5173
+pnpm build:web   # 一次性构建到 web/dist，打开 http://127.0.0.1:8787/ui
+pnpm web         # 开发用：vite build --watch，改代码自动重建，刷新 /ui 即可
 ```
 
-页面功能：健康检查、模型列表、流式聊天测试台（默认模型 `agent:pi`，可切换）。页面内可修改网关地址（存 localStorage `linkagent.gw.base`）。
+页面功能：Agent 管理（启停 / 设为默认）、微信机器人绑定、健康检查、模型列表、流式聊天测试台。页面内可修改网关地址（存 localStorage `linkagent.gw.base`）与可选 API Key（`linkagent.gw.token`）。
 
 ## 多渠道
 
@@ -416,6 +417,72 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 - `default` 用户拥有独立任务列表与会话，不与其他用户串扰；
 - `channel` 完全不写时走原 `model + sessionKey` 路径（oneshot，无任务机制）。
 
+## 远程节点（多机执行 agent）
+
+网关默认在本机（内建 `local` 节点）拉起 agent。也可以把 agent 跑在**其它机器**上：
+节点进程主动 WebSocket 连入网关，自报可用 agent；任务可绑定到「节点 + agent」，
+网关把对话轮次多路复用转发到对应节点，流式回传事件与结果。
+
+```
+执行机 A（node connector）──┐
+执行机 B（node connector）──┼── WS(出站) ──> 网关 :8787 /api/nodes/ws
+（节点无需开放入站端口）    ──┘                   ├── local 节点（网关本机 agent）
+                                                  └── 任务按 (nodeId, agentId) 路由
+```
+
+### 启动一个节点
+
+在安装了 agent CLI（opencode/pi/…）的机器上运行：
+
+```bash
+pnpm --filter @linkagent/backend node:connect \
+  --gatewayUrl ws://<网关主机>:8787 --name my-mac
+# 或用环境变量：
+#   LINKAGENT_GATEWAY_URL   网关地址（默认 ws://127.0.0.1:8787，自动补 /api/nodes/ws）
+#   LINKAGENT_GATEWAY_TOKEN 网关开启鉴权时必填（Bearer，等价 ?token=）
+#   LINKAGENT_NODE_NAME     节点展示名（默认 node-<hostname>）
+#   LINKAGENT_NODE_ID       节点 id（缺省首次由网关签发并持久化，重连复用）
+#   LINKAGENT_NODE_AGENTS   逗号分隔的自报 agent（缺省 opencode/pi/workbuddy/trace-cli）
+```
+
+- 节点只发起**出站**连接，无需公网入站/端口映射；断线自动指数退避重连。
+- `nodeId` 首次由网关签发（`n_xxxx`）并持久化在节点 `.runtime-state/node/node-id`，重连复用同一身份。
+- 同一 `nodeId` 重连时旧连接被替换；节点离线后其**注册记录保留**（后台仍可见，可手动删除）。
+
+后台启停 / 多实例 / 一键联调（推荐）：
+
+```bash
+pnpm node:start [name]      # 后台启动节点（可命名，支持本机多实例，独立 nodeId）
+pnpm node:status [name]     # 不带 name 列出全部实例
+pnpm node:log [name]        # 跟随日志
+pnpm node:restart [name]
+pnpm node:stop [name]
+pnpm node:dev [name]        # 前台运行（Ctrl-C 退出）
+pnpm dev:all [name]         # 一键联调：网关（已运行则复用）+ 节点同屏运行
+```
+
+- 令牌等配置可写入 `.runtime-state/node[-<name>].env`（`KEY=VALUE`），脚本自动加载；
+- 命名实例自动使用独立状态目录 `.runtime-state/node-<name>/`，避免多实例共用 `node-id` 被互踢。
+- 更多见 [`docs/design.md`](docs/design.md)（架构设计）与 [`docs/deployment.md`](docs/deployment.md)（部署运维）。
+
+### 节点与偏好 API（复用网关鉴权）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/nodes` | 全部节点（内建 local 置顶，含离线节点及在线状态） |
+| DELETE | `/api/nodes/:nodeId` | 删除离线节点注册记录（在线返回 409，local 不可删 400） |
+| GET | `/api/node-agents` | local + 在线节点的扁平可路由 agent 列表（建任务下拉用） |
+| GET | `/api/users/:channel/:userId/preferences` | 用户默认节点 + agent（仅预填，不参与鉴权） |
+| PUT | 同上 | 保存默认偏好 `{ nodeId, agentId }`，校验组合当前可路由 |
+
+### 任务绑定与离线行为
+
+- 建/改任务时绑定 `(nodeId, agentId)`；仅当节点在线且已自报该 agent 才允许绑定。
+- 消息路由到**离线节点**：非流式返回 `503`、OpenAI 错误 `code=node_offline`；
+  流式则在 SSE 中下发 `error` 事件（`code=node_offline`）后结束。
+- 节点在线但**未提供该 agent**：返回 `404`、`code=agent_unavailable`。
+- 用户默认偏好（节点 + agent）只用于控制台新建任务时**预填**，不做任何访问鉴权。
+
 ## 开发 / 运维
 
 ```bash
@@ -425,10 +492,13 @@ pnpm probe               # 探测 agent 链路（AGENT=<任意支持类型>，�
 pnpm typecheck           # 全仓类型检查
 pnpm server:start        # 后台启动（scripts/server.sh，健康检查通过才报就绪）
 pnpm server:stop / restart / status / log
-pnpm web                 # web 后台（vite dev）
+pnpm node:start [name]   # 后台启动远程节点（scripts/node.sh，可多实例）
+pnpm node:stop / restart / status / log [name]
+pnpm dev:all [name]      # 一键联调网关 + 节点（scripts/dev-all.sh）
+pnpm web                 # web 后台开发（vite build --watch，产物挂 8787/ui）
 pnpm bot:weixin          # 独立个人微信 botAgent
 pnpm bot:wecom           # 独立企业微信 botAgent
-pnpm test                # backend 单测（任务路由 store/service/api/gateway/router）
+pnpm test                # backend 单测（任务路由、agent 管理、节点 WS/存储/路由，共 95 例）
 pnpm --filter @linkagent/backend smoke-plugin   # 插件运行时冒烟测试（不连真实企微）
 pnpm --filter @linkagent/backend weixin-login   # 微信扫码登录
 ```
@@ -452,17 +522,25 @@ backend/                      # 网关包（@linkagent/backend）
   src/gateway/
     index.ts                  # HTTP 入口：/v1、/api/*、GET / 控制台、插件加载
     config.ts                 # 配置加载（GATEWAY_CONFIG_PATH / backend/config/gateway.yaml）
-    agents/                   # AgentManager + ACP(acpx) 适配器
+    agents/                   # AgentManager + ACP(acpx) 适配器 + 远程节点适配器(remoteWrapper)
+    nodes/                    # 远程节点：WS 接入/心跳/turn 多路复用(manager)、注册落盘(store)、REST(api)
+    prefs/                    # 用户默认节点+agent 偏好（KV JSON 落盘，仅预填不鉴权）
+    store/                    # 通用 KV JSON 存储（原子写、损坏隔离、key 转义）
     plugins/                  # openclaw 插件运行时宿主 + 渠道运行时面
       runtime/                # core.channel.*：routing/session/reply/media/commands/pairing/text
     modelcandidates.ts        # 本机模型候选收集
+  src/node/connector.ts       # 远程节点连接器（在执行机运行，出站 WS 连入网关跑本地 agent）
   src/channels/               # 独立 botAgent：weixin-bot / wecom-bot / gateway-chat / ilink-client
   src/dev/                    # console.html（内置控制台）、probe、smoke-plugin、weixin-login
 shared/                       # 领域共享类型：OpenAI 兼容类型、agent 抽象、config schema（@linkagent/shared）
 web/                          # 独立 React 后台管理页（@linkagent/web，Vite）
 openclaw-shim/                # openclaw 包本地 shim（overrides workspace:*）
-scripts/server.sh             # 后台启停脚本
-.runtime-state/               # 运行时状态（acpx 会话、插件登录态、server.pid/log，可清理）
+scripts/server.sh             # 网关后台启停脚本
+scripts/node.sh               # 节点后台启停脚本（支持多实例）
+scripts/dev-all.sh            # 网关 + 节点一键联调
+docs/design.md                # 架构设计文档（Mermaid 架构图 / 时序 / 流程）
+docs/deployment.md            # 部署运维文档（Mermaid 部署拓扑 / 上线流程）
+.runtime-state/               # 运行时状态（acpx 会话、插件登录态、server/node pid/log，可清理）
 ```
 
 ## 已知限制

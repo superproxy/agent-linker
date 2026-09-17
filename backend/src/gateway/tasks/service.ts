@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TaskStore } from './store.js';
+import { LOCAL_NODE_ID } from '@linkagent/shared';
 import {
   DEFAULT_AGENT_ID,
   DEFAULT_TASK_ID,
@@ -9,6 +10,7 @@ import {
   KNOWN_AGENT_IDS,
   TASK_COMMAND_PREFIX,
   TASK_KEY_PREFIX,
+  normalizeNodeId,
   type CommandResult,
   type TaskItem,
   type TaskRoute,
@@ -110,6 +112,7 @@ export class TaskService {
           keyEnabled: true,
           name: DEFAULT_TASK_NAME,
           agentId: this.defaultAgentId,
+          nodeId: LOCAL_NODE_ID,
           ...(workspace ? { cwd: workspace } : {}),
           createdAt: Date.now(),
         },
@@ -131,6 +134,10 @@ export class TaskService {
         t.keyEnabled = true;
         changed = true;
       }
+      if (!t.nodeId?.trim()) {
+        t.nodeId = LOCAL_NODE_ID;
+        changed = true;
+      }
       if (!t.cwd && this.workspaceRoot) {
         t.cwd = this.taskWorkspaceDir(state.userId, t.id);
         changed = true;
@@ -144,7 +151,14 @@ export class TaskService {
    * 新建任务：缺省自动生成全局唯一 key；customKey 可选（需符合格式且全局唯一）。
    * 返回任务（含 key），新建即激活。
    */
-  createTask(state: UserTasks, name: string, agentId?: string, customKey?: string, cwd?: string): TaskItem {
+  createTask(
+    state: UserTasks,
+    name: string,
+    agentId?: string,
+    customKey?: string,
+    cwd?: string,
+    nodeId?: string,
+  ): TaskItem {
     const id = newTaskId();
     const explicit = cwd?.trim();
     const workspace = explicit ? explicit : this.taskWorkspaceDir(state.userId, id);
@@ -154,6 +168,7 @@ export class TaskService {
       keyEnabled: true,
       name: name.trim() || `任务 ${state.tasks.length + 1}`,
       agentId: agentId?.trim() || this.agentOf(state),
+      nodeId: nodeId?.trim() || this.nodeOf(state),
       ...(workspace ? { cwd: workspace } : {}),
       createdAt: Date.now(),
     };
@@ -241,6 +256,7 @@ export class TaskService {
           keyEnabled: true,
           name: DEFAULT_TASK_NAME,
           agentId: this.defaultAgentId,
+          nodeId: LOCAL_NODE_ID,
           createdAt: Date.now(),
         });
       }
@@ -249,13 +265,25 @@ export class TaskService {
     return state.tasks;
   }
 
-  /** 修改任务绑定的 agent（如切换到 pi，让该任务由 pi 驱动） */
-  setTaskAgent(state: UserTasks, id: string, agentId: string): TaskItem {
+  /** 修改任务绑定的 agent（如切换到 pi，让该任务由 pi 驱动）；nodeId 一并可改 */
+  setTaskAgent(state: UserTasks, id: string, agentId: string, nodeId?: string): TaskItem {
     const agent = agentId.trim().toLowerCase();
     if (!agent) throw new Error('agentId 必填');
     const task = state.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`任务不存在: ${id}`);
     task.agentId = agent;
+    if (nodeId?.trim()) task.nodeId = normalizeNodeId(nodeId);
+    this.store.write(state);
+    return task;
+  }
+
+  /** 修改任务绑定的执行节点（agent 不变时用） */
+  setTaskNode(state: UserTasks, id: string, nodeId: string): TaskItem {
+    const node = nodeId.trim();
+    if (!node) throw new Error('nodeId 必填');
+    const task = state.tasks.find((t) => t.id === id);
+    if (!task) throw new Error(`任务不存在: ${id}`);
+    task.nodeId = node;
     this.store.write(state);
     return task;
   }
@@ -296,15 +324,29 @@ export class TaskService {
   resolveRoute(state: UserTasks, taskId?: string): TaskRoute {
     const id = taskId?.trim() || state.activeTaskId || DEFAULT_TASK_ID;
     const task = state.tasks.find((t) => t.id === id);
-    if (task) return { agentId: task.agentId, taskId: task.id, taskName: task.name, cwd: task.cwd };
+    if (task) {
+      return { nodeId: normalizeNodeId(task.nodeId), agentId: task.agentId, taskId: task.id, taskName: task.name, cwd: task.cwd };
+    }
     const active = state.tasks.find((t) => t.id === state.activeTaskId) ?? state.tasks[0];
-    return { agentId: active?.agentId ?? this.defaultAgentId, taskId: id, taskName: id, cwd: active?.cwd };
+    return {
+      nodeId: normalizeNodeId(active?.nodeId),
+      agentId: active?.agentId ?? this.defaultAgentId,
+      taskId: id,
+      taskName: id,
+      cwd: active?.cwd,
+    };
   }
 
   /** 当前激活任务的 agent（新建任务缺省继承） */
   private agentOf(state: UserTasks): string {
     const active = state.tasks.find((t) => t.id === state.activeTaskId);
     return active?.agentId ?? this.defaultAgentId;
+  }
+
+  /** 当前激活任务的执行节点（新建任务缺省继承） */
+  private nodeOf(state: UserTasks): string {
+    const active = state.tasks.find((t) => t.id === state.activeTaskId);
+    return normalizeNodeId(active?.nodeId);
   }
 
   /**

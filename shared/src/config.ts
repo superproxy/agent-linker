@@ -28,8 +28,10 @@ export const gatewayConfigSchema = z.object({
     .object({
       enabled: z.boolean().default(false),
       token: z.string().default(''),
+      /** 登录会话有效期（天），到期需重新登录；默认 7 天 */
+      sessionTtlDays: z.number().positive().default(7),
     })
-    .default({ enabled: false, token: '' }),
+    .default({ enabled: false, token: '', sessionTtlDays: 7 }),
   agents: z.array(agentDefSchema).default([]),
   /** agent 默认工作目录：agent 未显式配 cwd 时用它作为 ACP 进程/会话的工作目录；缺省为空串（沿用网关启动目录） */
   defaultCwd: z.string().default(''),
@@ -45,8 +47,9 @@ export const gatewayConfigSchema = z.object({
       /**
        * openclaw-weixin-plugin：openclaw 插件运行时（加载 plugins 里的 @tencent-weixin/openclaw-weixin，登录态复用同目录）
        * weixin-bot：独立标准 adapter（gateway 进程内拉起，走 ilink 长轮询 + 网关 SSE，默认）
+       * external：独立标准 adapter，但由外部进程管理器单独拉起（gateway 不再内嵌，避免同账号重复收消息）
        */
-      mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin']).default('weixin-bot'),
+      mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).default('weixin-bot'),
       /** weixin-bot 模式：登录态账号 id（缺省取 accounts/ 下第一个） */
       accountId: z.string().optional(),
       /** weixin-bot 模式：对话模型（默认 agent:opencode） */
@@ -108,7 +111,7 @@ export function defaultAgentDefinitions(): AgentDefinition[] {
 export function defaultConfig(): GatewayConfig {
   return {
     server: { host: '127.0.0.1', port: 8787 },
-    auth: { enabled: false, token: '' },
+    auth: { enabled: false, token: '', sessionTtlDays: 7 },
     agents: defaultAgentDefinitions(),
     channels: {},
     plugins: [],
