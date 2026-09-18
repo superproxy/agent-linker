@@ -278,6 +278,15 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   registerPmApi(app, {
     pm,
     authGuard,
+    configPath,
+    onChildGatewayChanged: (section, target) => {
+      // zod default 产出只读代理：整体替换对应顶层段，保持网关内存与落盘一致
+      if (section === 'weixin') {
+        config.weixin = { ...config.weixin, gatewayUrl: target.url || '', gatewayToken: target.token || '' };
+      } else {
+        config.node = { ...config.node, gatewayUrl: target.url || '', gatewayToken: target.token || '' };
+      }
+    },
     server: {
       host: gw.server.host,
       port: gw.server.port,

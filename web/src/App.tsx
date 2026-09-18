@@ -91,8 +91,8 @@ export function App() {
     setAuth({ status: 'login' });
   }, [base]);
 
-  const applyBase = () => {
-    localStorage.setItem(LS_KEY, base);
+  const applyBase = (next: string) => {
+    localStorage.setItem(LS_KEY, next.trim().replace(/\/+$/, ''));
     window.location.reload();
   };
 
@@ -128,7 +128,6 @@ export function App() {
       <LoginPage
         base={base}
         error={auth.error}
-        onBaseChange={setBase}
         onApplyBase={applyBase}
         onLogin={doLogin}
       />
@@ -158,7 +157,6 @@ export function App() {
           token={token}
           auth={auth}
           onAuthError={handleAuthError}
-          onBaseChange={setBase}
           onApplyBase={applyBase}
           onGoTab={goTab}
         />
@@ -192,8 +190,7 @@ function PageRouter(props: {
   token: string;
   auth: AuthState;
   onAuthError: (e: unknown) => boolean;
-  onBaseChange: (v: string) => void;
-  onApplyBase: () => void;
+  onApplyBase: (next: string) => void;
   onGoTab: (t: TabId) => void;
 }) {
   const { tab, base, token, onAuthError } = props;
@@ -226,7 +223,6 @@ function PageRouter(props: {
           base={base}
           token={token}
           onAuthError={onAuthError}
-          onBaseChange={props.onBaseChange}
           onApplyBase={props.onApplyBase}
         />
       ) : null;

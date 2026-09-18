@@ -5,14 +5,23 @@ import { ApiOutlined, LockOutlined, UserOutlined } from '@ant-design/icons';
 export function LoginPage(props: {
   base: string;
   error?: string;
-  onBaseChange: (v: string) => void;
-  onApplyBase: () => void;
+  onApplyBase: (next: string) => void;
   onLogin: (u: string, p: string) => Promise<string | null>;
 }) {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
+  const [baseDraft, setBaseDraft] = useState(props.base);
   const [err, setErr] = useState<string | null>(props.error ?? null);
   const [busy, setBusy] = useState(false);
+
+  const applyBase = () => {
+    const url = baseDraft.trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/.+/.test(url)) {
+      setErr('网关地址需以 http:// 或 https:// 开头');
+      return;
+    }
+    props.onApplyBase(url);
+  };
 
   const submit = async () => {
     if (!username.trim() || !password || busy) return;
@@ -37,12 +46,12 @@ export function LoginPage(props: {
             <Input
               size="large"
               prefix={<ApiOutlined style={{ color: 'rgba(229,233,240,0.35)' }} />}
-              value={props.base}
-              onChange={(e) => props.onBaseChange(e.target.value)}
+              value={baseDraft}
+              onChange={(e) => setBaseDraft(e.target.value)}
               spellCheck={false}
-              onPressEnter={props.onApplyBase}
+              onPressEnter={applyBase}
               addonAfter={
-                <Button type="link" size="small" style={{ padding: 0 }} onClick={props.onApplyBase}>
+                <Button type="link" size="small" style={{ padding: 0 }} onClick={applyBase}>
                   切换
                 </Button>
               }

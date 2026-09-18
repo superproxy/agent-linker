@@ -142,10 +142,11 @@ export class AgentManager {
     return { kind: 'ok', adapter };
   }
 
-  /** 全部可路由 agent 落点（任务弹窗级联选择用）：local 配置项 + 在线节点自报项 */
+  /** 全部可路由 agent 落点（任务弹窗级联选择用）：local 已启用项 + 在线节点自报项 */
   listRoutingAgents(): RoutingAgent[] {
     const out: RoutingAgent[] = [];
     for (const def of this.definitions) {
+      if (!this.enabled.has(def.id)) continue;
       out.push({
         nodeId: LOCAL_NODE_ID,
         agentId: def.id,

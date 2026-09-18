@@ -582,6 +582,39 @@ export class PmClient {
     const data = (await this.request(`/api/pm/logs/${encodeURIComponent(id)}?tail=${tail}`)) as { content?: string };
     return data.content ?? '';
   }
+
+  /** 读取 weixin/node 挂载网关；url 为空表示挂载本机网关，token 不回明文 */
+  async gatewayTargets(): Promise<Record<ChildGatewayId, ChildGatewayTargetInfo>> {
+    const data = (await this.request('/api/pm/gateway-targets')) as {
+      targets: Record<ChildGatewayId, ChildGatewayTargetInfo>;
+    };
+    return data.targets;
+  }
+
+  /** 落盘挂载网关并自动重启该进程；url 传空串切回本机网关 */
+  async setGatewayTarget(
+    id: ChildGatewayId,
+    url: string,
+    token: string,
+  ): Promise<{ processes: PmProcess[]; targets: Record<ChildGatewayId, ChildGatewayTargetInfo> }> {
+    return (await this.request(`/api/pm/gateway-targets/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ url, token }),
+    })) as { processes: PmProcess[]; targets: Record<ChildGatewayId, ChildGatewayTargetInfo> };
+  }
+}
+
+/** 可改挂载网关的本机子进程 */
+export type ChildGatewayId = 'weixin' | 'node';
+
+/** 子进程挂载网关信息（token 只回是否已配置） */
+export interface ChildGatewayTargetInfo {
+  /** 远程网关地址；空串表示本机网关 */
+  url: string;
+  /** 是否挂载本机网关 */
+  local: boolean;
+  /** 是否已配置回连 token */
+  tokenConfigured: boolean;
 }
 
 // ── 渠道终端 / 任务 / Key / 节点（渠道终端≠系统账号，仅为渠道侧匿名会话作用域）──
@@ -708,6 +741,12 @@ export class OpsClient {
   async listAllTasks(): Promise<UserTasks[]> {
     const data = (await this.request('/api/tasks/all')) as { users: UserTasks[] };
     return data.users;
+  }
+
+  /** 全局默认 agent（config.yaml tasks.defaultAgentId），新建任务缺省绑定它 */
+  async getDefaultAgent(): Promise<string> {
+    const data = (await this.request('/api/tasks/default-agent')) as { defaultAgentId: string };
+    return data.defaultAgentId;
   }
 
   async createTask(input: {

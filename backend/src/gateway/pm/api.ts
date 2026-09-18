@@ -6,6 +6,8 @@
  *   POST /api/pm/stop            { targets: ['weixin'|'node'] }（不允许经 web 停止 gateway）
  *   POST /api/pm/restart         { targets: string[] }（gateway 仅允许 restart，走接力自重启）
  *   GET  /api/pm/logs/:id?tail=  某进程日志尾部文本
+ *   GET  /api/pm/gateway-targets           weixin/node 当前挂载网关（token 只回是否已配置）
+ *   PUT  /api/pm/gateway-targets/:id       { url, token? } 落盘后自动重启该进程（url 空串=切回本机）
  *
  * 安全：进程能操控本机，必须同时满足
  *   1) 管理员（authGuard.isAdmin：未开鉴权 / 静态 token / admin 会话）
@@ -13,7 +15,11 @@
  * 连到远程网关时这些接口一律 403，前端也会据 /api/system/info.local 隐藏入口。
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { readFileSync, existsSync } from 'node:fs';
+import { parse } from 'yaml';
+import { migrateConfig } from '@linkagent/shared';
 import { ProcessManager, type TargetId } from '../../supervisor/manager.js';
+import { persistChildGatewayTarget, type ChildSectionId, type ChildGatewayTarget } from '../config.js';
 import type { AuthGuard } from '../users/auth.js';
 
 /** 回环来源判定（未开启 trustProxy，反向代理来源不会被当成本机） */
@@ -44,6 +50,9 @@ export function normalizeTargets(input: unknown, opts: { allowGateway?: boolean 
 export interface PmApiDeps {
   pm: ProcessManager;
   authGuard: AuthGuard;
+  configPath: string;
+  /** 落盘成功后同步网关内存配置；不落内存不影响重启后的子进程，仅为保持本进程读到的一致 */
+  onChildGatewayChanged?: (section: ChildSectionId, target: ChildGatewayTarget) => void;
   server: { host: string; port: number; authEnabled: boolean; authMode?: string; sessionTtlDays: number };
 }
 
@@ -134,5 +143,44 @@ export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
     const q = request.query as { tail?: string };
     const tail = Math.min(2000, Math.max(1, Number(q.tail) || 200));
     return { id, tail, content: pm.readTailLog(id, tail) };
+  });
+
+  /** 读取 weixin/node 挂载网关：url 缺省即本机网关；token 只回是否已配置，不回明文 */
+  const readTargets = (): Record<ChildSectionId, { url: string; local: boolean; tokenConfigured: boolean }> => {
+    const cfg = existsSync(deps.configPath) ? migrateConfig(parse(readFileSync(deps.configPath, 'utf8'))) : null;
+    const out = {} as Record<ChildSectionId, { url: string; local: boolean; tokenConfigured: boolean }>;
+    for (const section of ['weixin', 'node'] as ChildSectionId[]) {
+      const url = cfg?.[section].gatewayUrl?.replace(/\/+$/, '') ?? '';
+      out[section] = { url, local: !url, tokenConfigured: !!cfg?.[section].gatewayToken };
+    }
+    return out;
+  };
+
+  app.get('/api/pm/gateway-targets', async (request, reply) => {
+    if (!guard(request, reply)) return;
+    return { targets: readTargets() };
+  });
+
+  app.put('/api/pm/gateway-targets/:id', async (request, reply) => {
+    if (!guard(request, reply)) return;
+    const { id } = request.params as { id: string };
+    if (id !== 'weixin' && id !== 'node') {
+      return reply.code(400).send({ error: `未知进程 "${id}"，可选：weixin | node` });
+    }
+    const body = (request.body ?? {}) as { url?: unknown; token?: unknown };
+    if (typeof body.url !== 'string' || (body.token !== undefined && typeof body.token !== 'string')) {
+      return reply.code(400).send({ error: 'url 必须为字符串，token 为可选字符串' });
+    }
+    const target: ChildGatewayTarget = { url: body.url, token: body.token ?? '' };
+    try {
+      persistChildGatewayTarget(deps.configPath, id, target);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+    deps.onChildGatewayChanged?.(id, { url: target.url.trim().replace(/\/+$/, ''), token: target.token.trim() });
+
+    // 保存并重启：仅重启该子进程（未在运行则直接拉起）
+    await pm.restart([id]);
+    return { ok: true, targets: readTargets(), processes: pm.status() };
   });
 }

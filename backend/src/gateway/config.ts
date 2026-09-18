@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
-import { parse, parseDocument } from 'yaml';
+import { isMap, parse, parseDocument, YAMLMap } from 'yaml';
 import {
   migrateConfig,
   defaultSharedConfig,
@@ -236,6 +236,69 @@ export function persistDefaultTaskAgentId(path: string, agentId: string): string
   const reparsed = migrateConfig(parse(readFileSync(p, 'utf8')));
   if (reparsed.gateway.tasks.defaultAgentId !== id) {
     throw new Error(`持久化校验失败：tasks.defaultAgentId 未更新为 ${id}`);
+  }
+  return p;
+}
+
+/** 可改挂载网关的子进程段（weixin / node 进程，配置里均为顶层同名段） */
+export type ChildSectionId = 'weixin' | 'node';
+
+export interface ChildGatewayTarget {
+  /** 远程网关 base；空串表示切回本机网关（清空该段回连地址，恢复缺省推导） */
+  url: string;
+  /** 回连凭据；切回本机或远程网关免鉴权时留空 */
+  token: string;
+}
+
+/**
+ * 持久化微信 / node 进程的挂载网关到 config.yaml 的 <section>.gatewayUrl/gatewayToken：
+ * - 两种文件形状统一：新三段与旧扁平文件里 weixin/node 均为顶层段；
+ * - url 非空：写入 gatewayUrl，有 token 写 gatewayToken、无 token 则清除旧 token；
+ * - url 为空（切回本机）：删除 gatewayUrl/gatewayToken 两个键；
+ * - 文件不存在则新建；用 YAML Document API 就地改，保留原有注释与键序。
+ * 返回写入的绝对路径。
+ */
+export function persistChildGatewayTarget(
+  path: string,
+  section: ChildSectionId,
+  target: ChildGatewayTarget,
+): string {
+  const p = resolve(path);
+  const url = target.url.trim().replace(/\/+$/, '');
+  const token = target.token.trim();
+  if (url && !/^https?:\/\/\S+$/.test(url)) {
+    throw new Error('网关地址需以 http:// 或 https:// 开头');
+  }
+
+  let doc = parseDocument('');
+  if (existsSync(p)) {
+    doc = parseDocument(readFileSync(p, 'utf8'));
+  } else {
+    mkdirSync(dirname(p), { recursive: true });
+  }
+
+  let sec = doc.get(section) as unknown;
+  if (url) {
+    if (!isMap(sec)) {
+      doc.set(section, new YAMLMap());
+      sec = doc.get(section);
+    }
+    const map = sec as YAMLMap;
+    map.set('gatewayUrl', url);
+    if (token) map.set('gatewayToken', token);
+    else map.delete('gatewayToken');
+  } else if (isMap(sec)) {
+    (sec as YAMLMap).delete('gatewayUrl');
+    (sec as YAMLMap).delete('gatewayToken');
+  }
+
+  writeFileSync(p, doc.toString(), 'utf8');
+
+  // 重新解析校验（两种形状都归一化）
+  const reparsed = migrateConfig(parse(readFileSync(p, 'utf8')));
+  const gotUrl = reparsed[section].gatewayUrl;
+  if ((url || '') !== gotUrl) {
+    throw new Error(`持久化校验失败：${section}.gatewayUrl 未更新为 ${url || '（本机）'}`);
   }
   return p;
 }

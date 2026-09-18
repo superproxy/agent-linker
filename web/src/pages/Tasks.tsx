@@ -34,19 +34,33 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
   const { tick } = useRefreshTick();
   const [users, setUsers] = useState<UserTasks[] | null>(null);
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
-  const [agents, setAgents] = useState<{ id: string; displayName?: string }[]>([]);
+  const [localAgents, setLocalAgents] = useState<{ id: string; displayName?: string }[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
 
+  const nodeId = Form.useWatch('nodeId', form) as string | undefined;
+  const isLocalNode = (id?: string) => !id || id === 'local';
+  const agentOptions = useMemo<{ id: string; displayName?: string }[]>(() => {
+    if (!isLocalNode(nodeId)) return nodes.find((n) => n.nodeId === nodeId)?.agents ?? [];
+    return localAgents;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId, nodes, localAgents]);
+
+  const syncAgentForNode = (nextNode?: string) => {
+    const list = isLocalNode(nextNode) ? localAgents : nodes.find((n) => n.nodeId === nextNode)?.agents ?? [];
+    const cur = form.getFieldValue('agentId') as string | undefined;
+    if (!list.some((a) => a.id === cur)) form.setFieldValue('agentId', list[0]?.id ?? '');
+  };
+
   const load = useCallback(async () => {
     try {
       const [u, na] = await Promise.all([ops.listAllTasks(), ops.nodeAgents()]);
       setUsers(u);
       setNodes(na.nodes);
-      setAgents(na.agents);
+      setLocalAgents(na.local.agents);
       setErr(null);
     } catch (e) {
       if (props.onAuthError(e)) return;
@@ -75,8 +89,12 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
 
   const openCreate = (channel: string, userId: string) => {
     setEditing({ channel, userId });
-    form.setFieldsValue({ name: '', agentId: agents[0]?.id ?? '', nodeId: '', key: '', cwd: '' });
+    form.setFieldsValue({ name: '', agentId: localAgents[0]?.id ?? '', nodeId: '', key: '', cwd: '' });
     setOpen(true);
+    void ops
+      .getDefaultAgent()
+      .then((id) => form.setFieldValue('agentId', localAgents.some((a) => a.id === id) ? id : localAgents[0]?.id ?? ''))
+      .catch(() => undefined);
   };
 
   const openEdit = (channel: string, userId: string, t: TaskItem) => {
@@ -84,10 +102,11 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
     form.setFieldsValue({
       name: t.name,
       agentId: t.agentId,
-      nodeId: t.nodeId ?? '',
+      nodeId: t.nodeId && t.nodeId !== 'local' ? t.nodeId : '',
       cwd: t.cwd ?? '',
     });
     setOpen(true);
+    syncAgentForNode(t.nodeId ?? '');
   };
 
   const submit = async () => {
@@ -271,12 +290,16 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
           </Form.Item>
           <Form.Item name="agentId" label="Agent">
             <Select
-              options={[{ value: '', label: '（默认）' }, ...agents.map((a) => ({ value: a.id, label: a.displayName || a.id }))]}
+              options={[
+                ...(editing?.task ? [] : [{ value: '', label: '（跟随当前激活任务）' }]),
+                ...agentOptions.map((a) => ({ value: a.id, label: a.displayName || a.id })),
+              ]}
             />
           </Form.Item>
           <Form.Item name="nodeId" label="运行节点">
             <Select
               options={[{ value: '', label: '本机' }, ...nodes.map((n) => ({ value: n.nodeId, label: n.name }))]}
+              onChange={(v: string) => syncAgentForNode(v)}
             />
           </Form.Item>
           {!editing?.task ? (

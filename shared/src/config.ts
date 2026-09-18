@@ -144,6 +144,17 @@ const legacyConfigSchema = z
         mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).optional(),
         accountId: z.string().optional(),
         model: z.string().optional(),
+        gatewayUrl: z.string().optional(),
+        gatewayToken: z.string().optional(),
+      })
+      .optional(),
+    node: z
+      .object({
+        enabled: z.boolean().optional(),
+        name: z.string().optional(),
+        agents: z.array(z.string()).optional(),
+        gatewayUrl: z.string().optional(),
+        gatewayToken: z.string().optional(),
       })
       .optional(),
   })
@@ -186,9 +197,19 @@ export function migrateConfig(raw: unknown): SharedConfig {
     ...(legacy.weixin?.mode ? { mode: legacy.weixin.mode } : {}),
     ...(legacy.weixin?.accountId ? { accountId: legacy.weixin.accountId } : {}),
     ...(legacy.weixin?.model ? { model: legacy.weixin.model } : {}),
+    ...(legacy.weixin?.gatewayUrl !== undefined ? { gatewayUrl: legacy.weixin.gatewayUrl } : {}),
+    ...(legacy.weixin?.gatewayToken !== undefined ? { gatewayToken: legacy.weixin.gatewayToken } : {}),
   });
 
-  return { gateway, weixin, node: nodeSectionSchema.parse({}) };
+  const node = nodeSectionSchema.parse({
+    ...(legacy.node?.enabled !== undefined ? { enabled: legacy.node.enabled } : {}),
+    ...(legacy.node?.name ? { name: legacy.node.name } : {}),
+    ...(legacy.node?.agents ? { agents: legacy.node.agents } : {}),
+    ...(legacy.node?.gatewayUrl !== undefined ? { gatewayUrl: legacy.node.gatewayUrl } : {}),
+    ...(legacy.node?.gatewayToken !== undefined ? { gatewayToken: legacy.node.gatewayToken } : {}),
+  });
+
+  return { gateway, weixin, node };
 }
 
 /**

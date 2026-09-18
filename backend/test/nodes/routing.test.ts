@@ -94,6 +94,16 @@ test('listRoutingAgents：local 全量 + 仅在线远程节点的自报 agent', 
   await m.dispose();
 });
 
+test('listRoutingAgents：local 仅暴露已启用 agent，停用项不出现', async () => {
+  const m = freshManager();
+  await m.start();
+  m.updateAgent('pi', { enabled: false });
+  const all = m.listRoutingAgents();
+  assert.ok(all.some((a) => a.nodeId === 'local' && a.agentId === 'opencode'));
+  assert.ok(!all.some((a) => a.nodeId === 'local' && a.agentId === 'pi'), '停用 agent 不应出现在可路由列表');
+  await m.dispose();
+});
+
 test('节点上下线 change 回调驱动远程适配器增删', async () => {
   let listener: (nodeId: string, online: boolean) => void = () => {};
   const state = { online: true, agents: [{ id: 'codex', displayName: 'Codex' }] };

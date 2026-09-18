@@ -14,6 +14,16 @@ export const DEFAULT_BASE = 'http://127.0.0.1:8787';
 export const LS_KEY = 'linkagent.gw.base';
 export const LS_TAB_KEY = 'linkagent.gw.tab';
 export const LS_TOKEN_KEY = 'linkagent.gw.token';
+export const LS_PROFILES_KEY = 'linkagent.gw.profiles';
+
+/** 远程网关连接配置（仅保存在当前浏览器 localStorage） */
+export interface GatewayProfile {
+  id: string;
+  name: string;
+  url: string;
+  /** 可选：网关开启鉴权时使用的永久凭据（gateway token / API token） */
+  token?: string;
+}
 
 export type TabId =
   | 'overview'
@@ -76,6 +86,36 @@ export const NAV_GROUPS: NavGroup[] = [
 export const ALL_TABS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
 export const readToken = (): string => localStorage.getItem(LS_TOKEN_KEY) ?? '';
+
+/** 读取已保存的远程网关清单（数据损坏时回退空数组） */
+export function readProfiles(): GatewayProfile[] {
+  const raw = localStorage.getItem(LS_PROFILES_KEY);
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(
+      (p): p is GatewayProfile =>
+        !!p &&
+        typeof p === 'object' &&
+        typeof (p as GatewayProfile).id === 'string' &&
+        typeof (p as GatewayProfile).name === 'string' &&
+        typeof (p as GatewayProfile).url === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** 持久化远程网关清单 */
+export function writeProfiles(profiles: GatewayProfile[]): void {
+  localStorage.setItem(LS_PROFILES_KEY, JSON.stringify(profiles));
+}
+
+/** 生成新 profile id */
+export function newProfileId(): string {
+  return `gw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
