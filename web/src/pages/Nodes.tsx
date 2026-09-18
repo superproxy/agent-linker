@@ -9,7 +9,12 @@ import { EmptyHint, StateTag } from '../components/common';
 import { relTime } from '../lib/constants';
 import { NodeEnrollPanel } from './NodeEnroll';
 
-export function NodesPage(props: { base: string; token: string; onAuthError: AuthErrorHandler }) {
+export function NodesPage(props: {
+  base: string;
+  token: string;
+  onAuthError: AuthErrorHandler;
+  scope: 'local' | 'remote';
+}) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
   const [nodes, setNodes] = useState<NodeInfo[] | null>(null);
@@ -47,6 +52,8 @@ export function NodesPage(props: { base: string; token: string; onAuthError: Aut
   };
 
   const pending = (nodes ?? []).filter((n) => n.status === 'pending');
+  const visible = (nodes ?? []).filter((n) => (props.scope === 'local' ? n.nodeId === 'local' : n.nodeId !== 'local'));
+  const isRemote = props.scope === 'remote';
 
   const columns: ColumnsType<NodeInfo> = [
     {
@@ -166,7 +173,7 @@ export function NodesPage(props: { base: string; token: string; onAuthError: Aut
     <div>
       {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} /> : null}
 
-      {pending.length > 0 ? (
+      {isRemote && pending.length > 0 ? (
         <Alert
           type="warning"
           showIcon
@@ -178,26 +185,32 @@ export function NodesPage(props: { base: string; token: string; onAuthError: Aut
 
       <Card
         bordered
-        title={<span style={{ fontSize: 14.5, fontWeight: 600 }}>节点列表</span>}
+        title={<span style={{ fontSize: 14.5, fontWeight: 600 }}>{isRemote ? '远程节点' : '本机节点'}</span>}
         extra={
-          <Button type={showEnroll ? 'default' : 'primary'} icon={<PlusOutlined />} onClick={() => setShowEnroll((v) => !v)}>
-            {showEnroll ? '收起接入指引' : '接入新机器'}
-          </Button>
+          isRemote ? (
+            <Button type={showEnroll ? 'default' : 'primary'} icon={<PlusOutlined />} onClick={() => setShowEnroll((v) => !v)}>
+              {showEnroll ? '收起接入指引' : '接入新机器'}
+            </Button>
+          ) : null
         }
       >
-        {showEnroll ? (
+        {isRemote && showEnroll ? (
           <div style={{ marginBottom: 18, padding: 16, border: '1px solid #1e2430', borderRadius: 10, background: '#0d1017' }}>
             <NodeEnrollPanel base={props.base} token={props.token} onAuthError={props.onAuthError} />
           </div>
         ) : null}
         <Table
           rowKey="nodeId"
-          columns={columns}
-          dataSource={nodes ?? []}
+          columns={isRemote ? columns : columns.filter((c) => c.key !== 'ops')}
+          dataSource={visible}
           loading={nodes === null}
           pagination={false}
           rowClassName={(n) => (n.status === 'pending' ? 'node-pending-row' : '')}
-          locale={{ emptyText: <EmptyHint text="暂无远程节点（本机网关始终可用）" /> }}
+          locale={{
+            emptyText: (
+              <EmptyHint text={isRemote ? '暂无远程节点' : '本机网关节点不可用'} />
+            ),
+          }}
         />
       </Card>
     </div>

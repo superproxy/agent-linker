@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
 import {
   AppstoreOutlined,
+  CloudServerOutlined,
   ClusterOutlined,
   ControlOutlined,
-  DashboardOutlined,
+  DesktopOutlined,
   KeyOutlined,
   MessageOutlined,
   SafetyCertificateOutlined,
-  SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
 import { processApiBase as processApiBaseImpl } from './local-base';
@@ -30,16 +30,19 @@ export interface GatewayProfile {
 
 export type TabId =
   | 'overview'
-  | 'agents'
+  | 'local-agents'
+  | 'remote-agents'
   | 'tasks'
   | 'keys'
   | 'my-token'
   | 'channel-tokens'
-  | 'nodes'
+  | 'local-nodes'
+  | 'remote-nodes'
   | 'weixin'
   | 'accounts'
   | 'processes'
-  | 'settings';
+  | 'local-gateway'
+  | 'remote-gateway';
 
 export interface NavItem {
   id: TabId;
@@ -55,40 +58,59 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    title: '监控',
-    items: [{ id: 'overview', label: '概览 / 测试台', icon: <DashboardOutlined /> }],
-  },
-  {
-    title: '运行时',
+    title: '本机',
     items: [
-      { id: 'agents', label: 'Agent 管理', icon: <AppstoreOutlined /> },
-      { id: 'tasks', label: '任务', icon: <MessageOutlined /> },
-      { id: 'nodes', label: '节点管理', icon: <ClusterOutlined /> },
+      { id: 'local-gateway', label: '网关', icon: <DesktopOutlined />, adminOnly: true },
+      { id: 'processes', label: '进程', icon: <ControlOutlined />, adminOnly: true },
+      { id: 'local-nodes', label: '节点', icon: <ClusterOutlined /> },
+      { id: 'local-agents', label: 'agent', icon: <AppstoreOutlined /> },
+      { id: 'overview', label: 'chat测试', icon: <MessageOutlined /> },
     ],
   },
   {
-    title: '凭据',
+    title: '远程',
     items: [
-      { id: 'keys', label: 'Key 管理', icon: <KeyOutlined /> },
-      { id: 'my-token', label: '我的 Token', icon: <SafetyCertificateOutlined /> },
-      { id: 'channel-tokens', label: '渠道凭据', icon: <SafetyCertificateOutlined />, adminOnly: true },
+      { id: 'remote-gateway', label: '网关', icon: <CloudServerOutlined />, adminOnly: true },
+      { id: 'remote-nodes', label: '节点', icon: <ClusterOutlined /> },
+      { id: 'remote-agents', label: 'agent', icon: <AppstoreOutlined /> },
     ],
   },
   {
-    title: '渠道',
-    items: [{ id: 'weixin', label: '微信登录', icon: <MessageOutlined /> }],
+    title: '通用',
+    items: [
+      { id: 'keys', label: 'key', icon: <KeyOutlined /> },
+      { id: 'tasks', label: '任务管理', icon: <MessageOutlined /> },
+    ],
   },
   {
     title: '系统',
     items: [
+      { id: 'my-token', label: '我的 Token', icon: <SafetyCertificateOutlined /> },
+      { id: 'channel-tokens', label: '渠道凭据', icon: <SafetyCertificateOutlined />, adminOnly: true },
+      { id: 'weixin', label: '微信登录', icon: <MessageOutlined /> },
       { id: 'accounts', label: '真实用户', icon: <TeamOutlined />, adminOnly: true },
-      { id: 'processes', label: '进程管理', icon: <ControlOutlined />, adminOnly: true },
-      { id: 'settings', label: '网关设置', icon: <SettingOutlined />, adminOnly: true },
     ],
   },
 ];
 
 export const ALL_TABS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
+
+/** 旧侧栏 tab id → 新 id（localStorage 兼容） */
+const LEGACY_TABS: Record<string, TabId> = {
+  agents: 'local-agents',
+  nodes: 'remote-nodes',
+  settings: 'local-gateway',
+};
+
+export function resolveStoredTab(raw: string | null): TabId {
+  if (!raw) return 'overview';
+  const mapped = LEGACY_TABS[raw] ?? raw;
+  return ALL_TABS.some((x) => x.id === mapped) ? (mapped as TabId) : 'overview';
+}
+
+export function navGroupTitle(tab: TabId): string | undefined {
+  return NAV_GROUPS.find((g) => g.items.some((it) => it.id === tab))?.title;
+}
 
 export const readToken = (): string => localStorage.getItem(LS_TOKEN_KEY) ?? '';
 

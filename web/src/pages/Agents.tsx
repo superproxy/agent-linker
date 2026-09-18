@@ -20,6 +20,7 @@ export function AgentsPage(props: {
   base: string;
   token: string;
   onAuthError: AuthErrorHandler;
+  scope: 'local' | 'remote';
   onGoNodes?: () => void;
 }) {
   const admin = new AdminClient(props.base, props.token);
@@ -199,6 +200,7 @@ export function AgentsPage(props: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {err ? <Alert type="error" showIcon message={err} /> : null}
 
+      {props.scope === 'local' ? (
       <PageCard
         title="本机（网关）"
         subtitle="这台机器开通的 agent，来自网关配置，可在此启停、切模型、设为新任务默认。"
@@ -234,8 +236,16 @@ export function AgentsPage(props: {
           添加为运行时热生效（重启网关后还原 config.yaml，需长期保留请写入配置）；启用前请确认本机已安装对应 CLI，否则该 agent 会标记为不可用。
         </p>
       </PageCard>
+      ) : null}
 
-      {(data?.nodes ?? []).map((n) => {
+      {props.scope === 'remote' && data === null ? (
+        <PageCard title="远程机器" subtitle="连接器自报开通的 agent，网关侧只读。" loading>
+          <EmptyHint text="加载中…" />
+        </PageCard>
+      ) : null}
+
+      {props.scope === 'remote'
+        ? (data?.nodes ?? []).map((n) => {
         const st = nodeState(n);
         return (
           <PageCard
@@ -283,11 +293,12 @@ export function AgentsPage(props: {
             </div>
           </PageCard>
         );
-      })}
+      })
+        : null}
 
-      {data && data.nodes.length === 0 ? (
+      {props.scope === 'remote' && data && data.nodes.length === 0 ? (
         <PageCard title="其他远程机器" subtitle="在其他机器上运行节点连接器并注册后，会在此显示其开通的 agent。">
-          <EmptyHint text="暂无远程机器（可在「节点管理」接入新机器）" />
+          <EmptyHint text="暂无远程机器（可在「远程 · 节点」接入新机器）" />
         </PageCard>
       ) : null}
     </div>

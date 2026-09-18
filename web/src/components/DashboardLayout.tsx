@@ -10,7 +10,7 @@ import {
   SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { ALL_TABS, NAV_GROUPS, type TabId } from '../lib/constants';
+import { ALL_TABS, NAV_GROUPS, navGroupTitle, type TabId } from '../lib/constants';
 import { GatewayClient, OpsClient, type UserPublic } from '../api';
 
 const { Sider, Header, Content } = Layout;
@@ -28,7 +28,7 @@ function SiderMenu(props: { active: TabId; canAdmin: boolean; showMyToken: boole
             return !it.adminOnly || props.canAdmin;
           })
           .map((it) => ({ key: it.id, icon: it.icon, label: it.label })),
-      })),
+      })).filter((g) => (g.children?.length ?? 0) > 0),
     [props.canAdmin, props.showMyToken],
   );
 
@@ -39,7 +39,9 @@ function SiderMenu(props: { active: TabId; canAdmin: boolean; showMyToken: boole
       theme="dark"
       selectedKeys={[props.active]}
       items={items}
-      onClick={(info) => props.onSelect(info.key as TabId)}
+      onClick={(info) => {
+        if (ALL_TABS.some((t) => t.id === info.key)) props.onSelect(info.key as TabId);
+      }}
       style={{ background: 'transparent', borderInlineEnd: 0 }}
     />
   );
@@ -62,6 +64,7 @@ export function DashboardLayout(props: {
   const canAdmin = props.authMode !== 'ready' || isAdmin;
   const showMyToken = props.authMode === 'ready' && props.currentUser?.username !== 'local';
   const activeMeta = ALL_TABS.find((t) => t.id === props.active);
+  const groupTitle = navGroupTitle(props.active);
 
   const [healthOk, setHealthOk] = useState(false);
   const [healthText, setHealthText] = useState('检测中…');
@@ -189,7 +192,7 @@ export function DashboardLayout(props: {
             className="menu-trigger"
           />
           <div className="header-title">
-            <h2>{activeMeta?.label ?? ''}</h2>
+            <h2>{groupTitle && activeMeta ? `${groupTitle} · ${activeMeta.label}` : (activeMeta?.label ?? '')}</h2>
             <span className="sub">linkagent gateway</span>
           </div>
           <span className="header-spacer" />
@@ -202,9 +205,12 @@ export function DashboardLayout(props: {
           </Tooltip>
 
           {pendingNodes > 0 ? (
-            <Tooltip title="有待审批节点，前往节点管理处理">
+            <Tooltip title="有待审批节点，前往远程 · 节点处理">
               <Badge count={pendingNodes} size="small">
-                <BellOutlined style={{ fontSize: 16, color: '#eab308' }} />
+                <BellOutlined
+                  style={{ fontSize: 16, color: '#eab308', cursor: 'pointer' }}
+                  onClick={() => selectTab('remote-nodes')}
+                />
               </Badge>
             </Tooltip>
           ) : null}

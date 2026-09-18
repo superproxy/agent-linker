@@ -9,6 +9,7 @@ import {
   initialGatewayBase,
   alignToPageOrigin,
   readToken,
+  resolveStoredTab,
   type TabId,
 } from './lib/constants';
 import { useRefreshTick } from './lib/hooks';
@@ -24,7 +25,7 @@ import { ChannelTokensPage } from './pages/ChannelTokens';
 import { NodesPage } from './pages/Nodes';
 import { WeixinPage } from './pages/Weixin';
 import { AccountsPage } from './pages/Accounts';
-import { SettingsPage } from './pages/Settings';
+import { LocalGatewayPage, RemoteGatewayPage } from './pages/Settings';
 import { ProcessesPage } from './pages/Processes';
 
 type AuthState =
@@ -48,10 +49,7 @@ export function App() {
   );
   const [, setTokenState] = useState(readToken);
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
-  const [tab, setTab] = useState<TabId>(() => {
-    const t = localStorage.getItem(LS_TAB_KEY) as TabId | null;
-    return t && ALL_TABS.some((x) => x.id === t) ? t : 'overview';
-  });
+  const [tab, setTab] = useState<TabId>(() => resolveStoredTab(localStorage.getItem(LS_TAB_KEY)));
   const [pwdOpen, setPwdOpen] = useState(false);
   const { bump } = useRefreshTick();
 
@@ -205,8 +203,18 @@ function PageRouter(props: {
   switch (tab) {
     case 'overview':
       return <Overview base={base} token={token} onAuthError={onAuthError} />;
-    case 'agents':
-      return <AgentsPage base={base} token={token} onAuthError={onAuthError} onGoNodes={() => props.onGoTab('nodes')} />;
+    case 'local-agents':
+      return <AgentsPage scope="local" base={base} token={token} onAuthError={onAuthError} />;
+    case 'remote-agents':
+      return (
+        <AgentsPage
+          scope="remote"
+          base={base}
+          token={token}
+          onAuthError={onAuthError}
+          onGoNodes={() => props.onGoTab('remote-nodes')}
+        />
+      );
     case 'tasks':
       return <TasksPage base={base} token={token} onAuthError={onAuthError} />;
     case 'keys':
@@ -217,17 +225,23 @@ function PageRouter(props: {
       ) : null;
     case 'channel-tokens':
       return isAdmin ? <ChannelTokensPage base={base} token={token} onAuthError={onAuthError} /> : null;
-    case 'nodes':
-      return <NodesPage base={base} token={token} onAuthError={onAuthError} />;
+    case 'local-nodes':
+      return <NodesPage scope="local" base={base} token={token} onAuthError={onAuthError} />;
+    case 'remote-nodes':
+      return <NodesPage scope="remote" base={base} token={token} onAuthError={onAuthError} />;
     case 'weixin':
       return <WeixinPage base={base} token={token} onAuthError={onAuthError} />;
     case 'accounts':
       return isAdmin ? <AccountsPage base={base} token={token} onAuthError={onAuthError} /> : null;
     case 'processes':
       return isAdmin ? <ProcessesPage token={token} /> : null;
-    case 'settings':
+    case 'local-gateway':
       return isAdmin ? (
-        <SettingsPage
+        <LocalGatewayPage token={token} onAuthError={onAuthError} onApplyBase={props.onApplyBase} />
+      ) : null;
+    case 'remote-gateway':
+      return isAdmin ? (
+        <RemoteGatewayPage
           base={base}
           token={token}
           onAuthError={onAuthError}
