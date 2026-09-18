@@ -12,7 +12,7 @@ import {
   Tag,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined } from '@ant-design/icons';
+import { CommentOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   OpsClient,
   type NodeInfo,
@@ -22,6 +22,7 @@ import {
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 import { EmptyHint } from '../components/common';
+import type { ChatSession } from './types';
 
 interface EditState {
   channel: string;
@@ -29,7 +30,12 @@ interface EditState {
   task?: TaskItem;
 }
 
-export function TasksPage(props: { base: string; token: string; onAuthError: AuthErrorHandler }) {
+export function TasksPage(props: {
+  base: string;
+  token: string;
+  onAuthError: AuthErrorHandler;
+  onOpenChat: (session: ChatSession) => void;
+}) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
   const [users, setUsers] = useState<UserTasks[] | null>(null);
@@ -181,9 +187,29 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
     {
       title: '操作',
       key: 'ops',
-      width: 200,
+      width: 268,
       render: (_, t) => (
         <Space size={6}>
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            icon={<CommentOutlined />}
+            onClick={() =>
+              props.onOpenChat({
+                channel: u.channel,
+                userId: u.userId,
+                taskId: t.id,
+                taskName: t.name,
+                agentId: t.agentId,
+                nodeId: t.nodeId,
+                key: t.key,
+                keyEnabled: t.keyEnabled,
+              })
+            }
+          >
+            对话
+          </Button>
           {u.activeTaskId !== t.id ? (
             <Button size="small" disabled={busy} onClick={() => void withBusy(() => ops.activateTask(u.channel, u.userId, t.id), '已激活任务')}>
               激活
@@ -261,7 +287,7 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
       <p className="page-desc" style={{ marginBottom: 14 }}>
         这里按<strong>渠道终端</strong>（微信 openid 等）分组展示多轮会话任务，仅用于会话隔离与路由，<strong>不是系统账号</strong>。
-        终端在首次发起渠道消息时自动建档；Chatbox 等 OpenAI 客户端用任务 Key / Token 直连，不在这里产生终端。
+        点「对话」进入该任务的持久会话页。终端在首次发起渠道消息时自动建档；Chatbox 等 OpenAI 客户端用任务 Key / Token 直连，不在这里产生终端。
       </p>
       {users === null ? (
         <Table loading showHeader={false} pagination={false} rowKey="x" columns={[{ title: '', dataIndex: 'x' }]} dataSource={[]} />

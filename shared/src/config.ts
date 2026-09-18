@@ -101,7 +101,7 @@ export const nodeSectionSchema = z
     enabled: z.boolean().default(true),
     /** 节点展示名（缺省 node-<hostname>） */
     name: z.string().default(''),
-    /** 上报的 agent id 列表（空 = 网关默认 4 种：opencode/pi/workbuddy/trace-cli） */
+    /** 上报的 agent id 列表（空 = 网关默认：opencode/pi/workbuddy/trace-cli/cursor） */
     agents: z.array(z.string()).default([]),
     /** 网关地址；缺省由 gateway.server 推导 */
     gatewayUrl: z.string().default(''),
@@ -214,7 +214,8 @@ export function migrateConfig(raw: unknown): SharedConfig {
 
 /**
  * 缺省 agent（无配置文件时可开箱即用）；pi 依赖本机已装 pi 与 pi-acp，
- * workbuddy 依赖本机已装 codebuddy（CodeBuddy Code CLI），trace-cli 依赖本机已装 traecli（TraeCode CLI）。
+ * workbuddy 依赖本机已装 codebuddy（CodeBuddy Code CLI），trace-cli 依赖本机已装 traecli（TraeCode CLI），
+ * cursor 依赖本机已装 Cursor CLI（`agent acp`）。
  * 对应 CLI 未安装时 gateway 仍正常启动（probe 仅标记 unhealthy），实际调用会报 ACP_BACKEND_UNAVAILABLE。
  * pi 默认会话模型绑定本机 ~/.pi/agent/models.json 已注册的 volcengine ark（deepseek-v4-flash）：
  * 其它机器若无同名模型，可自建 config 的 agents 配置改 model，或删掉 model 字段让 pi 用其自身默认。
@@ -247,6 +248,12 @@ export function defaultAgentDefinitions(): AgentDefinition[] {
       type: 'trace-cli',
       displayName: 'TraeCode CLI',
       description: 'TraeCode CLI（经 traecli acp serve），默认只读问答',
+    },
+    {
+      id: 'cursor',
+      type: 'cursor',
+      displayName: 'Cursor',
+      description: 'Cursor CLI（经 agent acp），默认只读问答',
     },
   ];
 }

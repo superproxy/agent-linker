@@ -4,6 +4,7 @@ import {
   CloudServerOutlined,
   ClusterOutlined,
   ControlOutlined,
+  DashboardOutlined,
   DesktopOutlined,
   KeyOutlined,
   MessageOutlined,
@@ -30,6 +31,7 @@ export interface GatewayProfile {
 
 export type TabId =
   | 'overview'
+  | 'chat'
   | 'local-agents'
   | 'remote-agents'
   | 'tasks'
@@ -64,7 +66,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'processes', label: '进程', icon: <ControlOutlined />, adminOnly: true },
       { id: 'local-nodes', label: '节点', icon: <ClusterOutlined /> },
       { id: 'local-agents', label: 'agent', icon: <AppstoreOutlined /> },
-      { id: 'overview', label: 'chat测试', icon: <MessageOutlined /> },
+      { id: 'overview', label: '概览', icon: <DashboardOutlined /> },
+      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
     ],
   },
   {

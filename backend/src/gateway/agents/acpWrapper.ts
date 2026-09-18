@@ -13,10 +13,12 @@ export {
   DEFAULT_COMMANDS,
   DEFAULT_LABELS,
   DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS,
+  installGuideFor,
   expandHome,
   resolveCwd,
   type AcpAgentKind,
   type AgentCatalogEntry,
+  type AgentInstallGuide,
   type EngineTurnEvent,
 } from './acpEngine.js';
 
@@ -65,7 +67,7 @@ export class AcpWrapper implements AgentAdapter {
     });
   }
 
-  /** agent 后端类型（opencode / pi / workbuddy / trace-cli） */
+  /** agent 后端类型（opencode / pi / workbuddy / trace-cli / cursor 等 ACP_AGENT_KINDS） */
   get type(): AcpAgentKind {
     return this.engine.agentName;
   }

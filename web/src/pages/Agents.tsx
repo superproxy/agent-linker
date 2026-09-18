@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Divider, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Divider, Input, Modal, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { StarFilled } from '@ant-design/icons';
 import { AdminClient, type AgentCatalogItem, type AgentDetail, type RemoteNodeAgentView } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { notify } from '../lib/notify';
-import { EmptyHint, PageCard, StateTag } from '../components/common';
+import { CopyableCode, EmptyHint, PageCard, StateTag } from '../components/common';
 import { relTime } from '../lib/constants';
 
 const { Text } = Typography;
@@ -33,6 +33,15 @@ export function AgentsPage(props: {
   const [catalog, setCatalog] = useState<AgentCatalogItem[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [install, setInstall] = useState<{
+    kind: string;
+    displayName: string;
+    command: string;
+    hint?: string;
+    runnable: boolean;
+  } | null>(null);
+  const [installLog, setInstallLog] = useState('');
+  const [installBusy, setInstallBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +73,47 @@ export function AgentsPage(props: {
       notify.error(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const openInstall = (c: Pick<AgentCatalogItem, 'kind' | 'displayName' | 'command' | 'installCommand' | 'installHint' | 'installRunnable'>) => {
+    setInstallLog('');
+    setInstall({
+      kind: c.kind,
+      displayName: c.displayName,
+      command: c.installCommand || (c.command ?? []).join(' '),
+      hint: c.installHint,
+      runnable: Boolean(c.installRunnable),
+    });
+  };
+
+  const copyInstall = async () => {
+    if (!install?.command) return;
+    try {
+      await navigator.clipboard.writeText(install.command);
+      notify.success('已复制安装命令');
+    } catch {
+      notify.error('复制失败，请手动选择命令框中的文本');
+    }
+  };
+
+  const executeInstall = async () => {
+    if (!install) return;
+    setInstallBusy(true);
+    try {
+      const r = await admin.installAgentCli(install.kind);
+      const parts = [r.stdout.trim(), r.stderr.trim()];
+      if (!r.ok) parts.push(`退出码 ${r.exitCode}`);
+      setInstallLog(parts.filter(Boolean).join('\n') || (r.ok ? '完成' : '失败'));
+      if (r.ok) notify.success(`安装完成：${install.displayName}`);
+      else notify.error(`安装未成功：${install.displayName}`);
+    } catch (e) {
+      if (props.onAuthError(e)) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      setInstallLog(msg);
+      notify.error(msg);
+    } finally {
+      setInstallBusy(false);
     }
   };
 
@@ -111,9 +161,11 @@ export function AgentsPage(props: {
     {
       title: '操作',
       key: 'ops',
-      width: 180,
-      render: (_, a) => (
-        <Space size={6}>
+      width: 240,
+      render: (_, a) => {
+        const cat = catalog.find((c) => c.kind === a.type);
+        return (
+        <Space size={6} wrap>
           <Tooltip title={a.id === defaultAgentId ? '已是默认 agent' : '设为新任务的默认 agent'}>
             <Button
               size="small"
@@ -139,8 +191,14 @@ export function AgentsPage(props: {
           >
             {a.enabled ? '停用' : '启用'}
           </Button>
+          {cat ? (
+            <Button size="small" onClick={() => openInstall(cat)}>
+              安装
+            </Button>
+          ) : null}
         </Space>
-      ),
+        );
+      },
     },
   ];
 
@@ -172,26 +230,39 @@ export function AgentsPage(props: {
         cmd?.length ? <Text code style={{ fontSize: 12 }}>{cmd.join(' ')}</Text> : <Text type="secondary">—</Text>,
     },
     {
+      title: '安装命令',
+      dataIndex: 'installCommand',
+      key: 'installCommand',
+      responsive: ['lg'],
+      render: (cmd?: string) =>
+        cmd ? <CopyableCode text={cmd} title="点击复制安装命令" /> : <Text type="secondary">—</Text>,
+    },
+    {
       title: '操作',
       key: 'ops',
-      width: 120,
+      width: 200,
       render: (_, c) => (
-        <Button
-          size="small"
-          type="primary"
-          ghost
-          loading={busyId === `add:${c.kind}`}
-          disabled={busyId !== null && busyId !== `add:${c.kind}`}
-          onClick={() =>
-            void run(
-              `add:${c.kind}`,
-              () => admin.addAgentByType(c.kind),
-              `已添加并启用：${c.displayName}`,
-            )
-          }
-        >
-          添加并启用
-        </Button>
+        <Space size={6}>
+          <Button size="small" onClick={() => openInstall(c)}>
+            安装
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            loading={busyId === `add:${c.kind}`}
+            disabled={busyId !== null && busyId !== `add:${c.kind}`}
+            onClick={() =>
+              void run(
+                `add:${c.kind}`,
+                () => admin.addAgentByType(c.kind),
+                `已添加并启用：${c.displayName}`,
+              )
+            }
+          >
+            添加并启用
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -233,7 +304,7 @@ export function AgentsPage(props: {
           locale={{ emptyText: <EmptyHint text="所有支持的 agent 类型均已配置" /> }}
         />
         <p className="page-desc" style={{ marginTop: 10, marginBottom: 0 }}>
-          添加为运行时热生效（重启网关后还原 config.yaml，需长期保留请写入配置）；启用前请确认本机已安装对应 CLI，否则该 agent 会标记为不可用。
+          添加为运行时热生效（重启网关后还原 config.yaml，需长期保留请写入配置）。未装 CLI 时点「安装」查看命令；npm 全局包可由网关代执行，含管道的安装请复制到本机终端。
         </p>
       </PageCard>
       ) : null}
@@ -301,6 +372,61 @@ export function AgentsPage(props: {
           <EmptyHint text="暂无远程机器（可在「远程 · 节点」接入新机器）" />
         </PageCard>
       ) : null}
+
+      <Modal
+        title={install ? `安装 ${install.displayName}` : '安装 Agent CLI'}
+        open={Boolean(install)}
+        onCancel={() => {
+          if (installBusy) return;
+          setInstall(null);
+        }}
+        destroyOnClose
+        footer={
+          <Space>
+            <Button disabled={installBusy} onClick={() => setInstall(null)}>
+              关闭
+            </Button>
+            <Button onClick={() => void copyInstall()} disabled={!install?.command || installBusy}>
+              复制命令
+            </Button>
+            <Tooltip title={install && !install.runnable ? '此命令含管道或需交互，请复制到本机终端执行' : '按白名单在网关本机执行，不会使用你改写的文本'}>
+              <Button type="primary" loading={installBusy} disabled={!install?.runnable} onClick={() => void executeInstall()}>
+                在本机执行
+              </Button>
+            </Tooltip>
+          </Space>
+        }
+      >
+        {install ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {install.hint ? <Text type="secondary" style={{ fontSize: 12.5 }}>{install.hint}</Text> : null}
+            <Input.TextArea
+              value={install.command}
+              readOnly
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 13 }}
+            />
+            {installLog ? (
+              <pre
+                style={{
+                  margin: 0,
+                  maxHeight: 220,
+                  overflow: 'auto',
+                  padding: 10,
+                  borderRadius: 8,
+                  background: 'rgba(0,0,0,0.28)',
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {installLog}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

@@ -11,9 +11,9 @@ const SUPPORTED = ACP_AGENT_KINDS;
 
 /**
  * 自检：不经 HTTP，直连 acpx → ACP agent（默认 opencode acp；AGENT=<type> 可换任意支持类型，
- * 如 AGENT=pi 走 pi-acp 桥接、AGENT=workbuddy 走 codebuddy --acp、AGENT=trace-cli 走 traecli acp serve），
+ * 如 AGENT=pi 走 pi-acp 桥接、AGENT=workbuddy 走 codebuddy --acp、AGENT=trace-cli 走 traecli acp serve、AGENT=cursor 走 agent acp），
  * 发一条读代码库的 prompt，验证「agent 进程可启动 + ACP 会话可建 + 文本可流回 + 读权限放行」整条链路。
- * 用法：pnpm probe；AGENT=pi pnpm probe；AGENT=trace-cli pnpm probe
+ * 用法：pnpm probe；AGENT=pi pnpm probe；AGENT=trace-cli pnpm probe；AGENT=cursor pnpm probe
  */
 async function main() {
   const agent = (process.env.AGENT ?? 'opencode') as (typeof SUPPORTED)[number];
@@ -21,8 +21,11 @@ async function main() {
     throw new Error(`AGENT 仅支持 ${SUPPORTED.join(' | ')}`);
   }
 
-  const base = defaultAgentDefinitions().find((d) => d.type === agent);
-  if (!base) throw new Error(`缺默认 agent 定义: ${agent}`);
+  const base = defaultAgentDefinitions().find((d) => d.type === agent) ?? {
+    id: agent,
+    type: agent,
+    description: 'probe',
+  };
   const def: AgentDefinition = {
     ...base,
     id: agent,

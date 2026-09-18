@@ -241,11 +241,21 @@ export class AgentManager {
 
   /** 全部支持类型目录 + 配置状态（管理后台「支持 ACP 的 Agent 目录」用） */
   listAgentCatalog(): AgentCatalogItem[] {
-    return AGENT_CATALOG.map(({ kind, displayName, description, command }) => {
-      const defs = this.definitions.filter((d) => d.type === kind);
+    return AGENT_CATALOG.map((entry) => {
+      const defs = this.definitions.filter((d) => d.type === entry.kind);
       const configured = defs.length > 0;
       const enabled = configured && defs.some((d) => this.enabled.has(d.id));
-      return { kind, displayName, description, command, configured, enabled };
+      return {
+        kind: entry.kind,
+        displayName: entry.displayName,
+        description: entry.description,
+        command: entry.command,
+        installCommand: entry.installCommand,
+        installRunnable: entry.installRunnable,
+        ...(entry.installHint ? { installHint: entry.installHint } : {}),
+        configured,
+        enabled,
+      };
     });
   }
 

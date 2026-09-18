@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Card, Col, Input, Row, Select, Tag, Tooltip } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Col, Row, Tag } from 'antd';
 import {
   AppstoreOutlined,
   CheckCircleOutlined,
   ClusterOutlined,
   KeyOutlined,
   MessageOutlined,
-  SendOutlined,
-  StopOutlined,
   WechatOutlined,
 } from '@ant-design/icons';
 import {
@@ -16,7 +14,6 @@ import {
   OpsClient,
   WeixinClient,
   type AgentDetail,
-  type ChatDelta,
   type ModelInfo,
   type NodeInfo,
   type UserTasks,
@@ -25,17 +22,6 @@ import {
 import { useRefreshTick } from '../lib/hooks';
 import { StatCard } from '../components/common';
 import type { PageProps } from './types';
-
-interface Msg {
-  id: number;
-  role: 'user' | 'assistant';
-  content: string;
-  reasoning?: string;
-  error?: string;
-  done?: boolean;
-}
-
-let msgSeq = 0;
 
 export function Overview(props: PageProps) {
   const { base, token, onAuthError } = props;
@@ -52,12 +38,6 @@ export function Overview(props: PageProps) {
   const [wxStatus, setWxStatus] = useState<WeixinStatus | null>(null);
 
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [model, setModel] = useState('agent:pi');
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadStats = useCallback(async () => {
     const [aRes, nRes, tRes, wRes] = await Promise.allSettled([
@@ -94,68 +74,11 @@ export function Overview(props: PageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, tick]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const enabledAgents = (agents ?? []).filter((a) => a.enabled).length;
   const onlineNodes = (nodes ?? []).filter((n) => n.status !== 'pending' && n.status !== 'blocked' && n.online).length;
   const pendingNodes = (nodes ?? []).filter((n) => n.status === 'pending').length;
   const taskCount = (users ?? []).reduce((s, u) => s + u.tasks.length, 0);
   const keyCount = (users ?? []).reduce((s, u) => s + u.tasks.filter((t) => t.key).length, 0);
-
-  const send = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
-    const history: Msg[] = [...messages, { id: ++msgSeq, role: 'user', content: text }];
-    setMessages(history);
-    setInput('');
-    setBusy(true);
-    const abort = new AbortController();
-    abortRef.current = abort;
-
-    let content = '';
-    let reasoning = '';
-    try {
-      for await (const d of client.streamChat(
-        model,
-        history.map((m) => ({ role: m.role, content: m.content })),
-        abort.signal,
-      )) {
-        applyDelta(d);
-      }
-      patchLast((m) => ({ ...m, done: true }));
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
-        if (onAuthError(e)) return;
-        patchLast((m) => ({ ...m, error: e instanceof Error ? e.message : String(e) }));
-      }
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
-    }
-
-    function applyDelta(d: ChatDelta) {
-      if (d.type === 'reasoning' && d.text) {
-        reasoning += d.text;
-        patchLast((m) => ({ ...m, reasoning }));
-      } else if (d.type === 'text' && d.text) {
-        content += d.text;
-        patchLast((m) => ({ ...m, content }));
-      } else if (d.type === 'error' && d.text) {
-        patchLast((m) => ({ ...m, error: d.text }));
-      }
-    }
-    function patchLast(fn: (m: Msg) => Msg) {
-      setMessages((prev) => {
-        const idx = prev.length - 1;
-        if (idx < 0 || prev[idx]!.id !== history[history.length - 1]!.id) return prev;
-        const next = [...prev];
-        next[idx] = fn(next[idx]!);
-        return next;
-      });
-    }
-  };
 
   return (
     <div>
@@ -232,80 +155,9 @@ export function Overview(props: PageProps) {
           />
         </Col>
       </Row>
-
-      <Card
-        className="chat-card section-gap"
-        bordered
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 14.5, fontWeight: 600 }}>聊天测试台</span>
-            <Tag color="blue" style={{ borderRadius: 999 }}>流式</Tag>
-          </div>
-        }
-        extra={
-          <Select
-            value={model}
-            onChange={setModel}
-            style={{ width: 220 }}
-            options={models.map((m) => ({ value: m.id, label: m.id }))}
-            showSearch
-            optionFilterProp="label"
-          />
-        }
-      >
-        <div className="chat-thread">
-          {messages.length === 0 ? (
-            <div className="chat-empty">向网关发送一条消息，测试流式回复（思考流与正文分开展示）</div>
-          ) : null}
-          {messages.map((m) => (
-            <div key={m.id} className={`bubble ${m.role}`}>
-              <div className="who">{m.role === 'user' ? '你' : 'agent'}</div>
-              {m.reasoning ? (
-                <div className="reasoning">
-                  <div className="reasoning-title">思考过程</div>
-                  {m.reasoning}
-                </div>
-              ) : null}
-              {m.content ? <div className="bubble-body">{m.content}</div> : null}
-              {m.error ? (
-                <Tag color="error" style={{ alignSelf: 'flex-start' }}>
-                  {m.error}
-                </Tag>
-              ) : null}
-              {!m.content && !m.error && !m.done ? (
-                <div className="bubble-body">
-                  <span className="chat-typing">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                </div>
-              ) : null}
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-
-        <div className="composer">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onPressEnter={() => void send()}
-            placeholder="输入消息，Enter 发送"
-            disabled={busy}
-            size="large"
-          />
-          {busy ? (
-            <Button danger size="large" icon={<StopOutlined />} onClick={() => abortRef.current?.abort()}>
-              停止
-            </Button>
-          ) : (
-            <Tooltip title="发送">
-              <Button type="primary" size="large" icon={<SendOutlined />} disabled={!input.trim()} onClick={() => void send()} />
-            </Tooltip>
-          )}
-        </div>
-      </Card>
+      <p className="page-desc" style={{ marginTop: 18 }}>
+        流式对话已独立到侧栏「对话」。任务级持久会话请从「任务管理」点「对话」进入。
+      </p>
     </div>
   );
 }

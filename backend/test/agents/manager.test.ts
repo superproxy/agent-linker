@@ -15,17 +15,24 @@ function freshManager(definitions: AgentDefinition[] = defaultAgentDefinitions()
   });
 }
 
-test('listAgentCatalog：默认 4 个已配置启用，其余支持类型未配置且带命令', async () => {
+test('listAgentCatalog：默认 agent 已配置启用，其余支持类型未配置且带命令', async () => {
   const m = freshManager();
   await m.start();
   const catalog = m.listAgentCatalog();
   assert.equal(catalog.length, ACP_AGENT_KINDS.length);
-  for (const kind of ['opencode', 'pi', 'workbuddy', 'trace-cli'] as const) {
+  for (const kind of ['opencode', 'pi', 'workbuddy', 'trace-cli', 'cursor'] as const) {
     const item = catalog.find((c) => c.kind === kind);
     assert.ok(item, `缺目录项 ${kind}`);
     assert.equal(item.configured, true);
     assert.equal(item.enabled, true);
   }
+  const cursor = catalog.find((c) => c.kind === 'cursor');
+  assert.deepEqual(cursor?.command, ['agent', 'acp']);
+  assert.equal(cursor?.installRunnable, false);
+  assert.ok(cursor?.installCommand);
+  const zcode = catalog.find((c) => c.kind === 'zcode');
+  assert.equal(zcode?.installRunnable, true);
+  assert.equal(zcode?.installCommand, 'npm i -g zcode-acp-server');
   for (const kind of ['codex', 'claude', 'gemini', 'qwen', 'openclaw', 'zcode'] as const) {
     const item = catalog.find((c) => c.kind === kind);
     assert.ok(item, `缺目录项 ${kind}`);

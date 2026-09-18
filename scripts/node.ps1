@@ -11,7 +11,7 @@
 # 节点配置（环境变量，或写入 .runtime-state/node[-<name>].env，KEY=VALUE 每行一条）：
 #   LINKAGENT_GATEWAY_URL    网关地址（默认 ws://127.0.0.1:8787）
 #   LINKAGENT_GATEWAY_TOKEN  网关 token（网关开启 auth 时必填）
-#   LINKAGENT_NODE_AGENTS    逗号分隔的 agent id（缺省上报默认 4 种）
+#   LINKAGENT_NODE_AGENTS    逗号分隔的 agent id（缺省上报默认 opencode/pi/workbuddy/trace-cli/cursor）
 #   LINKAGENT_NODE_ID        一般不填，首次连接由网关签发并持久化
 # 命名实例会自动把 LINKAGENT_NODE_NAME 设为实例名（除非 env 文件已指定）。
 #

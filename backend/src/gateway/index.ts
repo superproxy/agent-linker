@@ -9,6 +9,7 @@ import type { SharedConfig } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
+import { AgentInstallError, runAgentInstall } from './agents/installCli.js';
 import { collectModelCandidates } from './modelcandidates.js';
 import { PluginManager } from './plugins/manager.js';
 import { createJsonStore } from './tasks/store.js';
@@ -618,6 +619,35 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
     return { agents: manager.listAgentCatalog() };
+  });
+
+  /** 按目录白名单在本机执行安装命令（无 argv 的类型请复制到终端） */
+  app.post('/api/agents/install', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkAuth(request)) {
+      return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send(openaiError('需要管理员权限才能在本机执行安装', 'invalid_request_error', 'forbidden'));
+    }
+    const body = request.body as Record<string, unknown> | null | undefined;
+    if (!body || typeof body !== 'object') {
+      return reply.code(400).send(openaiError('请求体需为 JSON 对象', 'invalid_request_error', 'invalid_request'));
+    }
+    const type = body.type;
+    if (typeof type !== 'string') {
+      return reply.code(400).send(openaiError('缺少 type', 'invalid_request_error', 'invalid_request'));
+    }
+    try {
+      const result = await runAgentInstall(type);
+      return result;
+    } catch (err) {
+      if (err instanceof AgentInstallError) {
+        const status = err.code === 'install_busy' ? 409 : 400;
+        return reply.code(status).send(openaiError(err.message, 'invalid_request_error', err.code));
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(500).send(openaiError(message, 'server_error', 'install_failed'));
+    }
   });
 
   /** 一键添加 agent：body { type }，按内置目录模板创建并热启用（仅内存生效，重启还原 yaml） */

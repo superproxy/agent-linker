@@ -40,7 +40,8 @@ export const DEFAULT_COMMANDS: Record<AcpAgentKind, string[]> = {
   codex: ['npx', '-y', '@agentclientprotocol/codex-acp'],
   claude: ['npx', '-y', '@agentclientprotocol/claude-agent-acp'],
   gemini: ['gemini', '--acp'],
-  cursor: ['cursor-agent', 'acp'],
+  // cursor = Cursor CLI：当前安装入口是 `agent acp`（`cursor-agent acp` 在仅有 dist-package 的安装上会找不到版本目录）
+  cursor: ['agent', 'acp'],
   copilot: ['copilot', '--acp', '--stdio'],
   droid: ['droid', 'exec', '--output-format', 'acp'],
   'fast-agent': ['uvx', 'fast-agent-mcp', 'acp'],
@@ -71,7 +72,7 @@ export const DEFAULT_LABELS: Record<AcpAgentKind, { displayName: string; descrip
   codex: { displayName: 'Codex', description: 'OpenAI Codex CLI（经 ACP 适配器），默认只读问答' },
   claude: { displayName: 'Claude', description: 'Claude Code（经 ACP 适配器），默认只读问答' },
   gemini: { displayName: 'Gemini', description: 'Gemini CLI（gemini --acp），默认只读问答' },
-  cursor: { displayName: 'Cursor', description: 'Cursor CLI（cursor-agent acp），默认只读问答' },
+  cursor: { displayName: 'Cursor', description: 'Cursor CLI（agent acp），默认只读问答' },
   copilot: { displayName: 'Copilot', description: 'GitHub Copilot CLI（copilot --acp --stdio），默认只读问答' },
   droid: { displayName: 'Droid', description: 'Factory Droid（droid exec --output-format acp），默认只读问答' },
   'fast-agent': { displayName: 'Fast Agent', description: 'Fast Agent（uvx fast-agent-mcp acp），默认只读问答' },
@@ -90,20 +91,101 @@ export const DEFAULT_LABELS: Record<AcpAgentKind, { displayName: string; descrip
   zcode: { displayName: 'ZCode', description: 'ZCode（zcode-acp-server，需 npm i -g zcode-acp-server），默认只读问答' },
 };
 
+/** 本机安装指引：命令框展示用；argv 存在才允许网关代执行（固定白名单，不跑用户改写的文本） */
+export interface AgentInstallGuide {
+  command: string;
+  hint?: string;
+  argv?: string[];
+}
+
+function npmGlobal(pkg: string, hint?: string): AgentInstallGuide {
+  const argv = process.platform === 'win32' ? ['npm.cmd', 'i', '-g', pkg] : ['npm', 'i', '-g', pkg];
+  return { command: `npm i -g ${pkg}`, argv, hint };
+}
+
+/**
+ * 按类型给出本机安装命令。npx -y 的类型默认落到 `npm i -g <包>`，可一键执行；
+ * 含管道 / 需交互登录的安装只展示命令，由用户在终端自行执行。
+ */
+export function installGuideFor(kind: AcpAgentKind, platform = process.platform): AgentInstallGuide {
+  switch (kind) {
+    case 'opencode':
+      return npmGlobal('opencode-ai', '安装后启动命令：opencode acp --port 0');
+    case 'pi':
+      return npmGlobal(
+        'pi-acp',
+        'ACP 桥接包；同时需要本机已装 pi CLI（pi-coding-agent）。安装后启动命令：npx -y pi-acp',
+      );
+    case 'workbuddy':
+      return {
+        command: 'codebuddy --version',
+        hint: '请按 CodeBuddy Code CLI 文档安装 codebuddy，并确认已在 PATH 中。',
+      };
+    case 'trace-cli':
+      return {
+        command: 'traecli --version',
+        hint: '请按 TraeCode CLI 文档安装 traecli（https://docs.trae.cn/cli），安装后可执行 traecli doctor。',
+      };
+    case 'cursor':
+      return platform === 'win32'
+        ? {
+            command: 'irm https://cursor.com/install?win=1 | iex',
+            hint: '在 PowerShell 中执行；也可从 Cursor 应用安装 CLI。安装后确认 agent 在 PATH 中。',
+          }
+        : {
+            command: 'curl https://cursor.com/install -fsS | bash',
+            hint: '安装后确认 agent 在 PATH 中，启动命令：agent acp',
+          };
+    case 'gemini':
+      return npmGlobal('@google/gemini-cli', '安装后启动命令：gemini --acp');
+    case 'copilot':
+      return npmGlobal('@github/copilot', '安装后启动命令：copilot --acp --stdio');
+    case 'qwen':
+      return npmGlobal('@qwen-code/qwen-code', '安装后启动命令：qwen --acp');
+    case 'zcode':
+      return npmGlobal('zcode-acp-server', '安装后启动命令：zcode-acp-server');
+    case 'fast-agent':
+      return {
+        command: 'uvx fast-agent-mcp acp',
+        hint: '需已安装 uv；uvx 会按需拉取包，一般无需再全局安装。',
+      };
+    default: {
+      const cmd = DEFAULT_COMMANDS[kind];
+      const pkg = cmd[0] === 'npx' && cmd[1] === '-y' ? cmd[2] : undefined;
+      if (pkg) return npmGlobal(pkg, `安装后仍可用：${cmd.join(' ')}`);
+      return {
+        command: cmd.join(' '),
+        hint: '请先安装对应 CLI，并确保启动命令在 PATH 中可用。',
+      };
+    }
+  }
+}
+
 /** 管理后台目录条目（不含配置状态；configured/enabled 由 AgentManager 组装） */
 export interface AgentCatalogEntry {
   kind: AcpAgentKind;
   displayName: string;
   description: string;
   command: string[];
+  installCommand: string;
+  installRunnable: boolean;
+  installHint?: string;
+}
+
+function catalogEntry(kind: AcpAgentKind): AgentCatalogEntry {
+  const install = installGuideFor(kind);
+  return {
+    kind,
+    ...DEFAULT_LABELS[kind],
+    command: DEFAULT_COMMANDS[kind],
+    installCommand: install.command,
+    installRunnable: Boolean(install.argv?.length),
+    ...(install.hint ? { installHint: install.hint } : {}),
+  };
 }
 
 /** 全部支持的 ACP agent 目录（管理后台展示 + 一键添加模板） */
-export const AGENT_CATALOG: AgentCatalogEntry[] = ACP_AGENT_KINDS.map((kind) => ({
-  kind,
-  ...DEFAULT_LABELS[kind],
-  command: DEFAULT_COMMANDS[kind],
-}));
+export const AGENT_CATALOG: AgentCatalogEntry[] = ACP_AGENT_KINDS.map(catalogEntry);
 
 /** persistent 会话默认空闲超时：30 分钟无消息 → 关闭进程（状态保留，可续聊） */
 export const DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS = 30 * 60_000;

@@ -1,8 +1,8 @@
 /**
  * AgentAdapter —— 网关对「一个 agent 后端」的统一抽象。
  * 支持全部 ACP agent（经 acpx 连各自 ACP server）：
- * 预置 opencode / pi / workbuddy / trace-cli，以及 acpx 内置 registry 的
- * codex / claude / gemini / cursor 等其余类型。
+ * 预置 opencode / pi / workbuddy / trace-cli / cursor，以及 acpx 内置 registry 的
+ * 其余类型。
  * 领域共享类型集中于此，config 单向依赖本文件。
  */
 import type { ChatMessage } from './openai.js';
@@ -13,8 +13,8 @@ export type AcpPermissionMode = (typeof ACP_PERMISSION_MODES)[number];
 
 /**
  * 支持的 ACP agent 类型（单一事实来源：config 校验、启动命令、管理目录均引用此列表）。
- * 前 4 个为本项目预置（opencode 原生 ACP；pi 经 pi-acp 桥接；workbuddy 经 `codebuddy --acp`；
- * trace-cli 经 `traecli acp serve`，即 acpx 内置的 trae）；中间为 acpx@0.15.1 内置 registry
+ * 默认启用列表见 defaultAgentDefinitions（opencode 原生 ACP；pi 经 pi-acp 桥接；workbuddy 经 `codebuddy --acp`；
+ * trace-cli 经 `traecli acp serve`；cursor 经 `agent acp`）。其余为 acpx@0.15.1 内置 registry
  * 的类型（对应 CLI 本机安装后才可用，缺 CLI 时仅标记 unhealthy）；末尾 zcode 不在 acpx 内置
  * registry，经 acpx registry override 注册到自定义命令 `zcode-acp-server`（npm i -g zcode-acp-server）。
  * 默认 ACP server 启动命令见 backend acpEngine DEFAULT_COMMANDS。
@@ -66,6 +66,12 @@ export interface AgentCatalogItem {
   description: string;
   /** 默认 ACP server 启动命令（展示 + 一键添加时生成 definition.command） */
   command: string[];
+  /** 本机安装命令（管理后台命令框） */
+  installCommand?: string;
+  /** 是否允许网关按白名单 argv 代执行安装（不含管道/交互脚本） */
+  installRunnable?: boolean;
+  /** 安装说明 */
+  installHint?: string;
   /** 是否已配置（config.yaml / 默认定义含该 kind） */
   configured: boolean;
   /** 当前是否启用（configured 且未停用） */
@@ -74,7 +80,7 @@ export interface AgentCatalogItem {
 
 export interface AgentDefinition {
   id: string;
-  /** agent 后端类型：opencode/pi/workbuddy/trace-cli 为项目预置，其余为 acpx 内置 registry 的类型（见 ACP_AGENT_KINDS） */
+  /** agent 后端类型：见 ACP_AGENT_KINDS；默认启用列表见 defaultAgentDefinitions */
   type: AcpAgentKind;
   displayName?: string;
   description?: string;
@@ -84,7 +90,7 @@ export interface AgentDefinition {
   permissionMode?: AcpPermissionMode;
   /** 额外环境变量 */
   env?: Record<string, string>;
-  /** ACP server 启动命令；缺省按 type 的内置默认（opencode acp / npx -y pi-acp / codebuddy --acp / traecli acp serve） */
+  /** ACP server 启动命令；缺省按 type 的内置默认（见 backend acpEngine DEFAULT_COMMANDS） */
   command?: string[];
   /**
    * 会话默认模型：建会话后经 ACP session/set_config_option（configId "model"）下发。

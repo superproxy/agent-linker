@@ -17,7 +17,7 @@ import { AcpEngine, DEFAULT_LABELS, type AcpAgentKind } from '../gateway/agents/
  *   LINKAGENT_GATEWAY_TOKEN 网关 token（网关开启 auth 时必填）
  *   LINKAGENT_NODE_NAME    节点展示名（默认本机 hostname）
  *   LINKAGENT_NODE_ID      节点 id（缺省首次连接由网关签发并持久化，重连复用）
- *   LINKAGENT_NODE_AGENTS  逗号分隔的 agent id（缺省上报网关默认 4 种：opencode/pi/workbuddy/trace-cli）
+ *   LINKAGENT_NODE_AGENTS  逗号分隔的 agent id（缺省上报网关默认：opencode/pi/workbuddy/trace-cli/cursor）
  *   LINKAGENT_NODE_STATE_DIR 节点状态目录（默认 .runtime-state/node；本机多实例时各自指定可避免 nodeId 冲突）
  *
  * 两种准入方式：

@@ -25,6 +25,8 @@ test('GET /api/agents/catalog：返回全部支持类型与配置状态', async 
     assert.equal(codex.configured, false);
     assert.equal(codex.enabled, false);
     assert.ok(codex.command.length > 0);
+    assert.ok(typeof codex.installCommand === 'string' && codex.installCommand.length > 0);
+    assert.equal(typeof codex.installRunnable, 'boolean');
   } finally {
     await pluginManager?.dispose().catch(() => {});
     await manager.dispose().catch(() => {});
@@ -118,6 +120,23 @@ test('POST /api/agents：未知类型 400；重复 409；合法添加 200 且模
 
     const models = await app.inject({ method: 'GET', url: '/v1/models' });
     assert.ok((models.json().data as { id: string }[]).some((m) => m.id === 'agent:codex'));
+  } finally {
+    await pluginManager?.dispose().catch(() => {});
+    await manager.dispose().catch(() => {});
+    await app.close().catch(() => {});
+  }
+});
+
+test('POST /api/agents/install：未知类型 / 不可代执行 400', async () => {
+  const built = await freshBuilt([{ id: 'opencode', type: 'opencode', displayName: 'OpenCode' }]);
+  const { app, manager, pluginManager } = built;
+  try {
+    const bad = await app.inject({ method: 'POST', url: '/api/agents/install', payload: { type: 'ghost' } });
+    assert.equal(bad.statusCode, 400);
+
+    const skip = await app.inject({ method: 'POST', url: '/api/agents/install', payload: { type: 'cursor' } });
+    assert.equal(skip.statusCode, 400);
+    assert.equal(skip.json().error.code, 'install_not_runnable');
   } finally {
     await pluginManager?.dispose().catch(() => {});
     await manager.dispose().catch(() => {});

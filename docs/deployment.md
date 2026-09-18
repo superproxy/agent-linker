@@ -52,7 +52,7 @@ flowchart TB
 | Node.js | `>= 22.13` |
 | 包管理 | pnpm `8.6.5`（corepack 自带） |
 | 网关机 | 可被客户端与节点访问的 TCP 端口（默认 8787） |
-| 执行机 | 已安装需要的 agent CLI（opencode / pi / workbuddy / trace-cli） |
+| 执行机 | 已安装需要的 agent CLI（opencode / pi / workbuddy / trace-cli / cursor） |
 | 操作系统 | macOS / Linux（启停脚本为 bash；Windows 用 `pnpm` 原生命令） |
 
 ---
@@ -167,7 +167,7 @@ server {
 | `LINKAGENT_GATEWAY_URL` / `--gatewayUrl` | 网关地址，自动补全路径 | `ws://127.0.0.1:8787` |
 | `LINKAGENT_GATEWAY_TOKEN` | 网关开启鉴权时填**网关静态 token 或用户颁发的 `nt_` 机器 token**；不填则匿名申请待审批 | 空 |
 | `LINKAGENT_NODE_NAME` / `--name` | 控制台展示名 | `node-<hostname>` |
-| `LINKAGENT_NODE_AGENTS` | 逗号分隔自报 agent | 内置 4 种 |
+| `LINKAGENT_NODE_AGENTS` | 逗号分隔自报 agent | 内置默认（含 cursor） |
 | `LINKAGENT_NODE_ID` | 一般不填，首次网关注发并持久化 | 自动 |
 | `LINKAGENT_NODE_STATE_DIR` | 状态目录（多实例隔离用） | `.runtime-state/node` |
 

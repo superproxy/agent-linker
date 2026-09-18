@@ -35,8 +35,9 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 | pi | `npx -y pi-acp` | pi-coding-agent 的第三方 ACP 桥接（内部 `pi --mode rpc`） |
 | workbuddy | `codebuddy --acp` | 腾讯 CodeBuddy Code CLI 原生 ACP server |
 | trace-cli | `traecli acp serve` | 字节 TraeCode CLI 2.0 原生 ACP server |
+| cursor | `agent acp` | Cursor CLI 原生 ACP server |
 | zcode | `zcode-acp-server` | 智谱 ZCode（先 `npm i -g zcode-acp-server`），经 ACP 桥接 |
-| 更多（codex / claude / gemini / cursor / copilot / qwen / openclaw 等） | 见管理后台「支持 ACP 的 Agent 目录」 | 对应 CLI 本机安装后即可一键添加启用 |
+| 更多（codex / claude / gemini / copilot / qwen / openclaw 等） | 见管理后台「支持 ACP 的 Agent 目录」 | 对应 CLI 本机安装后即可一键添加启用 |
 
 ## 配置
 
@@ -44,7 +45,7 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 
 1. 环境变量 `GATEWAY_CONFIG_PATH` 指向的 yaml（缺失则启动报错）
 2. `backend/config/config.yaml`（缺省读取路径）
-3. 内置默认值（127.0.0.1:8787，无鉴权，opencode / pi / workbuddy / trace-cli 四个 agent）
+3. 内置默认值（127.0.0.1:8787，无鉴权，opencode / pi / workbuddy / trace-cli / cursor）
 
 `backend/config/config.yaml` 示例：
 
@@ -59,10 +60,10 @@ auth:
 # agent 默认工作目录（= 默认工作空间 default）：未显式配 cwd 的 agent 在此运行
 # defaultCwd: /path/to/works
 
-# agents 省略时使用内置默认（opencode / pi / workbuddy / trace-cli）
+# agents 省略时使用内置默认（opencode / pi / workbuddy / trace-cli / cursor）
 agents:
   - id: opencode
-    type: opencode              # 支持全部 ACP 类型：opencode | pi | workbuddy | trace-cli | codex | claude | gemini | ...
+    type: opencode              # 支持全部 ACP 类型：opencode | pi | workbuddy | trace-cli | cursor | codex | claude | gemini | ...
     displayName: OpenCode
     description: 本地 opencode
     # cwd: /path/to/workdir     # agent 进程工作目录
@@ -88,6 +89,12 @@ agents:
     # 依赖本机已装 traecli（TraeCode CLI 2.0）；全局参数（如 --profile / --permission-mode）可写在 command 里：
     # command: ["traecli", "--permission-mode", "auto", "acp", "serve"]
 
+  - id: cursor
+    type: cursor
+    displayName: Cursor
+    # 依赖本机已装 Cursor CLI；当前入口是 `agent acp`（不要用会找不到版本目录的 `cursor-agent acp`）
+    # command: ["agent", "acp"]
+
 # ── 渠道（可选）──────────────────────────────────────────
 # 企业微信：channels.<id> 配 botId/secret 即启用（默认内置 @wecom/wecom-openclaw-plugin）
 # 个人微信：配 plugins 后先扫码登录，见「多渠道」章节
@@ -104,7 +111,7 @@ plugins:
 
 ## OpenAI 兼容 API
 
-模型对外 id 统一形如 `agent:<agentId>`：`agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`；管理后台目录一键添加的类型同样暴露为 `agent:<type>`（如 `agent:codex`）。
+模型对外 id 统一形如 `agent:<agentId>`：`agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`、`agent:cursor`；管理后台目录一键添加的类型同样暴露为 `agent:<type>`（如 `agent:codex`）。
 
 ### GET /v1/models
 
@@ -195,7 +202,7 @@ curl -X PATCH http://127.0.0.1:8787/api/agents/opencode \
 | API 提供方 | OpenAI API 兼容 / Custom Provider |
 | Base URL | `http://127.0.0.1:8787/v1` |
 | API Key | 网关未开鉴权填任意非空即可；开了可填 `auth.token`，或登录后台在「我的 Token」获取本人的个人 token（`pat_` 前缀） |
-| 模型 | `agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`（也可先调 `/v1/models` 让客户端自动拉取） |
+| 模型 | `agent:opencode`、`agent:pi`、`agent:workbuddy`、`agent:trace-cli`、`agent:cursor`（也可先调 `/v1/models` 让客户端自动拉取） |
 
 ## web 后台（可选）
 
@@ -326,7 +333,7 @@ pnpm bot:wecom
 
 | 命令 | 说明 |
 |---|---|
-| `/task new <名称> [agent]` | 新建任务并激活（agent: opencode / pi / workbuddy / trace-cli） |
+| `/task new <名称> [agent]` | 新建任务并激活（agent: opencode / pi / workbuddy / trace-cli / cursor） |
 | `/task list` | 查看全部任务（`← 激活` 标记当前） |
 | `/task use <id>` | 切换到指定任务 |
 | `/task del <id>` | 删除任务（默认任务不可删） |
@@ -444,7 +451,7 @@ pnpm --filter @linkagent/backend node:connect \
 #   LINKAGENT_GATEWAY_TOKEN 网关开启鉴权时必填（Bearer，等价 ?token=）
 #   LINKAGENT_NODE_NAME     节点展示名（默认 node-<hostname>）
 #   LINKAGENT_NODE_ID       节点 id（缺省首次由网关签发并持久化，重连复用）
-#   LINKAGENT_NODE_AGENTS   逗号分隔的自报 agent（缺省 opencode/pi/workbuddy/trace-cli）
+#   LINKAGENT_NODE_AGENTS   逗号分隔的自报 agent（缺省 opencode/pi/workbuddy/trace-cli/cursor）
 ```
 
 - 节点只发起**出站**连接，无需公网入站/端口映射；断线自动指数退避重连。
@@ -490,7 +497,7 @@ pnpm dev:all [name]         # 一键联调：网关（已运行则复用）+ 节
 ```bash
 pnpm dev                 # 开发模式（watch）
 pnpm start               # 直接运行
-pnpm probe               # 探测 agent 链路（AGENT=<任意支持类型>，如 pi/workbuddy/trace-cli；PI_MODEL=... 可覆盖 pi 模型）
+pnpm probe               # 探测 agent 链路（AGENT=<任意支持类型>，如 pi/workbuddy/trace-cli/cursor；PI_MODEL=... 可覆盖 pi 模型）
 pnpm typecheck           # 全仓类型检查
 pnpm server:start        # 后台启动（scripts/server.sh，健康检查通过才报就绪）
 pnpm server:stop / restart / status / log

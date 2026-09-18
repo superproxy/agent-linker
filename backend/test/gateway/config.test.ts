@@ -89,10 +89,10 @@ test('migrateConfig：已是三段式直接解析，不做二次迁移', () => {
 test('defaultSharedConfig：内置默认 agent 且 local 鉴权', () => {
   const cfg = defaultSharedConfig();
   assert.equal(cfg.gateway.auth.mode, 'local');
-  assert.ok(cfg.gateway.agents.length >= 4);
+  assert.ok(cfg.gateway.agents.length >= 5);
   assert.deepEqual(
     cfg.gateway.agents.map((a) => a.id),
-    ['opencode', 'pi', 'workbuddy', 'trace-cli'],
+    ['opencode', 'pi', 'workbuddy', 'trace-cli', 'cursor'],
   );
 });
 

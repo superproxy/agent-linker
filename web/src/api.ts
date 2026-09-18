@@ -61,6 +61,17 @@ export interface ChatDelta {
   text?: string;
 }
 
+/** /v1/chat/completions 流式请求的任务路由扩展（与 chat.html 控制台一致） */
+export interface ChatStreamOpts {
+  signal?: AbortSignal;
+  /** 任务 key 直连：有值时不再带 channel/userId/task */
+  taskKey?: string;
+  channel?: string;
+  userId?: string;
+  task?: string;
+  agent?: string;
+}
+
 export class GatewayClient {
   constructor(
     private base: string,
@@ -92,17 +103,29 @@ export class GatewayClient {
     return data.data;
   }
 
-  /** 流式对话：逐条产出 reasoning / text / done 增量 */
+  /** 流式对话：逐条产出 reasoning / text / done 增量；可带任务路由字段进入持久会话 */
   async *streamChat(
     model: string,
     messages: { role: string; content: string }[],
-    signal?: AbortSignal,
+    opts?: AbortSignal | ChatStreamOpts,
   ): AsyncGenerator<ChatDelta> {
+    const extra: ChatStreamOpts = opts instanceof AbortSignal ? { signal: opts } : (opts ?? {});
+    const body: Record<string, unknown> = { model, messages, stream: true };
+    const taskKey = extra.taskKey?.trim();
+    if (taskKey) {
+      body.taskKey = taskKey;
+      if (extra.agent) body.agent = extra.agent;
+    } else if (extra.channel && extra.userId) {
+      body.channel = extra.channel;
+      body.userId = extra.userId;
+      if (extra.task) body.task = extra.task;
+      if (extra.agent) body.agent = extra.agent;
+    }
     const res = await fetch(this.url('/v1/chat/completions'), {
       method: 'POST',
       headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ model, messages, stream: true }),
-      signal,
+      body: JSON.stringify(body),
+      signal: extra.signal,
     });
     if (!res.ok || !res.body) {
       const body = await res.text().catch(() => '');
@@ -343,6 +366,21 @@ export class AdminClient {
     })) as { agent: AgentDetail };
     return data.agent;
   }
+
+  /** 按目录白名单在网关本机执行安装（无 argv 时接口会 400，请复制命令到终端） */
+  async installAgentCli(type: string): Promise<{
+    ok: boolean;
+    command: string;
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  }> {
+    const data = (await this.request('/api/agents/install', {
+      method: 'POST',
+      body: JSON.stringify({ type }),
+    })) as { ok: boolean; command: string; exitCode: number; stdout: string; stderr: string };
+    return data;
+  }
 }
 
 /** Agent 目录条目（/api/agents/catalog） */
@@ -351,6 +389,9 @@ export interface AgentCatalogItem {
   displayName: string;
   description: string;
   command?: string[];
+  installCommand?: string;
+  installRunnable?: boolean;
+  installHint?: string;
   configured: boolean;
   enabled: boolean;
 }

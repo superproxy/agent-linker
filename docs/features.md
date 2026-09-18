@@ -5,7 +5,7 @@
 ## OpenAI 兼容网关
 
 - **统一 `/v1` 入口**：Chatbox / Open WebUI / 任意 OpenAI 客户端零改造接入；支持 `/v1/chat/completions`（流式 SSE）与 `/v1/models`。
-- **多 Agent 后端**：经 ACP（acpx）桥接本机多种编码 Agent——opencode / pi / workbuddy / trace-cli 等 20+ 内置类型（见 `AGENT_CATALOG`），把会话模型参数 `agent:<id>` 路由到对应 agent。
+- **多 Agent 后端**：经 ACP（acpx）桥接本机多种编码 Agent——opencode / pi / workbuddy / trace-cli / cursor 等 20+ 内置类型（见 `AGENT_CATALOG`），把会话模型参数 `agent:<id>` 路由到对应 agent。
 - **会话事件归一**：把各 agent 的 ACP 事件收敛为统一的 text / thought(推理) / tool(工具活动) 流式回调，并回传 sessionId 续接。
 
 ## 多任务与按机器（节点）路由
@@ -29,10 +29,11 @@
 ## 管理后台（web /ui）
 
 - React + antd 单页，分组导航：
-  - **本机**：网关、进程、节点、agent、chat 测试。
+  - **本机**：网关、进程、节点、agent、概览、对话。
   - **远程**：网关、节点（审批/接入）、agent（只读，连接器自报）。
-  - **通用**：key、任务管理。
+  - **通用**：key、任务管理（可点「对话」跳入该任务的持久会话页）。
   - **系统**：我的 Token、渠道凭据、微信登录、真实用户（管理员项按角色过滤）。
+- **对话页**：React/antd 实现（不嵌入 `chat.html`）。未绑定时 oneshot 测试；从任务进入时带 `taskKey` 或 `channel/userId/task/agent` 走 `/v1` 任务路由，与微信渠道同一套会话隔离。
 - 后台支持运行时热更新（启停/切模型立即生效，重启还原 yaml）与持久化配置（默认 agent 写回 config.yaml）。
 
 ## 鉴权与多账号

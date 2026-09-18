@@ -17,6 +17,8 @@ import { DashboardLayout } from './components/DashboardLayout';
 import { LoginPage } from './pages/Login';
 import { ChangePasswordModal } from './pages/ChangePasswordModal';
 import { Overview } from './pages/Overview';
+import { ChatPage } from './pages/Chat';
+import type { ChatSession } from './pages/types';
 import { AgentsPage } from './pages/Agents';
 import { TasksPage } from './pages/Tasks';
 import { KeysPage } from './pages/Keys';
@@ -50,6 +52,7 @@ export function App() {
   const [, setTokenState] = useState(readToken);
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
   const [tab, setTab] = useState<TabId>(() => resolveStoredTab(localStorage.getItem(LS_TAB_KEY)));
+  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const [pwdOpen, setPwdOpen] = useState(false);
   const { bump } = useRefreshTick();
 
@@ -163,6 +166,12 @@ export function App() {
           onAuthError={handleAuthError}
           onApplyBase={applyBase}
           onGoTab={goTab}
+          chatSession={chatSession}
+          onOpenChat={(s) => {
+            setChatSession(s);
+            goTab('chat');
+          }}
+          onClearChatSession={() => setChatSession(null)}
         />
       </DashboardLayout>
 
@@ -196,6 +205,9 @@ function PageRouter(props: {
   onAuthError: (e: unknown) => boolean;
   onApplyBase: (next: string) => void;
   onGoTab: (t: TabId) => void;
+  chatSession: ChatSession | null;
+  onOpenChat: (s: ChatSession) => void;
+  onClearChatSession: () => void;
 }) {
   const { tab, base, token, onAuthError } = props;
   const isAdmin = props.auth.status === 'ready' ? props.auth.user.role === 'admin' : true;
@@ -203,6 +215,16 @@ function PageRouter(props: {
   switch (tab) {
     case 'overview':
       return <Overview base={base} token={token} onAuthError={onAuthError} />;
+    case 'chat':
+      return (
+        <ChatPage
+          base={base}
+          token={token}
+          onAuthError={onAuthError}
+          session={props.chatSession}
+          onClearSession={props.onClearChatSession}
+        />
+      );
     case 'local-agents':
       return <AgentsPage scope="local" base={base} token={token} onAuthError={onAuthError} />;
     case 'remote-agents':
@@ -216,7 +238,7 @@ function PageRouter(props: {
         />
       );
     case 'tasks':
-      return <TasksPage base={base} token={token} onAuthError={onAuthError} />;
+      return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} />;
     case 'keys':
       return <KeysPage base={base} token={token} onAuthError={onAuthError} />;
     case 'my-token':
