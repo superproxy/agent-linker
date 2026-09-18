@@ -519,7 +519,7 @@ export interface SystemInfo {
   port: number;
   authEnabled: boolean;
   sessionTtlDays: number;
-  /** 是否本机回环访问（false=外接远程网关，进程管理入口应隐藏） */
+  /** 当前请求是否来自回环（仅描述网关连接来源，与进程管理菜单无关） */
   local: boolean;
 }
 
@@ -531,7 +531,7 @@ export interface PmProcess {
   logFile: string;
 }
 
-/** 系统信息 + 本机进程管理客户端（进程接口仅回环 + 管理员可用） */
+/** 系统信息 + 本机进程管理客户端（进程接口打本机回环，与当前网关连接地址无关） */
 export class PmClient {
   constructor(
     private base: string,

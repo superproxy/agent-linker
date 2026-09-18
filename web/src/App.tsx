@@ -8,6 +8,7 @@ import {
   LS_TAB_KEY,
   LS_TOKEN_KEY,
   readToken,
+  rememberLocalBase,
   type TabId,
 } from './lib/constants';
 import { useRefreshTick } from './lib/hooks';
@@ -24,6 +25,7 @@ import { NodesPage } from './pages/Nodes';
 import { WeixinPage } from './pages/Weixin';
 import { AccountsPage } from './pages/Accounts';
 import { SettingsPage } from './pages/Settings';
+import { ProcessesPage } from './pages/Processes';
 
 type AuthState =
   | { status: 'loading' }
@@ -69,6 +71,10 @@ export function App() {
   }, [authClient]);
 
   useEffect(() => {
+    rememberLocalBase(base);
+  }, [base]);
+
+  useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
 
@@ -92,7 +98,9 @@ export function App() {
   }, [base]);
 
   const applyBase = (next: string) => {
-    localStorage.setItem(LS_KEY, next.trim().replace(/\/+$/, ''));
+    const url = next.trim().replace(/\/+$/, '');
+    rememberLocalBase(url);
+    localStorage.setItem(LS_KEY, url);
     window.location.reload();
   };
 
@@ -218,6 +226,8 @@ function PageRouter(props: {
       return <WeixinPage base={base} token={token} onAuthError={onAuthError} />;
     case 'accounts':
       return isAdmin ? <AccountsPage base={base} token={token} onAuthError={onAuthError} /> : null;
+    case 'processes':
+      return isAdmin ? <ProcessesPage /> : null;
     case 'settings':
       return isAdmin ? (
         <SettingsPage

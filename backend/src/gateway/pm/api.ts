@@ -1,6 +1,6 @@
 /**
  * 本机进程管理 REST（仅回环 + 管理员可用）：
- *   GET  /api/system/info        网关只读信息 + 是否本机访问（前端据此决定是否展示进程卡片）
+ *   GET  /api/system/info        网关只读信息 + 是否本机回环访问
  *   GET  /api/pm/status          gateway / weixin / node 运行态
  *   POST /api/pm/start           { targets: ['weixin'|'node'] }（不允许经 web 拉起 gateway）
  *   POST /api/pm/stop            { targets: ['weixin'|'node'] }（不允许经 web 停止 gateway）
@@ -12,7 +12,7 @@
  * 安全：进程能操控本机，必须同时满足
  *   1) 管理员（authGuard.isAdmin：未开鉴权 / 静态 token / admin 会话）
  *   2) 回环来源（127.0.0.1 / ::1 / ::ffff:127.0.0.1）
- * 连到远程网关时这些接口一律 403，前端也会据 /api/system/info.local 隐藏入口。
+ * 非回环来源这些接口一律 403。前端进程管理菜单独立，始终打本机回环地址。
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { readFileSync, existsSync } from 'node:fs';

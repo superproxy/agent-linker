@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import {
   AppstoreOutlined,
   ClusterOutlined,
+  ControlOutlined,
   DashboardOutlined,
   KeyOutlined,
   MessageOutlined,
@@ -9,8 +10,10 @@ import {
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
+import { rememberLocalBase as rememberLocalBaseImpl, localProcessBase as localProcessBaseImpl } from './local-base';
 
-export const DEFAULT_BASE = 'http://127.0.0.1:8787';
+export { DEFAULT_BASE, LS_LOCAL_BASE_KEY, isLoopbackBase, isLoopbackHostname } from './local-base';
+
 export const LS_KEY = 'linkagent.gw.base';
 export const LS_TAB_KEY = 'linkagent.gw.tab';
 export const LS_TOKEN_KEY = 'linkagent.gw.token';
@@ -35,6 +38,7 @@ export type TabId =
   | 'nodes'
   | 'weixin'
   | 'accounts'
+  | 'processes'
   | 'settings';
 
 export interface NavItem {
@@ -78,6 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '系统',
     items: [
       { id: 'accounts', label: '真实用户', icon: <TeamOutlined />, adminOnly: true },
+      { id: 'processes', label: '进程管理', icon: <ControlOutlined />, adminOnly: true },
       { id: 'settings', label: '网关设置', icon: <SettingOutlined />, adminOnly: true },
     ],
   },
@@ -115,6 +120,15 @@ export function writeProfiles(profiles: GatewayProfile[]): void {
 /** 生成新 profile id */
 export function newProfileId(): string {
   return `gw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function rememberLocalBase(url: string): void {
+  rememberLocalBaseImpl(url);
+}
+
+/** 本机进程管理入口：优先页面同源回环，其次上次记住的本机地址，最后默认 127.0.0.1:8787 */
+export function localProcessBase(): string {
+  return localProcessBaseImpl(window.location.origin);
 }
 
 export function errText(e: unknown): string {
