@@ -252,9 +252,9 @@ export function ChatPage(
                   </Card>
                 ) : null}
                 {m.error ? (
-                  <Tag color="error" style={{ marginTop: 6 }}>
+                  <Typography.Text type="danger" style={{ marginTop: 6, whiteSpace: 'pre-wrap', maxWidth: '100%' }}>
                     {m.error}
-                  </Tag>
+                  </Typography.Text>
                 ) : null}
                 {!m.content && !m.error && !m.done ? <Spin size="small" style={{ marginTop: 8 }} /> : null}
               </Flex>
