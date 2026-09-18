@@ -48,7 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '运行时',
     items: [
       { id: 'agents', label: 'Agent 管理', icon: <AppstoreOutlined /> },
-      { id: 'tasks', label: '任务管理', icon: <MessageOutlined /> },
+      { id: 'tasks', label: '任务', icon: <MessageOutlined /> },
       { id: 'nodes', label: '节点管理', icon: <ClusterOutlined /> },
     ],
   },
@@ -57,7 +57,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'keys', label: 'Key 管理', icon: <KeyOutlined /> },
       { id: 'my-token', label: '我的 Token', icon: <SafetyCertificateOutlined /> },
-      { id: 'channel-tokens', label: '用户凭据', icon: <SafetyCertificateOutlined />, adminOnly: true },
+      { id: 'channel-tokens', label: '渠道凭据', icon: <SafetyCertificateOutlined />, adminOnly: true },
     ],
   },
   {
@@ -67,7 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: '系统',
     items: [
-      { id: 'accounts', label: '登录账号', icon: <TeamOutlined />, adminOnly: true },
+      { id: 'accounts', label: '真实用户', icon: <TeamOutlined />, adminOnly: true },
       { id: 'settings', label: '网关设置', icon: <SettingOutlined />, adminOnly: true },
     ],
   },

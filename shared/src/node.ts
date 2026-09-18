@@ -33,6 +33,58 @@ export interface NodeInfo {
   remoteAddress?: string;
 }
 
+/**
+ * 按机器（节点）聚合的 agent 开通视图（GET /api/agents/by-node）。
+ * agent 是「每台机器各自开通」的：本机由网关配置（可编辑），远程机器由其连接器自报（只读）。
+ */
+
+/** 本机（网关内建 local 节点）上一个 agent 的可编辑运行态 */
+export interface LocalAgentView {
+  id: string;
+  type: string;
+  displayName: string;
+  description: string;
+  /** 当前生效的会话模型（undefined=agent 自身默认） */
+  model?: string;
+  /** 运行时是否启用 */
+  enabled: boolean;
+}
+
+/** 远程机器上一个自报开通的 agent（只读） */
+export interface RemoteAgentView {
+  id: string;
+  displayName?: string;
+}
+
+/** 本机分组：agent 来自 gateway.agents 配置，可在后台启停/切模型/设默认 */
+export interface LocalNodeAgentView {
+  nodeId: typeof LOCAL_NODE_ID;
+  name: string;
+  online: true;
+  status: 'approved';
+  agents: LocalAgentView[];
+}
+
+/** 远程机器分组：agent 由该机器连接器自报，网关侧只读 */
+export interface RemoteNodeAgentView {
+  nodeId: string;
+  name: string;
+  online: boolean;
+  status?: NodeAdmissionStatus;
+  agents: RemoteAgentView[];
+  version?: string;
+  connectedAt?: number;
+  lastSeenAt?: number;
+  remoteAddress?: string;
+}
+
+export interface AgentsByNode {
+  /** 全局新任务默认绑定的本机 agentId（config.yaml tasks.defaultAgentId） */
+  defaultAgentId: string;
+  local: LocalNodeAgentView;
+  nodes: RemoteNodeAgentView[];
+}
+
 /** 节点归一化后的流式事件（与传输无关，远程侧把 acpx 事件收敛成这三类） */
 export type NodeTurnEvent =
   | { kind: 'text'; text: string }

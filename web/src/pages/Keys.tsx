@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Input, Switch, Table, Tag } from 'antd';
+import { Input, Space, Switch, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { SearchOutlined } from '@ant-design/icons';
 import { OpsClient, type TaskItem, type UserTasks } from '../api';
@@ -38,7 +38,7 @@ export function KeysPage(props: { base: string; token: string; onAuthError: Auth
     const withKey = all.filter((r) => !!r.t.key);
     const kw = q.trim().toLowerCase();
     return kw
-      ? withKey.filter((r) => (r.t.key! + r.t.name + r.u.userId).toLowerCase().includes(kw))
+      ? withKey.filter((r) => (r.t.key! + r.t.name + r.u.userId + r.u.channel).toLowerCase().includes(kw))
       : withKey;
   }, [users, q]);
 
@@ -64,12 +64,15 @@ export function KeysPage(props: { base: string; token: string; onAuthError: Auth
       render: (k: string) => <CopyableCode text={k} truncate title="点击复制完整 Key" />,
     },
     {
-      title: '所属用户',
+      title: '渠道 / 终端',
       key: 'user',
       render: (_, r) => (
-        <code className="code-cell">
-          {r.u.channel}:{r.u.userId}
-        </code>
+        <Space size={6}>
+          <Tag color={r.u.channel === 'weixin' ? 'green' : 'default'} style={{ borderRadius: 999, marginInlineEnd: 0 }}>
+            {r.u.channel === 'weixin' ? '微信' : r.u.channel}
+          </Tag>
+          <code className="code-cell">{r.u.userId}</code>
+        </Space>
       ),
     },
     {
@@ -110,13 +113,14 @@ export function KeysPage(props: { base: string; token: string; onAuthError: Auth
       <p className="page-desc">
         任务 key 随任务自动生成，可直接填入 Chatbox 或任意 OpenAI 客户端的 <code>API Key</code>（
         <code>Bearer &lt;key&gt;</code>）做任务级直连，无需全局静态 token 与 channel/userId/task；
-        该凭据只能访问这一个任务且不能切换 agent。停用后该 Key 立即失效。
+        该凭据只能访问这一个任务且不能切换 agent。「渠道 / 终端」标识该会话来自哪个渠道终端（非系统账号）；
+        真实用户（系统账号）自己的长期凭据见「我的 Token」。停用后该 Key 立即失效。
       </p>
       <Input
         prefix={<SearchOutlined style={{ color: 'rgba(229,233,240,0.35)' }} />}
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="搜索 Key / 任务 / 用户"
+        placeholder="搜索 Key / 任务 / 渠道终端"
         style={{ marginBottom: 14, maxWidth: 360 }}
         allowClear
       />

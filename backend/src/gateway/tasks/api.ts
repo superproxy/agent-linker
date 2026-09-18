@@ -76,18 +76,17 @@ export function registerTaskApi(
     return { channel: ref.channel, userId: ref.userId, task: ref.task };
   });
 
-  // GET /api/tasks/all —— 全部用户的任务明细（管理后台「任务」页）
+  // GET /api/tasks/all —— 全部渠道终端的任务明细（管理后台「任务」页）
+  // 只返回真实落盘的渠道终端（微信用户发过消息才建档）；开箱无任何渠道消息时为空列表，
+  // 不再凭空造 weixin/default 虚拟终端（渠道终端不是系统用户）。
   app.get('/api/tasks/all', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
-    // 开箱状态（尚无渠道消息落盘）也展示系统默认用户（weixin/default）的默认任务
-    service.ensureSystemDefault();
     return { users: service.listAllTasks() };
   });
 
-  // GET /api/users —— 全部用户（含任务数），用户列表页
+  // GET /api/users —— 全部渠道终端摘要（含任务数），渠道终端列表页
   app.get('/api/users', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
-    service.ensureSystemDefault();
     return { users: service.listUsers() };
   });
 

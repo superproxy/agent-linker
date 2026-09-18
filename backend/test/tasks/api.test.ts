@@ -257,31 +257,20 @@ test('/api/tasks/all: 返回全部用户任务明细（管理后台任务页）'
   }
 });
 
-test('/api/tasks/all: 开箱状态（无任何落盘）懒展示系统默认用户的默认任务', async () => {
+test('/api/tasks/all: 开箱状态（无任何渠道消息落盘）返回空列表，不凭空造 weixin/default 虚拟终端', async () => {
   const app = await freshApp();
   try {
     const res = await app.inject({ method: 'GET', url: '/api/tasks/all' });
     assert.equal(res.statusCode, 200);
-    const users = res.json().users;
-    assert.equal(users.length, 1);
-    assert.equal(users[0].channel, 'weixin');
-    assert.equal(users[0].userId, 'default');
-    assert.equal(users[0].activeTaskId, 'default');
-    assert.equal(users[0].tasks.length, 1);
-    assert.equal(users[0].tasks[0].id, 'default');
-    assert.equal(users[0].tasks[0].name, '默认');
-    assert.equal(users[0].tasks[0].agentId, 'opencode');
+    assert.deepEqual(res.json().users, []);
 
-    // 用户列表页同样可见（含任务数 1）
+    // 渠道终端列表页同样为空（GET 不应产生建档副作用）
     const ures = await app.inject({ method: 'GET', url: '/api/users' });
-    const summary = ures.json().users.find((u: { userId: string }) => u.userId === 'default');
-    assert.ok(summary);
-    assert.equal(summary.taskCount, 1);
+    assert.deepEqual(ures.json().users, []);
 
-    // 幂等：再次请求仍是同一个默认任务（不重复建档）
+    // 幂等：再次请求仍为空，确认读取接口不落盘
     const again = await app.inject({ method: 'GET', url: '/api/tasks/all' });
-    assert.equal(again.json().users.length, 1);
-    assert.equal(again.json().users[0].tasks[0].key, users[0].tasks[0].key);
+    assert.deepEqual(again.json().users, []);
   } finally {
     await app.close().catch(() => {});
   }

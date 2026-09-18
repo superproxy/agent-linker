@@ -224,6 +224,38 @@ export interface AgentDetail {
   enabled: boolean;
 }
 
+/** 远程机器自报开通的 agent（只读） */
+export interface RemoteAgentView {
+  id: string;
+  displayName?: string;
+}
+
+/** 远程机器（节点）分组（/api/agents/by-node） */
+export interface RemoteNodeAgentView {
+  nodeId: string;
+  name: string;
+  online: boolean;
+  status?: 'approved' | 'pending' | 'blocked';
+  agents: RemoteAgentView[];
+  version?: string;
+  connectedAt?: number;
+  lastSeenAt?: number;
+  remoteAddress?: string;
+}
+
+/** 按机器聚合的 agent 开通视图（/api/agents/by-node） */
+export interface AgentsByNode {
+  defaultAgentId: string;
+  local: {
+    nodeId: 'local';
+    name: string;
+    online: true;
+    status: 'approved';
+    agents: AgentDetail[];
+  };
+  nodes: RemoteNodeAgentView[];
+}
+
 /** 管理接口客户端：/api/agents + /api/tasks/default-agent（可带 Bearer token） */
 export class AdminClient {
   constructor(
@@ -259,6 +291,11 @@ export class AdminClient {
   async listAgents(): Promise<AgentDetail[]> {
     const data = (await this.request('/api/agents')) as { agents: AgentDetail[] };
     return data.agents;
+  }
+
+  /** 按机器（节点）聚合的 agent 开通视图：本机可编辑，远程机器只读 */
+  async agentsByNode(): Promise<AgentsByNode> {
+    return (await this.request('/api/agents/by-node')) as AgentsByNode;
   }
 
   /** 运行时热更新 agent（启停 / 切换模型，仅内存生效，重启还原 config.yaml） */
@@ -306,7 +343,7 @@ export interface AgentCatalogItem {
   kind: string;
   displayName: string;
   description: string;
-  command?: string;
+  command?: string[];
   configured: boolean;
   enabled: boolean;
 }
@@ -547,9 +584,9 @@ export class PmClient {
   }
 }
 
-// ── 渠道用户 / 任务 / Key / 节点（对齐旧 admin.html 的运维模块）──
+// ── 渠道终端 / 任务 / Key / 节点（渠道终端≠系统账号，仅为渠道侧匿名会话作用域）──
 
-/** 渠道用户摘要（/api/users） */
+/** 渠道终端摘要（/api/users） */
 export interface ChannelUserSummary {
   channel: string;
   userId: string;
@@ -558,7 +595,7 @@ export interface ChannelUserSummary {
   updatedAt: number;
 }
 
-/** 渠道用户级 token 摘要（/api/channel-tokens，不含完整 token） */
+/** 渠道终端级 token 摘要（/api/channel-tokens，不含完整 token） */
 export interface ChannelTokenInfo {
   channel: string;
   userId: string;
@@ -580,7 +617,7 @@ export interface TaskItem {
   createdAt: number;
 }
 
-/** 单个渠道用户的全部任务（/api/tasks/all 的 users[]） */
+/** 单个渠道终端的全部会话任务（/api/tasks/all 的 users[]） */
 export interface UserTasks {
   channel: string;
   userId: string;
@@ -644,7 +681,7 @@ export class OpsClient {
     return res.json().catch(() => ({}));
   }
 
-  // ── 渠道用户 ──
+  // ── 渠道终端 ──
   async listUsers(): Promise<ChannelUserSummary[]> {
     const data = (await this.request('/api/users')) as { users: ChannelUserSummary[] };
     return data.users;
@@ -725,13 +762,13 @@ export class OpsClient {
     await this.request(`/api/tasks/${encodeURIComponent(taskId)}?${q.toString()}`, { method: 'DELETE' });
   }
 
-  // ── 渠道用户级 token（微信 bot 用户级直连凭据）──
+  // ── 渠道终端级 token（微信 bot 终端级直连凭据）──
   async listChannelTokens(): Promise<ChannelTokenInfo[]> {
     const data = (await this.request('/api/channel-tokens')) as { tokens: ChannelTokenInfo[] };
     return data.tokens;
   }
 
-  /** 获取或签发某渠道用户 token（幂等）；返回完整 token 本体 */
+  /** 获取或签发某渠道终端 token（幂等）；返回完整 token 本体 */
   async ensureChannelToken(channel: string, userId: string, label?: string): Promise<{ token: string }> {
     return (await this.request('/api/channel-tokens/ensure', {
       method: 'POST',
@@ -747,7 +784,7 @@ export class OpsClient {
     })) as { token: string };
   }
 
-  /** 按渠道用户吊销其全部 token（列表仅回显预览，故按用户维度吊销） */
+  /** 按渠道终端吊销其全部 token（列表仅回显预览，故按终端维度吊销） */
   async revokeChannelTokenByUser(channel: string, userId: string): Promise<void> {
     await this.request(
       `/api/channel-tokens/by-user/${encodeURIComponent(channel)}/${encodeURIComponent(userId)}`,

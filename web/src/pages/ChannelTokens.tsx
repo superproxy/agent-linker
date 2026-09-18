@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Input, Popconfirm, Space, Table } from 'antd';
+import { Alert, Button, Input, Popconfirm, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { OpsClient, type ChannelTokenInfo } from '../api';
@@ -52,12 +52,15 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
       render: (v: string) => <code className="code-cell">{v}</code>,
     },
     {
-      title: '所属用户',
+      title: '渠道 / 终端',
       key: 'user',
       render: (_, r) => (
-        <code className="code-cell">
-          {r.channel}:{r.userId}
-        </code>
+        <Space size={6}>
+          <Tag color={r.channel === 'weixin' ? 'green' : 'default'} style={{ borderRadius: 999, marginInlineEnd: 0 }}>
+            {r.channel === 'weixin' ? '微信' : r.channel}
+          </Tag>
+          <code className="code-cell">{r.userId}</code>
+        </Space>
       ),
     },
     {
@@ -90,8 +93,8 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
               轮换
             </Button>
             <Popconfirm
-              title={`确认吊销 ${id} 的用户凭据？`}
-              description="bot 下次消息将自动重新签发。"
+              title={`确认吊销 ${id} 的渠道凭据？`}
+              description="该终端下次发消息时 bot 将自动重新签发。"
               okText="吊销"
               okButtonProps={{ danger: true }}
               cancelText="取消"
@@ -110,8 +113,8 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
   return (
     <div>
       <p className="page-desc">
-        每个微信用户一枚用户级 token（<code>ct_</code> 前缀），微信 bot 代该用户直连网关，只能访问其本人的任务，不能触碰管理接口。
-        Chatbox 任务级直连请用「Key 管理」里的任务 key。
+        每个渠道终端（微信 openid）一枚终端级 token（<code>ct_</code> 前缀），微信 bot 代该终端直连网关，只能访问其本人的会话任务，不能触碰管理接口。
+        它代表的是渠道终端而非系统账号；真实用户（系统账号）的长期凭据见「我的 Token」，Chatbox 任务级直连请用「Key 管理」里的任务 key。
       </p>
 
       <Space.Compact style={{ marginBottom: 14, width: '100%', maxWidth: 560 }}>
@@ -119,7 +122,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
         <Input
           value={userId}
           onChange={(e) => setUserId(e.target.value)}
-          placeholder="微信用户 id（from_user_id）"
+          placeholder="微信终端 id（from_user_id / openid）"
           onPressEnter={() =>
             userId.trim() &&
             void run('ensure', () => ops.ensureChannelToken('weixin', userId.trim())).then(() => setUserId(''))
@@ -160,7 +163,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
         dataSource={rows ?? []}
         loading={rows === null}
         pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }}
-        locale={{ emptyText: <EmptyHint text="暂无用户凭据（微信用户首次发消息时自动签发）" /> }}
+        locale={{ emptyText: <EmptyHint text="暂无渠道凭据（微信终端首次发消息时自动签发）" /> }}
       />
     </div>
   );

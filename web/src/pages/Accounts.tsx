@@ -166,6 +166,10 @@ export function AccountsPage(props: { base: string; token: string; onAuthError: 
   return (
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
+      <p className="page-desc" style={{ marginBottom: 14 }}>
+        这里是能登录后台、持有 <code>pat_</code> 个人 Token 的<strong>真实用户（系统账号）</strong>。
+        微信 / Chatbox 等渠道侧的匿名终端（按 openid 或凭据区分）不是系统账号，其任务见「任务」、其凭据见「Key 管理 / 渠道凭据」。
+      </p>
       <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
           新增用户

@@ -194,12 +194,18 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
     },
   ];
 
+  const channelLabel = (ch: string): string => (ch === 'weixin' ? '微信' : ch);
+
   const panels = (users ?? []).map((u) => ({
     key: `${u.channel}:${u.userId}`,
     label: (
       <Space size={10}>
+        <Tag color={u.channel === 'weixin' ? 'green' : 'default'} style={{ borderRadius: 999, marginInlineEnd: 0 }}>
+          {channelLabel(u.channel)}
+        </Tag>
+        <span className="sub-muted" style={{ fontSize: 12 }}>终端标识</span>
         <code className="code-cell" style={{ fontSize: 12.5 }}>
-          {u.channel}:{u.userId}
+          {u.userId}
         </code>
         <Badge count={u.tasks.length} style={{ background: '#1f2937', color: '#aebdd4' }} />
         <span className="sub-muted">当前任务 {u.activeTaskId || '—'}</span>
@@ -234,10 +240,14 @@ export function TasksPage(props: { base: string; token: string; onAuthError: Aut
   return (
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
+      <p className="page-desc" style={{ marginBottom: 14 }}>
+        这里按<strong>渠道终端</strong>（微信 openid 等）分组展示多轮会话任务，仅用于会话隔离与路由，<strong>不是系统账号</strong>。
+        终端在首次发起渠道消息时自动建档；Chatbox 等 OpenAI 客户端用任务 Key / Token 直连，不在这里产生终端。
+      </p>
       {users === null ? (
         <Table loading showHeader={false} pagination={false} rowKey="x" columns={[{ title: '', dataIndex: 'x' }]} dataSource={[]} />
       ) : users.length === 0 ? (
-        <EmptyHint text="暂无渠道用户任务（微信用户发起对话后自动创建）" />
+        <EmptyHint text="暂无任务（微信终端首次发消息后自动创建）" />
       ) : (
         <Collapse
           defaultActiveKey={users.map((u) => `${u.channel}:${u.userId}`)}

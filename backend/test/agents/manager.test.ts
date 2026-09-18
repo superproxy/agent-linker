@@ -26,7 +26,7 @@ test('listAgentCatalog：默认 4 个已配置启用，其余支持类型未配�
     assert.equal(item.configured, true);
     assert.equal(item.enabled, true);
   }
-  for (const kind of ['codex', 'claude', 'gemini', 'qwen', 'openclaw'] as const) {
+  for (const kind of ['codex', 'claude', 'gemini', 'qwen', 'openclaw', 'zcode'] as const) {
     const item = catalog.find((c) => c.kind === kind);
     assert.ok(item, `缺目录项 ${kind}`);
     assert.equal(item.configured, false);

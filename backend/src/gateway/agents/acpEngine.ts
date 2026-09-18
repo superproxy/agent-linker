@@ -56,6 +56,10 @@ export const DEFAULT_COMMANDS: Record<AcpAgentKind, string[]> = {
   qoder: ['qodercli', '--acp'],
   qwen: ['qwen', '--acp'],
   zeroclaw: ['zeroclaw', 'acp'],
+  // zcode 不在 acpx 内置 registry：经 registry override 注册到全局安装的 zcode-acp-server
+  // （npm i -g zcode-acp-server；bin 无参即 stdio ACP server，内部派生 `zcode app-server --stdio`）。
+  // 注意：不要用 `zcode-acp` 无参（那是交互式 TUI，不是 ACP server）。
+  zcode: ['zcode-acp-server'],
 };
 
 /** 各 ACP agent 的缺省展示信息（definition.displayName/description 可覆盖） */
@@ -83,6 +87,7 @@ export const DEFAULT_LABELS: Record<AcpAgentKind, { displayName: string; descrip
   qoder: { displayName: 'Qoder', description: 'Qoder CLI（qodercli --acp），默认只读问答' },
   qwen: { displayName: 'Qwen Code', description: 'Qwen Code（qwen --acp），默认只读问答' },
   zeroclaw: { displayName: 'ZeroClaw', description: 'ZeroClaw（zeroclaw acp），默认只读问答' },
+  zcode: { displayName: 'ZCode', description: 'ZCode（zcode-acp-server，需 npm i -g zcode-acp-server），默认只读问答' },
 };
 
 /** 管理后台目录条目（不含配置状态；configured/enabled 由 AgentManager 组装） */

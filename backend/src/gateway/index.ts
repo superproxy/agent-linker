@@ -37,6 +37,8 @@ import {
   modelIdFor,
   messagesToText,
   defaultAgentDefinitions,
+  LOCAL_NODE_ID,
+  LOCAL_NODE_NAME,
   type AgentDefinition,
   type ChatCompletion,
   type ChatCompletionChunk,
@@ -535,6 +537,38 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       local: { nodeId: 'local', name: '本机（网关）', online: true, agents: manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })) },
       nodes: nodes.map((n) => ({ nodeId: n.nodeId, name: n.name, online: n.online, agents: n.agents })),
       agents: manager.listRoutingAgents(),
+    };
+  });
+
+  /**
+   * 按机器（节点）聚合的 agent 开通视图（Agent 管理页）：
+   * 本机 local 分组返回完整可编辑运行态；远程机器只返回其连接器自报的只读列表。
+   * agent 是「每台机器各自开通」的，网关不能远程改动其他机器的开通情况。
+   */
+  app.get('/api/agents/by-node', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!checkAuth(request)) {
+      return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    return {
+      defaultAgentId: taskService.getDefaultAgentId(),
+      local: {
+        nodeId: LOCAL_NODE_ID,
+        name: LOCAL_NODE_NAME,
+        online: true,
+        status: 'approved' as const,
+        agents: manager.listAgentDetails(),
+      },
+      nodes: nodeManager.list().map((n) => ({
+        nodeId: n.nodeId,
+        name: n.name,
+        online: n.online,
+        ...(n.status ? { status: n.status } : {}),
+        agents: n.agents,
+        ...(n.version ? { version: n.version } : {}),
+        ...(n.connectedAt ? { connectedAt: n.connectedAt } : {}),
+        ...(n.lastSeenAt ? { lastSeenAt: n.lastSeenAt } : {}),
+        ...(n.remoteAddress ? { remoteAddress: n.remoteAddress } : {}),
+      })),
     };
   });
 

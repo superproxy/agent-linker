@@ -160,6 +160,7 @@ export function App() {
           onAuthError={handleAuthError}
           onBaseChange={setBase}
           onApplyBase={applyBase}
+          onGoTab={goTab}
         />
       </DashboardLayout>
 
@@ -193,6 +194,7 @@ function PageRouter(props: {
   onAuthError: (e: unknown) => boolean;
   onBaseChange: (v: string) => void;
   onApplyBase: () => void;
+  onGoTab: (t: TabId) => void;
 }) {
   const { tab, base, token, onAuthError } = props;
   const isAdmin = props.auth.status === 'ready' ? props.auth.user.role === 'admin' : true;
@@ -201,7 +203,7 @@ function PageRouter(props: {
     case 'overview':
       return <Overview base={base} token={token} onAuthError={onAuthError} />;
     case 'agents':
-      return <AgentsPage base={base} token={token} onAuthError={onAuthError} />;
+      return <AgentsPage base={base} token={token} onAuthError={onAuthError} onGoNodes={() => props.onGoTab('nodes')} />;
     case 'tasks':
       return <TasksPage base={base} token={token} onAuthError={onAuthError} />;
     case 'keys':

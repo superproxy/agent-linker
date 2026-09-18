@@ -14,9 +14,10 @@ export type AcpPermissionMode = (typeof ACP_PERMISSION_MODES)[number];
 /**
  * 支持的 ACP agent 类型（单一事实来源：config 校验、启动命令、管理目录均引用此列表）。
  * 前 4 个为本项目预置（opencode 原生 ACP；pi 经 pi-acp 桥接；workbuddy 经 `codebuddy --acp`；
- * trace-cli 经 `traecli acp serve`，即 acpx 内置的 trae）；其余为 acpx@0.15.1 内置 registry
- * 的类型（对应 CLI 本机安装后才可用，缺 CLI 时仅标记 unhealthy）。
- * 默认 ACP server 启动命令见 backend acpWrapper DEFAULT_COMMANDS。
+ * trace-cli 经 `traecli acp serve`，即 acpx 内置的 trae）；中间为 acpx@0.15.1 内置 registry
+ * 的类型（对应 CLI 本机安装后才可用，缺 CLI 时仅标记 unhealthy）；末尾 zcode 不在 acpx 内置
+ * registry，经 acpx registry override 注册到自定义命令 `zcode-acp-server`（npm i -g zcode-acp-server）。
+ * 默认 ACP server 启动命令见 backend acpEngine DEFAULT_COMMANDS。
  */
 export const ACP_AGENT_KINDS = [
   'opencode',
@@ -42,6 +43,7 @@ export const ACP_AGENT_KINDS = [
   'qoder',
   'qwen',
   'zeroclaw',
+  'zcode',
 ] as const;
 export type AcpAgentKind = (typeof ACP_AGENT_KINDS)[number];
 

@@ -17,11 +17,6 @@ import {
   type UserTasks,
 } from './types.js';
 
-/** 任务机制的系统渠道（与任务路由白名单一致，目前仅微信渠道） */
-export const SYSTEM_TASK_CHANNEL = 'weixin';
-/** 系统默认用户：三元素路由 userId 缺省时即该用户（不写 user 就是 default） */
-export const SYSTEM_DEFAULT_USER = 'default';
-
 export interface TaskServiceOptions {
   store: TaskStore;
   /** 默认任务绑定的 agent（config.yaml tasks.defaultAgentId，缺省 opencode） */
@@ -68,15 +63,6 @@ export class TaskService {
     const dir = join(this.workspaceRoot, safe(userId), taskId);
     mkdirSync(dir, { recursive: true });
     return dir;
-  }
-
-  /**
-   * 确保系统默认用户（weixin/default：三元素路由 userId 缺省即该用户）的默认任务已建档。
-   * 管理后台「任务管理 / 用户管理」页首次打开（尚无任何渠道消息落盘）时调用，
-   * 让开箱状态也能看到并管理系统默认任务；已有建档则为纯读取、无副作用。
-   */
-  ensureSystemDefault(): UserTasks {
-    return this.load(SYSTEM_TASK_CHANNEL, SYSTEM_DEFAULT_USER);
   }
 
   /** 全局默认任务绑定的 agentId（config.yaml tasks.defaultAgentId 的运行时值） */

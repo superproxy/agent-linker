@@ -35,6 +35,7 @@ pnpm dev          # 等价 pnpm --filter @linkagent/backend dev（tsx watch，�
 | pi | `npx -y pi-acp` | pi-coding-agent 的第三方 ACP 桥接（内部 `pi --mode rpc`） |
 | workbuddy | `codebuddy --acp` | 腾讯 CodeBuddy Code CLI 原生 ACP server |
 | trace-cli | `traecli acp serve` | 字节 TraeCode CLI 2.0 原生 ACP server |
+| zcode | `zcode-acp-server` | 智谱 ZCode（先 `npm i -g zcode-acp-server`），经 ACP 桥接 |
 | 更多（codex / claude / gemini / cursor / copilot / qwen / openclaw 等） | 见管理后台「支持 ACP 的 Agent 目录」 | 对应 CLI 本机安装后即可一键添加启用 |
 
 ## 配置

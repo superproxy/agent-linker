@@ -32,6 +32,69 @@ test('GET /api/agents/catalog：返回全部支持类型与配置状态', async 
   }
 });
 
+test('GET /api/agents/by-node：本机分组含完整可编辑运行态 + 默认 agent；远程节点只读自报', async () => {
+  const built = await freshBuilt([{ id: 'opencode', type: 'opencode', displayName: 'OpenCode' }]);
+  const { app, manager, nodeManager, pluginManager } = built;
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/agents/by-node' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as {
+      defaultAgentId: string;
+      local: { nodeId: string; name: string; online: boolean; status: string; agents: { id: string; enabled: boolean }[] };
+      nodes: unknown[];
+    };
+    assert.equal(body.defaultAgentId, 'opencode');
+    assert.equal(body.local.nodeId, 'local');
+    assert.equal(body.local.online, true);
+    assert.equal(body.local.status, 'approved');
+    assert.ok(body.local.agents.some((a) => a.id === 'opencode' && a.enabled === true));
+    assert.ok(Array.isArray(body.nodes));
+
+    // 远程节点（含在线/离线）只读自报其开通的 agent，网关不做可编辑字段（stub 隔离真实注册表）
+    nodeManager.list = () => [
+      {
+        nodeId: 'n_aaa',
+        name: 'build-box',
+        online: true,
+        status: 'approved',
+        agents: [{ id: 'codex', displayName: 'Codex' }],
+        version: '0.1.0',
+        connectedAt: 1,
+        lastSeenAt: 2,
+      },
+      {
+        nodeId: 'n_bbb',
+        name: 'offline-box',
+        online: false,
+        status: 'approved',
+        agents: [{ id: 'pi' }],
+        lastSeenAt: 3,
+      },
+    ] as never;
+    const res2 = await app.inject({ method: 'GET', url: '/api/agents/by-node' });
+    assert.equal(res2.statusCode, 200);
+    const nodes = res2.json().nodes as { nodeId: string; online: boolean; agents: { id: string }[] }[];
+    assert.equal(nodes.length, 2);
+    const online = nodes.find((n) => n.nodeId === 'n_aaa');
+    assert.ok(online);
+    assert.equal(online?.online, true);
+    assert.deepEqual(online?.agents, [{ id: 'codex', displayName: 'Codex' }]);
+    const offline = nodes.find((n) => n.nodeId === 'n_bbb');
+    assert.equal(offline?.online, false);
+    assert.deepEqual(offline?.agents, [{ id: 'pi' }]);
+
+    // 本机停用一个 agent 后，by-node 的本机分组应反映（可编辑运行态）
+    manager.updateAgent('opencode', { enabled: false });
+    const res3 = await app.inject({ method: 'GET', url: '/api/agents/by-node' });
+    const localAgents = res3.json().local.agents as { id: string; enabled: boolean }[];
+    assert.equal(localAgents.find((a) => a.id === 'opencode')?.enabled, false);
+  } finally {
+    await pluginManager?.dispose().catch(() => {});
+    await manager.dispose().catch(() => {});
+    await app.close().catch(() => {});
+  }
+});
+
 test('POST /api/agents：未知类型 400；重复 409；合法添加 200 且模型列表可见', async () => {
   const built = await freshBuilt([{ id: 'opencode', type: 'opencode', displayName: 'OpenCode' }]);
   const { app, manager, pluginManager } = built;

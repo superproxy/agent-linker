@@ -192,7 +192,7 @@ export function Overview(props: PageProps) {
             label="任务总数"
             value={users ? taskCount : '—'}
             unit="个"
-            foot={`${users ? users.length : 0} 个渠道用户`}
+            foot={`${users ? users.length : 0} 个渠道终端`}
             loading={!users}
           />
         </Col>
