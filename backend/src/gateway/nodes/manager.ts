@@ -43,6 +43,10 @@ export interface NodeManagerOptions {
   registry: NodeRegistry;
   /** 网关开启鉴权时的静态令牌：携带正确令牌的节点直连上线；空串/undefined 表示不校验（全部自动批准） */
   expectedToken?: string;
+  /** 用户颁发的机器 token 反查（nt_）；命中则直连上线并归属该用户 */
+  resolveNodeToken?: (token: string) => { username: string; nodeId?: string } | null;
+  /** 首次握手将 token 锁定到 nodeId */
+  bindNodeToken?: (token: string, nodeId: string) => boolean;
   pingIntervalMs?: number;
   logger?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void };
 }
@@ -68,10 +72,19 @@ function secretEqual(a: string | undefined, b: string | undefined): boolean {
   }
 }
 
+type UpgradeAuth =
+  | { kind: 'none' }
+  | { kind: 'open' }
+  | { kind: 'gateway' }
+  | { kind: 'invalid' }
+  | { kind: 'node'; username: string; token: string; boundNodeId?: string };
+
 /** 管理远程节点的 WebSocket 连接、准入审批、心跳、turn 多路复用与注册信息持久化 */
 export class NodeManager {
   private readonly registry: NodeRegistry;
   private readonly expectedToken: string;
+  private readonly resolveNodeToken?: NodeManagerOptions['resolveNodeToken'];
+  private readonly bindNodeToken?: NodeManagerOptions['bindNodeToken'];
   private readonly logger: NonNullable<NodeManagerOptions['logger']>;
   private readonly wss = new WebSocketServer({ noServer: true });
   /** 含待审批连接（approved=false）；路由相关方法只认 approved 连接 */
@@ -82,6 +95,8 @@ export class NodeManager {
   constructor(options: NodeManagerOptions) {
     this.registry = options.registry;
     this.expectedToken = options.expectedToken ?? '';
+    this.resolveNodeToken = options.resolveNodeToken;
+    this.bindNodeToken = options.bindNodeToken;
     this.logger = options.logger ?? {
       info: (m) => console.log(`[nodes] ${m}`),
       warn: (m) => console.warn(`[nodes] ${m}`),
@@ -121,27 +136,34 @@ export class NodeManager {
       return;
     }
     if (this.expectedToken) {
-      const check = this.checkToken(req);
-      if (check === 'invalid') {
+      const check = this.classifyUpgradeToken(req);
+      if (check.kind === 'invalid') {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
       }
-      this.wss.handleUpgrade(req, socket, head, (ws) => this.handleConnection(ws, req, check === 'ok'));
+      this.wss.handleUpgrade(req, socket, head, (ws) => this.handleConnection(ws, req, check));
       return;
     }
-    this.wss.handleUpgrade(req, socket, head, (ws) => this.handleConnection(ws, req, true));
+    this.wss.handleUpgrade(req, socket, head, (ws) => this.handleConnection(ws, req, { kind: 'open' }));
   }
 
-  /** 'ok'=令牌正确；'none'=未携带（匿名）；'invalid'=携带但不匹配 */
-  private checkToken(req: IncomingMessage): 'ok' | 'none' | 'invalid' {
+  private readProvidedToken(req: IncomingMessage): string {
     const url = new URL(req.url ?? '', 'http://localhost');
     const qToken = url.searchParams.get('token') ?? '';
     const h = req.headers.authorization ?? '';
     const bearer = h.startsWith('Bearer ') ? h.slice('Bearer '.length) : '';
-    const provided = qToken || bearer;
-    if (!provided) return 'none';
-    return provided === this.expectedToken ? 'ok' : 'invalid';
+    return qToken || bearer;
+  }
+
+  /** 网关 token、用户机器 token 都可通过；错误令牌拒绝；未携带走匿名/凭证重连 */
+  private classifyUpgradeToken(req: IncomingMessage): UpgradeAuth {
+    const provided = this.readProvidedToken(req);
+    if (!provided) return { kind: 'none' };
+    if (this.expectedToken && provided === this.expectedToken) return { kind: 'gateway' };
+    const nt = this.resolveNodeToken?.(provided);
+    if (nt) return { kind: 'node', username: nt.username, token: provided, boundNodeId: nt.nodeId };
+    return { kind: 'invalid' };
   }
 
   /** 节点连接是否已准入且在线（待审批返回 false） */
@@ -191,6 +213,7 @@ export class NodeManager {
       connectedAt: conn?.connectedAt,
       lastSeenAt: conn?.lastSeenAt ?? rec?.lastSeenAt,
       remoteAddress: conn?.remoteAddress,
+      ...(rec?.ownerUsername ? { ownerUsername: rec.ownerUsername } : {}),
     };
   }
 
@@ -280,7 +303,7 @@ export class NodeManager {
   }
 
   /** 注册一个新连接：等待 hello 完成握手 */
-  private handleConnection(ws: WebSocket, req: IncomingMessage, preAuthorized: boolean): void {
+  private handleConnection(ws: WebSocket, req: IncomingMessage, upgradeAuth: UpgradeAuth): void {
     const remoteAddress = req.socket.remoteAddress;
     const helloTimer = setTimeout(() => {
       this.logger.warn('节点连接在超时内未发送 hello，关闭');
@@ -302,7 +325,7 @@ export class NodeManager {
       if (msg.type !== 'hello') return;
       ws.off('message', onHello);
       clearTimeout(helloTimer);
-      this.completeHandshake(ws, msg, remoteAddress, preAuthorized);
+      this.completeHandshake(ws, msg, remoteAddress, upgradeAuth);
     };
     ws.on('message', onHello);
     ws.on('error', () => {
@@ -314,22 +337,40 @@ export class NodeManager {
     ws: WebSocket,
     hello: Extract<NodeToGateway, { type: 'hello' }>,
     remoteAddress: string | undefined,
-    preAuthorized: boolean,
+    upgradeAuth: UpgradeAuth,
   ): void {
     const agents = Array.isArray(hello.agents) ? hello.agents.filter((a) => a && typeof a.id === 'string') : [];
 
-    // ── 准入判定 ──
-    // 1) 静态令牌正确（upgrade 预鉴权或 hello 内携带）→ 直连上线
-    const tokenOk = preAuthorized || (this.expectedToken !== '' && hello.token === this.expectedToken);
-    // 网关未开鉴权：一切连接视为已授权
-    const authDisabled = this.expectedToken === '';
+    const helloNode = hello.token ? this.resolveNodeToken?.(hello.token) : null;
+    const nodeAuth: UpgradeAuth | null =
+      upgradeAuth.kind === 'node'
+        ? upgradeAuth
+        : helloNode && hello.token
+          ? { kind: 'node', username: helloNode.username, token: hello.token, boundNodeId: helloNode.nodeId }
+          : null;
 
-    if (tokenOk || authDisabled) {
+    const gatewayOk =
+      upgradeAuth.kind === 'gateway' ||
+      upgradeAuth.kind === 'open' ||
+      (this.expectedToken !== '' && hello.token === this.expectedToken);
+    const authDisabled = upgradeAuth.kind === 'open' || this.expectedToken === '';
+
+    if (nodeAuth) {
+      this.admit(ws, hello, agents, remoteAddress, {
+        mode: 'node',
+        username: nodeAuth.username,
+        token: nodeAuth.token,
+        boundNodeId: nodeAuth.boundNodeId,
+      });
+      return;
+    }
+
+    if (gatewayOk || authDisabled) {
       this.admit(ws, hello, agents, remoteAddress, { mode: 'token' });
       return;
     }
 
-    // 2) hello 携带了错误令牌 → 拒绝（区别于"匿名申请"）
+    // hello 携带了既非网关也非 nt_ 的令牌 → 拒绝
     if (hello.token) {
       this.logger.warn('节点 hello token 校验失败，关闭连接');
       try {
@@ -376,16 +417,48 @@ export class NodeManager {
     hello: Extract<NodeToGateway, { type: 'hello' }>,
     agents: NodeInfo['agents'],
     remoteAddress: string | undefined,
-    opts: { mode: 'token' } | { mode: 'secret'; nodeId: string; approved: boolean; secret: string },
+    opts:
+      | { mode: 'token' }
+      | { mode: 'secret'; nodeId: string; approved: boolean; secret: string }
+      | { mode: 'node'; username: string; token: string; boundNodeId?: string },
   ): void {
     let nodeId: string;
     let approved: boolean;
     let secret: string | undefined;
+    let ownerUsername: string | undefined;
 
     if (opts.mode === 'token') {
       const requested = hello.nodeId?.trim();
       nodeId = requested && NODE_ID_PATTERN.test(requested) ? requested : newNodeId();
       approved = true;
+    } else if (opts.mode === 'node') {
+      if (opts.boundNodeId) {
+        const claimed = hello.nodeId?.trim();
+        if (claimed && claimed !== opts.boundNodeId) {
+          this.logger.warn(`机器 token 已绑定 ${opts.boundNodeId}，拒绝冒用 ${claimed}`);
+          try {
+            ws.close(4401, 'token bound to another node');
+          } catch {
+            ws.terminate();
+          }
+          return;
+        }
+        nodeId = opts.boundNodeId;
+      } else {
+        const requested = hello.nodeId?.trim();
+        nodeId = requested && NODE_ID_PATTERN.test(requested) ? requested : newNodeId();
+      }
+      approved = true;
+      ownerUsername = opts.username;
+      if (this.bindNodeToken && !this.bindNodeToken(opts.token, nodeId)) {
+        this.logger.warn('机器 token 绑定节点失败，关闭连接');
+        try {
+          ws.close(4401, 'unauthorized');
+        } catch {
+          ws.terminate();
+        }
+        return;
+      }
     } else {
       nodeId = opts.nodeId;
       approved = opts.approved;
@@ -433,6 +506,9 @@ export class NodeManager {
       // 凭证重连且记录仍 pending 时保持 pending（等待管理员批准）；其余为 approved
       status: approved ? 'approved' : prevRec?.status === 'blocked' ? 'blocked' : 'pending',
       secret,
+      ...(ownerUsername ?? prevRec?.ownerUsername
+        ? { ownerUsername: ownerUsername ?? prevRec?.ownerUsername }
+        : {}),
       createdAt: prevRec?.createdAt ?? now,
       lastSeenAt: now,
     };

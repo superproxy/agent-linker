@@ -14,6 +14,8 @@ export interface NodeRecord {
   version?: string;
   status?: NodeAdmissionStatus;
   secret?: string;
+  /** 用户颁发机器 token 接入时的属主；网关 token / 匿名审批可为空 */
+  ownerUsername?: string;
   createdAt: number;
   lastSeenAt: number;
 }

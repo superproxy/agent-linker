@@ -12,6 +12,7 @@ import { validatePassword } from './password.js';
 import { AuthError, type UserStore } from './store.js';
 import { isLoopbackIp, type AuthGuard } from './auth.js';
 import type { PersonalTokenStore } from './personal-token-store.js';
+import type { NodeTokenStore } from './node-token-store.js';
 
 type HeaderCarrier = { headers: Record<string, string | string[] | undefined> };
 
@@ -171,6 +172,7 @@ export function registerUserApi(
   store: UserStore,
   guard: AuthGuard,
   personalTokens?: PersonalTokenStore,
+  nodeTokens?: NodeTokenStore,
 ): void {
   const requireAdmin = (request: FastifyRequest, reply: FastifyReply): boolean => {
     if (!guard.isAdmin(request as HeaderCarrier)) {
@@ -231,8 +233,8 @@ export function registerUserApi(
       }
     }
     store.delete(username);
-    // 级联清理该账号的全部个人 API token
     personalTokens?.revokeForUser(username);
+    nodeTokens?.revokeForUser(username);
     request.log.info({ user: username, by: current?.username ?? 'token' }, '删除用户');
     return reply.send({ ok: true });
   });

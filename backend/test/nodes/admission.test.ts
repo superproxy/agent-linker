@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
-import { NodeManager } from '../../src/gateway/nodes/manager.js';
+import { NodeManager, type NodeManagerOptions } from '../../src/gateway/nodes/manager.js';
 import { createNodeRegistry } from '../../src/gateway/nodes/store.js';
+import { NodeTokenStore } from '../../src/gateway/users/node-token-store.js';
 import type { GatewayToNode, NodeToGateway } from '@linkagent/shared';
 
 interface Harness {
@@ -17,10 +18,14 @@ interface Harness {
   dispose: () => Promise<void>;
 }
 
-async function startManager(expectedToken = ''): Promise<Harness> {
+async function startManager(
+  expectedToken = '',
+  extra: Pick<NodeManagerOptions, 'resolveNodeToken' | 'bindNodeToken'> = {},
+): Promise<Harness> {
   const manager = new NodeManager({
     registry: createNodeRegistry(mkdtempSync(join(tmpdir(), 'linkagent-admission-'))),
     ...(expectedToken ? { expectedToken } : {}),
+    ...extra,
     pingIntervalMs: 60_000,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
   });
@@ -195,6 +200,69 @@ test('匿名申请冒名已存在的 nodeId：网关注发新身份', async () =
   assert.match(evil.w.nodeId, /^n_[0-9a-f]{12}$/);
   legit.ws.close();
   evil.ws.close();
+  await h.dispose();
+});
+
+test('用户机器 token（nt_）与网关静态 token 均可直连上线；错误 nt_ 在 upgrade 阶段 401', async () => {
+  const tokens = new NodeTokenStore(mkdtempSync(join(tmpdir(), 'linkagent-nt-admit-')));
+  const rec = tokens.issue('alice', 'pc');
+  const h = await startManager('gateway-secret', {
+    resolveNodeToken: (t) => {
+      const r = tokens.resolve(t);
+      return r ? { username: r.username, ...(r.nodeId ? { nodeId: r.nodeId } : {}) } : null;
+    },
+    bindNodeToken: (t, nodeId) => tokens.bindNode(t, nodeId),
+  });
+
+  const byNt = await connect(h.url, hello({ nodeId: 'alice-pc' }), { token: rec.token });
+  assert.equal(byNt.w.approved, true);
+  assert.equal(h.manager.isOnline('alice-pc'), true);
+  assert.equal(h.manager.list().find((n) => n.nodeId === 'alice-pc')?.ownerUsername, 'alice');
+  byNt.ws.close();
+
+  const byGw = await connect(h.url, hello({ nodeId: 'gw-box' }), { token: 'gateway-secret' });
+  assert.equal(byGw.w.approved, true);
+  assert.equal(h.manager.isOnline('gw-box'), true);
+  byGw.ws.close();
+
+  await new Promise<void>((resolve) => {
+    const bad = new WebSocket(`${h.url}?token=${encodeURIComponent('nt_deadbeef')}`);
+    bad.on('error', (e) => {
+      assert.match(e.message, /401/);
+      try {
+        bad.terminate();
+      } catch {
+        /* ignore */
+      }
+      resolve();
+    });
+  });
+  await h.dispose();
+});
+
+test('机器 token 绑定后不可用于另一台机器', async () => {
+  const tokens = new NodeTokenStore(mkdtempSync(join(tmpdir(), 'linkagent-nt-bind-')));
+  const rec = tokens.issue('alice');
+  const h = await startManager('gateway-secret', {
+    resolveNodeToken: (t) => {
+      const r = tokens.resolve(t);
+      return r ? { username: r.username, ...(r.nodeId ? { nodeId: r.nodeId } : {}) } : null;
+    },
+    bindNodeToken: (t, nodeId) => tokens.bindNode(t, nodeId),
+  });
+
+  const first = await connect(h.url, hello({ nodeId: 'n_one' }), { token: rec.token });
+  assert.equal(first.w.approved, true);
+  first.ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+
+  const ws2 = new WebSocket(`${h.url}?token=${encodeURIComponent(rec.token)}`);
+  const closed = new Promise<number>((resolve, reject) => {
+    ws2.on('open', () => ws2.send(JSON.stringify(hello({ nodeId: 'n_two' }))));
+    ws2.on('close', (code) => resolve(code));
+    ws2.on('error', reject);
+  });
+  assert.equal(await closed, 4401);
   await h.dispose();
 });
 

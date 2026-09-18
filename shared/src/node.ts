@@ -31,6 +31,8 @@ export interface NodeInfo {
   /** 最近一次心跳/消息时间（ms） */
   lastSeenAt?: number;
   remoteAddress?: string;
+  /** 用户颁发机器 token 接入时的属主登录名；网关 token / 匿名审批接入可为空 */
+  ownerUsername?: string;
 }
 
 /**
@@ -76,6 +78,7 @@ export interface RemoteNodeAgentView {
   connectedAt?: number;
   lastSeenAt?: number;
   remoteAddress?: string;
+  ownerUsername?: string;
 }
 
 export interface AgentsByNode {

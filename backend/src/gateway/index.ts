@@ -18,15 +18,18 @@ import { NodeManager } from './nodes/manager.js';
 import { createNodeRegistry } from './nodes/store.js';
 import { createPreferenceStore } from './prefs/store.js';
 import { registerNodeApi } from './nodes/api.js';
+import { canSeeNode } from './nodes/visibility.js';
 import { ProcessManager } from '../supervisor/manager.js';
 import { registerPmApi } from './pm/api.js';
 import { UserStore } from './users/store.js';
 import { AuthGuard } from './users/auth.js';
 import { ChannelTokenStore } from './users/channel-token-store.js';
 import { PersonalTokenStore } from './users/personal-token-store.js';
+import { NodeTokenStore } from './users/node-token-store.js';
 import { registerAuthApi, registerUserApi } from './users/api.js';
 import { registerChannelTokenApi } from './users/channel-token-api.js';
 import { registerPersonalTokenApi } from './users/personal-token-api.js';
+import { registerNodeTokenApi } from './users/node-token-api.js';
 import { startWeixinBot, type WeixinBotHandle } from '../channels/weixin-bot.js';
 import { InProcessUserTokenProvider } from '../channels/user-token.js';
 import { registerWeixinApi, WeixinLoginService } from './weixin-login.js';
@@ -133,10 +136,18 @@ export async function buildServer(options?: { configPath?: string; definitions?:
 
   // ── 远程节点：注册表落 .runtime-state/nodes，WebSocket 服务在 app.listen 后挂到同一 http server ──
   const nodeRegistry = createNodeRegistry(layout.nodesState);
+  const nodeTokenStore = new NodeTokenStore(layout.usersState);
   const nodeManager = new NodeManager({
     registry: nodeRegistry,
-    // local/token 模式节点必须携带永久 gateway token（回环也不豁免，确保 WS 准入统一）；open 不校验
+    // local/token：网关 token 或用户颁发的 nt_ 均可直连；open 不校验
     expectedToken: authEnabled ? auth.token : '',
+    resolveNodeToken: (token) => {
+      const rec = nodeTokenStore.resolve(token);
+      if (!rec) return null;
+      nodeTokenStore.touch(token);
+      return { username: rec.username, ...(rec.nodeId ? { nodeId: rec.nodeId } : {}) };
+    },
+    bindNodeToken: (token, nodeId) => nodeTokenStore.bindNode(token, nodeId),
     logger: {
       info: (m) => console.log(`[nodes] ${m}`),
       warn: (m) => console.warn(`[nodes] ${m}`),
@@ -199,11 +210,12 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     personalTokens: personalTokenStore,
   });
   registerAuthApi(app, userStore, authGuard);
-  registerUserApi(app, userStore, authGuard, personalTokenStore);
+  registerUserApi(app, userStore, authGuard, personalTokenStore, nodeTokenStore);
   registerChannelTokenApi(app, channelTokenStore, authGuard, taskService, {
     listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
   });
   registerPersonalTokenApi(app, personalTokenStore, authGuard);
+  registerNodeTokenApi(app, nodeTokenStore, authGuard);
 
   const checkAuth = (request: FastifyRequest): boolean => authGuard.checkAuth(request);
 
@@ -249,19 +261,19 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     preferenceStore,
     (req) => checkAuth(req as FastifyRequest),
     (req) => authGuard.isAdmin(req as FastifyRequest),
+    (req) => authGuard.sessionUser(req as FastifyRequest),
   );
 
-  // ── 节点接入指引（仅管理员）：回显网关地址/静态 token/默认 agent，供后台生成 env 与启动命令 ──
+  // ── 节点接入指引：登录用户可看；网关 token 仅管理员回显，机器 token 自行颁发 ──
   app.get('/api/nodes/enroll', async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!authGuard.isAdmin(request)) {
-      return reply.code(403).send({ error: '仅管理员可获取节点接入信息' });
+    if (!authGuard.checkAuth(request)) {
+      return reply.code(401).send({ error: 'unauthorized' });
     }
     return {
       host: gw.server.host,
       port: gw.server.port,
       authEnabled,
-      // open 模式为空串：节点连接无需 token；local/token 返回永久 gateway token
-      token: authEnabled ? auth.token : '',
+      token: authGuard.isAdmin(request) && authEnabled ? auth.token : '',
       defaultAgents: defaultAgentDefinitions().map((d) => ({
         id: d.id,
         ...(d.displayName ? { displayName: d.displayName } : {}),
@@ -537,10 +549,14 @@ export async function buildServer(options?: { configPath?: string; definitions?:
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
     const nodes = nodeManager.list();
+    const viewer = {
+      admin: authGuard.isAdmin(request),
+      username: authGuard.sessionUser(request)?.username,
+    };
     return {
       // local 仅暴露已启用 agent（停用的 agent 不能被任务绑定，与 hasRoutingAgent 校验一致）
       local: { nodeId: 'local', name: '本机（网关）', online: true, agents: manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })) },
-      nodes: nodes.map((n) => ({ nodeId: n.nodeId, name: n.name, online: n.online, agents: n.agents })),
+      nodes: nodes.filter((n) => canSeeNode(n, viewer)).map((n) => ({ nodeId: n.nodeId, name: n.name, online: n.online, agents: n.agents })),
       agents: manager.listRoutingAgents(),
     };
   });
@@ -554,6 +570,10 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
+    const viewer = {
+      admin: authGuard.isAdmin(request),
+      username: authGuard.sessionUser(request)?.username,
+    };
     return {
       defaultAgentId: taskService.getDefaultAgentId(),
       local: {
@@ -563,7 +583,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
         status: 'approved' as const,
         agents: manager.listAgentDetails(),
       },
-      nodes: nodeManager.list().map((n) => ({
+      nodes: nodeManager.list().filter((n) => canSeeNode(n, viewer)).map((n) => ({
         nodeId: n.nodeId,
         name: n.name,
         online: n.online,
@@ -573,6 +593,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
         ...(n.connectedAt ? { connectedAt: n.connectedAt } : {}),
         ...(n.lastSeenAt ? { lastSeenAt: n.lastSeenAt } : {}),
         ...(n.remoteAddress ? { remoteAddress: n.remoteAddress } : {}),
+        ...(n.ownerUsername ? { ownerUsername: n.ownerUsername } : {}),
       })),
     };
   });

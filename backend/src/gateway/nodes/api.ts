@@ -4,15 +4,17 @@ import type { AgentManager } from '../agents/manager.js';
 import type { PreferenceStore } from '../prefs/store.js';
 import type { AuthCheck } from '../tasks/api.js';
 import type { NodeManager } from './manager.js';
+import { canSeeNode } from './visibility.js';
 
 type Reply = { code(code: number): unknown };
+type HeaderReq = { headers: Record<string, string | string[] | undefined> };
 
 /**
  * 节点管理与用户偏好 REST：
- *   GET    /api/nodes                                  全部节点（含离线、待审批）
+ *   GET    /api/nodes                                  可见节点（管理员全部；其他人本机+自己的机器）
  *   POST   /api/nodes/:nodeId/approve                  批准待审批节点（仅管理员）
  *   POST   /api/nodes/:nodeId/reject                   拒绝待审批节点（仅管理员）
- *   DELETE /api/nodes/:nodeId                          删除离线/待审批节点注册记录
+ *   DELETE /api/nodes/:nodeId                          删除离线/待审批节点（管理员或属主）
  *   GET    /api/users/:channel/:userId/preferences     用户默认节点+agent（仅预填，不鉴权）
  *   PUT    /api/users/:channel/:userId/preferences     保存用户默认节点+agent
  */
@@ -23,6 +25,7 @@ export function registerNodeApi(
   prefs: PreferenceStore,
   checkAuth: AuthCheck,
   isAdmin: AuthCheck = checkAuth,
+  sessionUser: (req: HeaderReq) => { username: string } | null = () => null,
 ): void {
   const requireAuth = (request: { headers: Record<string, string | string[] | undefined> }, reply: Reply): boolean => {
     if (checkAuth(request)) return true;
@@ -42,8 +45,14 @@ export function registerNodeApi(
     return true;
   };
 
+  const viewerOf = (request: HeaderReq) => ({
+    admin: isAdmin(request),
+    username: sessionUser(request)?.username,
+  });
+
   app.get('/api/nodes', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    const viewer = viewerOf(request);
     // 内建本机节点置顶，其后为在线/待审批/离线远程节点
     const local = {
       nodeId: LOCAL_NODE_ID,
@@ -54,7 +63,8 @@ export function registerNodeApi(
       connectedAt: undefined,
       lastSeenAt: Date.now(),
     };
-    return { nodes: [local, ...nodeManager.list()] };
+    const remote = nodeManager.list().filter((n) => canSeeNode(n, viewer));
+    return { nodes: [local, ...remote] };
   });
 
   app.post('/api/nodes/:nodeId/approve', async (request, reply) => {
@@ -85,9 +95,15 @@ export function registerNodeApi(
   });
 
   app.delete('/api/nodes/:nodeId', async (request, reply) => {
-    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
+    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const { nodeId } = request.params as { nodeId: string };
     if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可删除' });
+    const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
+    if (!rec) return reply.code(404).send({ error: `节点不存在: ${nodeId}` });
+    const viewer = viewerOf(request);
+    if (!viewer.admin && rec.ownerUsername !== viewer.username) {
+      return reply.code(403).send({ error: '只能删除自己的机器' });
+    }
     try {
       nodeManager.removeNode(nodeId);
       return { ok: true };

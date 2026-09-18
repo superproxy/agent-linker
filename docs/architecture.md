@@ -17,7 +17,7 @@
 
 - `gateway/` —— 网关核心。`index.ts`（Fastify 装配 + `/v1` handler）、`config.ts`；子目录：
   - `agents/` agent/ACP 引擎管理；`nodes/` 节点注册与审批；`tasks/` 多任务路由（api→service→store）；
-  - `users/` 登录账号、会话、`AuthGuard`、渠道用户凭据（`ct_`）、个人 API token（`pat_`）；
+  - `users/` 登录账号、会话、`AuthGuard`、渠道用户凭据（`ct_`）、个人 API token（`pat_`）、机器 token（`nt_`）；
   - `plugins/` 渠道插件运行时；`pm/` 进程管理；`prefs/` 用户偏好；`store/` 通用 KV（原子写/损坏隔离）。
 - `channels/` —— 独立 botAgent：`weixin-bot.ts`、`wecom-bot.ts`。
 - `node/connector.ts` —— 节点连接器（WebSocket 接入网关）。
@@ -41,7 +41,7 @@
 - 会话 token：浏览器登录。
 - **个人 API token（`pat_` 前缀）**：一个登录账号一枚长期 token，自助 4 接口 `GET/POST ensure/POST rotate/DELETE /api/personal-tokens`，语义等同账号本人（在 `checkAuth/sessionUser/isAuth/isAdmin` 与 `/api/auth/me` 中与 `session` 同等放行）。
 - **渠道用户 token（`ct_` 前缀）**：作用域凭据，仅代表其 `channel/userId`，只能访问 `/v1` 与自己的资源，不放行管理接口。
-- 任务 key（`k_`）：仅 `resolveChat` 识别并锁定任务，不能用于管理接口。
+- **用户颁发的机器 token（`nt_` 前缀）**：登录用户为每台远程机器签发，仅用于节点 WebSocket 握手，连上后机器归该用户；与网关静态 token 均可接入。
 
 新增凭据类型时，需同时更新：`auth.ts`（解析 + 三个守卫）、`/api/auth/me`、对应 store/api、shared 类型与测试。
 

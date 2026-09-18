@@ -109,3 +109,16 @@ export interface PersonalTokenPublic {
   createdAt: string;
   lastUsedAt?: string;
 }
+
+// ── 用户颁发的机器（节点）token（nt_ 前缀，仅用于节点 WebSocket 握手）──
+
+/** 机器 token 列表项（不含全文） */
+export interface NodeTokenPublic {
+  id: string;
+  tokenPreview: string;
+  label?: string;
+  /** 首次连上后锁定的 nodeId */
+  nodeId?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}

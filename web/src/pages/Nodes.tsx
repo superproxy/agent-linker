@@ -70,6 +70,20 @@ export function NodesPage(props: { base: string; token: string; onAuthError: Aut
       },
     },
     {
+      title: '属主',
+      key: 'owner',
+      width: 110,
+      responsive: ['lg'],
+      render: (_, n) =>
+        n.nodeId === 'local' ? (
+          <span className="sub-muted">本机</span>
+        ) : n.ownerUsername ? (
+          <code className="code-cell">{n.ownerUsername}</code>
+        ) : (
+          <span className="sub-muted">—</span>
+        ),
+    },
+    {
       title: '版本',
       dataIndex: 'version',
       key: 'version',

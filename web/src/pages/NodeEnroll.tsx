@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Col, Input, Row, Steps, Tag } from 'antd';
-import { ApiError, OpsClient, type NodeEnrollInfo } from '../api';
+import { Alert, Button, Checkbox, Col, Input, Popconfirm, Row, Space, Steps, Table, Tag } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import { ApiError, OpsClient, type NodeEnrollInfo, type NodeTokenInfo } from '../api';
 import { notify } from '../lib/notify';
 import type { AuthErrorHandler } from '../lib/hooks';
 
@@ -11,34 +12,56 @@ function guessGatewayUrl(port: number): string {
   return `${proto}://${host}:${port}`;
 }
 
+function envBlock(url: string, token: string | undefined, agentsLine: string): string {
+  return [`LINKAGENT_GATEWAY_URL=${url}`, ...(token ? [`LINKAGENT_GATEWAY_TOKEN=${token}`] : []), `LINKAGENT_NODE_AGENTS=${agentsLine}`].join(
+    '\n',
+  );
+}
+
 export function NodeEnrollPanel(props: { base: string; token: string; onAuthError: AuthErrorHandler }) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const [info, setInfo] = useState<NodeEnrollInfo | null>(null);
-  const [forbidden, setForbidden] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [name, setName] = useState('node-1');
+  const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
   const [agents, setAgents] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [mine, setMine] = useState<NodeTokenInfo[]>([]);
+  const [revealed, setRevealed] = useState<{ id: string; token: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const refreshTokens = async () => {
+    try {
+      setMine(await ops.listNodeTokens());
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setMine([]);
+        return;
+      }
+      throw e;
+    }
+  };
 
   useEffect(() => {
     let alive = true;
-    ops
-      .nodeEnroll()
-      .then((i) => {
+    void (async () => {
+      try {
+        const i = await ops.nodeEnroll();
         if (!alive) return;
         setInfo(i);
         setUrl(guessGatewayUrl(i.port));
         setAgents(Object.fromEntries(i.defaultAgents.map((a) => [a.id, true])));
-      })
-      .catch((e) => {
+        await refreshTokens();
+      } catch (e) {
         if (!alive) return;
-        if (e instanceof ApiError && e.status === 403) setForbidden(true);
-        else setLoadErr(e instanceof Error ? e.message : String(e));
-      });
+        if (!props.onAuthError(e)) setLoadErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ops]);
 
   const copy = (key: string, text: string) => {
@@ -49,8 +72,21 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
     });
   };
 
-  if (forbidden)
-    return <Alert type="warning" showIcon message="仅管理员可查看节点接入命令（含网关令牌），请使用管理员账号登录。" />;
+  const issue = async () => {
+    setBusy('issue');
+    try {
+      const r = await ops.issueNodeToken(label || name);
+      setRevealed({ id: r.id, token: r.token });
+      setLabel('');
+      await refreshTokens();
+      notify.success('已颁发机器凭证，请复制到节点 env');
+    } catch (e) {
+      if (!props.onAuthError(e)) notify.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loadErr) return <Alert type="error" showIcon message={loadErr} />;
   if (!info) return <Alert type="info" showIcon message="正在加载接入信息…" />;
 
@@ -59,13 +95,9 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
   const agentsLine = chosen.length > 0 ? chosen.join(',') : info.defaultAgents.map((a) => a.id).join(',');
   const envPath = `.runtime-state/node-${instName}.env`;
   const startCmd = `pnpm node:start ${instName}`;
-
-  const envDirect = [
-    `LINKAGENT_GATEWAY_URL=${url}`,
-    ...(info.authEnabled && info.token ? [`LINKAGENT_GATEWAY_TOKEN=${info.token}`] : []),
-    `LINKAGENT_NODE_AGENTS=${agentsLine}`,
-  ].join('\n');
-  const envApproval = [`LINKAGENT_GATEWAY_URL=${url}`, `LINKAGENT_NODE_AGENTS=${agentsLine}`].join('\n');
+  const envDirect = envBlock(url, info.token || undefined, agentsLine);
+  const envApproval = envBlock(url, undefined, agentsLine);
+  const envMine = revealed ? envBlock(url, revealed.token, agentsLine) : '';
 
   const isLoopback = (() => {
     try {
@@ -75,6 +107,78 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
       return false;
     }
   })();
+
+  const tokenCols: ColumnsType<NodeTokenInfo> = [
+    {
+      title: '凭证',
+      key: 'p',
+      render: (_, t) => (
+        <div>
+          <code className="code-cell">{t.tokenPreview}</code>
+          {t.label ? <div className="sub-muted">{t.label}</div> : null}
+        </div>
+      ),
+    },
+    {
+      title: '绑定机器',
+      key: 'n',
+      render: (_, t) => (t.nodeId ? <code className="code-cell">{t.nodeId}</code> : <span className="sub-muted">未连接</span>),
+    },
+    {
+      title: '操作',
+      key: 'ops',
+      width: 160,
+      render: (_, t) => (
+        <Space size={6}>
+          <Button
+            size="small"
+            disabled={busy === t.id}
+            onClick={() =>
+              void (async () => {
+                setBusy(t.id);
+                try {
+                  const r = await ops.rotateNodeToken(t.id);
+                  setRevealed({ id: r.id, token: r.token });
+                  await refreshTokens();
+                  notify.success('已轮换，请更新节点 env');
+                } catch (e) {
+                  if (!props.onAuthError(e)) notify.error(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusy(null);
+                }
+              })()
+            }
+          >
+            轮换
+          </Button>
+          <Popconfirm
+            title="吊销这枚机器凭证？"
+            okText="吊销"
+            okButtonProps={{ danger: true }}
+            onConfirm={() =>
+              void (async () => {
+                setBusy(t.id);
+                try {
+                  await ops.revokeNodeToken(t.id);
+                  if (revealed?.id === t.id) setRevealed(null);
+                  await refreshTokens();
+                  notify.success('已吊销');
+                } catch (e) {
+                  if (!props.onAuthError(e)) notify.error(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusy(null);
+                }
+              })()
+            }
+          >
+            <Button size="small" danger disabled={busy === t.id}>
+              吊销
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -110,30 +214,54 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
         direction="vertical"
         items={[
           { title: '准备运行环境', description: '执行机安装 Node ≥ 22.13、pnpm，以及代码/发布包和所需 agent CLI。' },
-          { title: '创建 env 文件', description: <>在项目根目录创建 <code>{envPath}</code>，选择下列任一方式。</> },
+          { title: '颁发机器凭证并写入 env', description: <>在项目根目录创建 <code>{envPath}</code>。</> },
           { title: '启动节点', description: <><code>{startCmd}</code>（前台调试可用 <code>pnpm node:dev {instName}</code>）。</> },
         ]}
       />
 
-      <Row gutter={[14, 14]}>
-        <Col xs={24} md={12}>
-          <div className="enroll-block">
-            <div>
-              <strong>方式一 · 令牌直连</strong>
-              <div className="sub-muted" style={{ marginTop: 2 }}>env 含令牌，连上即上线，无需审批</div>
-            </div>
-            {!info.authEnabled ? <span className="sub-muted">网关当前未开启鉴权，无需令牌，任意连接自动上线。</span> : null}
-            <pre className="enroll-pre">{envDirect}</pre>
-            <Button size="small" onClick={() => copy('direct', envDirect)}>
-              {copied === 'direct' ? '已复制' : '复制 env'}
+      <div className="enroll-block">
+        <div>
+          <strong>我的机器凭证</strong>
+          <div className="sub-muted" style={{ marginTop: 2 }}>每台机器一枚，连上即归你所有；与网关 token 均可使用</div>
+        </div>
+        <Space.Compact style={{ width: '100%', maxWidth: 480, margin: '8px 0' }}>
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="备注，例如家里的 PC" />
+          <Button type="primary" loading={busy === 'issue'} onClick={() => void issue()}>
+            颁发
+          </Button>
+        </Space.Compact>
+        {revealed ? (
+          <>
+            <pre className="enroll-pre">{envMine}</pre>
+            <Button size="small" onClick={() => copy('mine', envMine)}>
+              {copied === 'mine' ? '已复制' : '复制 env'}
             </Button>
-          </div>
-        </Col>
+          </>
+        ) : null}
+        <Table rowKey="id" size="small" pagination={false} columns={tokenCols} dataSource={mine} style={{ marginTop: 10 }} />
+      </div>
+
+      <Row gutter={[14, 14]}>
+        {info.token || !info.authEnabled ? (
+          <Col xs={24} md={12}>
+            <div className="enroll-block">
+              <div>
+                <strong>网关令牌直连</strong>
+                <div className="sub-muted" style={{ marginTop: 2 }}>管理员/本机可用网关 token，连上即上线</div>
+              </div>
+              {!info.authEnabled ? <span className="sub-muted">网关当前未开启鉴权，无需令牌。</span> : null}
+              <pre className="enroll-pre">{envDirect}</pre>
+              <Button size="small" onClick={() => copy('direct', envDirect)}>
+                {copied === 'direct' ? '已复制' : '复制 env'}
+              </Button>
+            </div>
+          </Col>
+        ) : null}
         <Col xs={24} md={12}>
           <div className="enroll-block">
             <div>
-              <strong>方式二 · 申请审批</strong>
-              <div className="sub-muted" style={{ marginTop: 2 }}>env 不含令牌；启动后在本页顶部待审批区点「批准」</div>
+              <strong>申请审批</strong>
+              <div className="sub-muted" style={{ marginTop: 2 }}>env 不含令牌；启动后由管理员批准</div>
             </div>
             <pre className="enroll-pre">{envApproval}</pre>
             <Button size="small" onClick={() => copy('approval', envApproval)}>
@@ -147,10 +275,6 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
         <code>{startCmd}</code>
         <Button onClick={() => copy('cmd', startCmd)}>{copied === 'cmd' ? '已复制' : '复制命令'}</Button>
       </div>
-      <p className="sub-muted" style={{ margin: 0, lineHeight: 1.6 }}>
-        审批通过后网关会向节点签发专属凭证并保存在节点机 <code>.runtime-state/node-{instName}/node-secret</code>，
-        此后断线重连无需再次审批；被拒绝的节点会停止重连，需删除记录后重新申请。
-      </p>
     </div>
   );
 }

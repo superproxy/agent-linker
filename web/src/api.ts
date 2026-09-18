@@ -681,16 +681,26 @@ export interface NodeInfo {
   connectedAt?: number;
   lastSeenAt?: number;
   remoteAddress?: string;
+  ownerUsername?: string;
 }
 
-/** 节点接入信息（/api/nodes/enroll，仅管理员）：用于生成 env 与启动命令 */
+/** 节点接入信息（/api/nodes/enroll）：用于生成 env 与启动命令 */
 export interface NodeEnrollInfo {
   host: string;
   port: number;
   authEnabled: boolean;
-  /** 网关静态令牌（未开鉴权为空串）；持令牌节点直连上线 */
+  /** 网关静态令牌（仅管理员回显；未开鉴权 / 普通用户为空串） */
   token: string;
   defaultAgents: { id: string; displayName?: string }[];
+}
+
+export interface NodeTokenInfo {
+  id: string;
+  tokenPreview: string;
+  label?: string;
+  nodeId?: string;
+  createdAt: string;
+  lastUsedAt?: string;
 }
 
 /** 用户默认偏好（新建任务预填节点+agent） */
@@ -850,9 +860,31 @@ export class OpsClient {
     await this.request(`/api/nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' });
   }
 
-  /** 节点接入信息（仅管理员）：网关地址/静态 token/默认 agent，用于生成 env 与启动命令 */
+  /** 节点接入信息：网关地址/（管理员）静态 token/默认 agent */
   async nodeEnroll(): Promise<NodeEnrollInfo> {
     return (await this.request('/api/nodes/enroll')) as NodeEnrollInfo;
+  }
+
+  async listNodeTokens(): Promise<NodeTokenInfo[]> {
+    const data = (await this.request('/api/node-tokens')) as { tokens: NodeTokenInfo[] };
+    return data.tokens;
+  }
+
+  async issueNodeToken(label?: string): Promise<NodeTokenInfo & { token: string }> {
+    return (await this.request('/api/node-tokens', {
+      method: 'POST',
+      body: JSON.stringify(label?.trim() ? { label: label.trim() } : {}),
+    })) as NodeTokenInfo & { token: string };
+  }
+
+  async rotateNodeToken(id: string): Promise<NodeTokenInfo & { token: string }> {
+    return (await this.request(`/api/node-tokens/${encodeURIComponent(id)}/rotate`, { method: 'POST' })) as NodeTokenInfo & {
+      token: string;
+    };
+  }
+
+  async revokeNodeToken(id: string): Promise<void> {
+    await this.request(`/api/node-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   /** 批准待审批节点：在线则立即上线，离线则待其凭凭证重连 */

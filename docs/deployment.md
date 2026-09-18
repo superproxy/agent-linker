@@ -101,6 +101,7 @@ auth:
 | 静态 token（`auth.token`） | Chatbox / Open WebUI 的 `Authorization: Bearer`、节点连接器 `LINKAGENT_GATEWAY_TOKEN` | config.yaml 配置，留空则不启用 |
 | 会话 token | Web 管理后台（浏览器）登录后自动携带 | 账号密码登录 `/api/auth/login` 签发 |
 | 个人 API token（`pat_` 前缀） | 登录账号本人用 OpenAI 兼容客户端（Chatbox 等）以 `Authorization: Bearer pat_…` 直连 `/v1`，权限等同该账号 | 后台「我的 Token」自助获取/轮换/吊销，落盘 `.runtime-state/users/personal-tokens/` |
+| 机器 token（`nt_` 前缀） | 节点连接器 `LINKAGENT_GATEWAY_TOKEN`（用户在后台「节点」页颁发，一机一证、归属该用户）；**不**授予 HTTP 管理权限 | 落盘 `.runtime-state/users/node-tokens/` |
 
 - 首次**需要登录**的访问（token 模式，或 local 模式从非本机打开）且账号库为空时，生成随机管理员密码（用户名 **admin**），**仅本机回环的登录页与网关日志展示明文**，并落盘 `.runtime-state/users/admin-initial-password`（0600）；**首次登录强制改密**，改密后删除该文件；
 - **local（本机）模式**：回环访问免登录、无需密码（浏览器里过期 token 也不挡）；
@@ -164,7 +165,7 @@ server {
 | 变量 / 参数 | 说明 | 默认 |
 |---|---|---|
 | `LINKAGENT_GATEWAY_URL` / `--gatewayUrl` | 网关地址，自动补全路径 | `ws://127.0.0.1:8787` |
-| `LINKAGENT_GATEWAY_TOKEN` | 网关开启鉴权时**必填** | 空 |
+| `LINKAGENT_GATEWAY_TOKEN` | 网关开启鉴权时填**网关静态 token 或用户颁发的 `nt_` 机器 token**；不填则匿名申请待审批 | 空 |
 | `LINKAGENT_NODE_NAME` / `--name` | 控制台展示名 | `node-<hostname>` |
 | `LINKAGENT_NODE_AGENTS` | 逗号分隔自报 agent | 内置 4 种 |
 | `LINKAGENT_NODE_ID` | 一般不填，首次网关注发并持久化 | 自动 |
@@ -200,7 +201,7 @@ pnpm node:stop builder-01
 ```bash
 # .runtime-state/node-builder-01.env
 LINKAGENT_GATEWAY_URL=wss://gw.example.com
-LINKAGENT_GATEWAY_TOKEN=请改成与网关一致的强随机串
+LINKAGENT_GATEWAY_TOKEN=请改成网关静态 token 或用户颁发的 nt_ 机器 token
 LINKAGENT_NODE_AGENTS=opencode,pi
 # LINKAGENT_NODE_NAME 不填时，命名实例自动用实例名 builder-01
 ```
@@ -333,7 +334,7 @@ WantedBy=multi-user.target
 
 | 现象 | 可能原因 | 处理 |
 |---|---|---|
-| 节点 upgrade 被拒 `401` | 令牌缺失/不一致 | 核对 `auth.token` 与 `LINKAGENT_GATEWAY_TOKEN` |
+| 节点 upgrade 被拒 `401` | 令牌缺失/不一致 | 核对网关 `auth.token` 或用户颁发的 `nt_` 机器 token |
 | 握手后被关（客户端常见 `1006`） | hello 内 token 校验失败 | 检查 env 文件是否加载、令牌是否含空格 |
 | 升级返回 `404` | 路径错误 | 确认地址自动补 `/api/nodes/ws`，未被代理改写 |
 | 节点反复「连接已关闭→重连」 | 多实例共用同一 `node-id` 被互踢 | 用命名实例（独立 `LINKAGENT_NODE_STATE_DIR`） |
