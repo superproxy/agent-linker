@@ -82,7 +82,9 @@ export function spawnDetached(opts: SpawnOptions): Child {
     cwd: opts.cwd,
     env: { ...process.env, ...(opts.env ?? {}) },
     stdio: stdio as ['ignore', 'inherit' | number, 'inherit' | number],
-    detached: !IS_WINDOWS,
+    // 必须全平台 detached：Windows 上 detached=true 即 CREATE_NEW_PROCESS_GROUP，
+    // 子进程脱离父终端进程组；否则父终端 shell 关闭时会连带杀掉子进程（无错误日志）。
+    detached: true,
     windowsHide: IS_WINDOWS,
   });
   child.unref();

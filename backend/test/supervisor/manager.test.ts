@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   isAlive,
   killTree,
@@ -143,7 +144,12 @@ test('ProcessManager：dev 形态路径/命令/环境变量正确（无 .linkage
   const gw = (pm as unknown as { resolve(id: string): { command: string; args: string[] } }).resolve('gateway');
   assert.equal(gw.command, process.execPath);
   assert.equal(gw.args[0], '--import');
-  assert.ok(gw.args[1].endsWith(join('tsx', 'dist', 'esm', 'index.mjs')));
+  // Windows 下 --import 只接受 file:// URL，裸盘符绝对路径会触发 ERR_UNSUPPORTED_ESM_URL_SCHEME
+  assert.equal(
+    gw.args[1],
+    pathToFileURL(join(root, 'backend', 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs')).href,
+  );
+  assert.ok(gw.args[1].startsWith('file:///'));
   assert.ok(gw.args[2].endsWith(join('backend', 'src', 'gateway', 'index.ts')));
   // gateway 被强制 external
   const gwEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('gateway');

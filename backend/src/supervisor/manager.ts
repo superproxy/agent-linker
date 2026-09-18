@@ -16,6 +16,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   createInstallLayout,
   type InstallLayout,
@@ -134,7 +135,7 @@ export class ProcessManager {
     const args =
       this.layout.kind === 'dist'
         ? [entry]
-        : ['--import', this.layout.tsxLoader, entry];
+        : ['--import', pathToFileURL(this.layout.tsxLoader).href, entry];
     return { command: process.execPath, args, env };
   }
 
@@ -338,14 +339,14 @@ const portFree=()=>new Promise((resolve)=>{
   const logFile=process.env.LA_GW_LOGFILE;
   let out='ignore',err='ignore';
   if(logFile){fs.mkdirSync(require('path').dirname(logFile),{recursive:true});const fd=fs.openSync(logFile,'a');out=fd;err=fd;}
-  const child=cp.spawn(cmd,args,{cwd:process.env.LA_GW_CWD,env,detached:!isWin,windowsHide:isWin,stdio:['ignore',out,err]});
+  const child=cp.spawn(cmd,args,{cwd:process.env.LA_GW_CWD,env,detached:true,windowsHide:isWin,stdio:['ignore',out,err]});
   child.unref();
   if(child.pid) fs.writeFileSync(process.env.LA_GW_PIDFILE,String(child.pid));
   process.exit(0);
 })().catch(()=>process.exit(1));
 `;
     const relay = spawn(process.execPath, ['--input-type=commonjs', '-e', script], {
-      detached: !IS_WINDOWS,
+      detached: true,
       windowsHide: IS_WINDOWS,
       stdio: 'ignore',
       env: { ...process.env, ...relayEnv },
