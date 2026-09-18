@@ -2,55 +2,49 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_BASE,
-  LS_LOCAL_BASE_KEY,
+  alignToPageOrigin,
+  initialGatewayBase,
+  isLoopbackAliasPair,
   isLoopbackBase,
-  localProcessBase,
-  rememberLocalBase,
+  processApiBase,
 } from '../../../web/src/lib/local-base.ts';
 
-function memStore(init: Record<string, string> = {}): Storage {
-  const map = new Map(Object.entries(init));
-  return {
-    get length() {
-      return map.size;
-    },
-    clear() {
-      map.clear();
-    },
-    getItem(key: string) {
-      return map.get(key) ?? null;
-    },
-    key() {
-      return null;
-    },
-    removeItem(key: string) {
-      map.delete(key);
-    },
-    setItem(key: string, value: string) {
-      map.set(key, value);
-    },
-  };
-}
-
-test('isLoopbackBase：仅回环主机视为本机', () => {
+test('isLoopbackBase：仅回环主机视为本机打开', () => {
   assert.equal(isLoopbackBase('http://127.0.0.1:8787'), true);
   assert.equal(isLoopbackBase('http://localhost:8787'), true);
   assert.equal(isLoopbackBase('http://[::1]:8787'), true);
   assert.equal(isLoopbackBase('http://192.168.1.10:8787'), false);
+  assert.equal(isLoopbackBase('http://216.19.4.113:8787'), false);
   assert.equal(isLoopbackBase('not-a-url'), false);
 });
 
-test('localProcessBase：与当前网关连接地址无关，优先页面同源回环', () => {
-  const storage = memStore({ [LS_LOCAL_BASE_KEY]: 'http://127.0.0.1:9999' });
-  assert.equal(localProcessBase('http://127.0.0.1:8787', storage), 'http://127.0.0.1:8787');
-  assert.equal(localProcessBase('http://192.168.1.10:8787', storage), 'http://127.0.0.1:9999');
-  assert.equal(localProcessBase('http://example.com', memStore()), DEFAULT_BASE);
+test('isLoopbackAliasPair：localhost 与 127.0.0.1 同端口视为别名', () => {
+  assert.equal(isLoopbackAliasPair('http://localhost:8787', 'http://127.0.0.1:8787'), true);
+  assert.equal(isLoopbackAliasPair('http://127.0.0.1:8787/', 'http://localhost:8787'), true);
+  assert.equal(isLoopbackAliasPair('http://localhost:8787', 'http://127.0.0.1:9000'), false);
+  assert.equal(isLoopbackAliasPair('http://localhost:8787', 'http://216.19.4.113:8787'), false);
 });
 
-test('rememberLocalBase：只记住回环地址', () => {
-  const storage = memStore();
-  rememberLocalBase('http://example.com:8787', storage);
-  assert.equal(storage.getItem(LS_LOCAL_BASE_KEY), null);
-  rememberLocalBase('http://127.0.0.1:8787/', storage);
-  assert.equal(storage.getItem(LS_LOCAL_BASE_KEY), 'http://127.0.0.1:8787');
+test('alignToPageOrigin：回环别名对齐到页面主机，避免跨域', () => {
+  assert.equal(alignToPageOrigin('http://localhost:8787', 'http://127.0.0.1:8787'), 'http://localhost:8787');
+  assert.equal(alignToPageOrigin('http://127.0.0.1:8787', 'http://localhost:8787'), 'http://127.0.0.1:8787');
+  assert.equal(alignToPageOrigin('http://localhost:8787', 'http://216.19.4.113:8787'), 'http://216.19.4.113:8787');
+});
+
+test('processApiBase：跟页面部署地址走，本机 127、远程即远程', () => {
+  assert.equal(processApiBase('http://127.0.0.1:8787'), 'http://127.0.0.1:8787');
+  assert.equal(processApiBase('http://127.0.0.1:8787/'), 'http://127.0.0.1:8787');
+  assert.equal(processApiBase('http://216.19.4.113:8787'), 'http://216.19.4.113:8787');
+  assert.equal(processApiBase(''), DEFAULT_BASE);
+});
+
+test('initialGatewayBase：未保存用页面 origin；回环别名对齐；本机 127 不带到远程', () => {
+  assert.equal(initialGatewayBase('http://216.19.4.113:8787', null), 'http://216.19.4.113:8787');
+  assert.equal(initialGatewayBase('http://localhost:8787', 'http://127.0.0.1:8787'), 'http://localhost:8787');
+  assert.equal(initialGatewayBase('http://216.19.4.113:8787', 'http://127.0.0.1:8787'), 'http://216.19.4.113:8787');
+  assert.equal(
+    initialGatewayBase('http://127.0.0.1:8787', 'http://216.19.4.113:8787'),
+    'http://216.19.4.113:8787',
+  );
+  assert.equal(initialGatewayBase('http://127.0.0.1:8787', 'http://127.0.0.1:8787'), 'http://127.0.0.1:8787');
 });

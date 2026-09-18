@@ -19,7 +19,7 @@ import {
 import { useRefreshTick } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 import {
-  localProcessBase,
+  processApiBase,
   newProfileId,
   readProfiles,
   writeProfiles,
@@ -274,10 +274,15 @@ function ChildGatewayMounts(props: { client: PmClient }) {
   };
 
   const submitMount = async (id: ChildGatewayId, values: { url: string; token: string }) => {
-    const r = await props.client.setGatewayTarget(id, values.url, values.token);
-    setTargets(r.targets);
-    setMountFor(null);
-    notify.success(`已保存，${id === 'weixin' ? '微信 bot' : 'node'} 已重启`);
+    try {
+      const r = await props.client.setGatewayTarget(id, values.url, values.token);
+      setTargets(r.targets);
+      setMountFor(null);
+      notify.success(`已保存，${id === 'weixin' ? '微信 bot' : 'node'} 已重启`);
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
+      throw e;
+    }
   };
 
   const mountColumns = (): ColumnsType<{ id: ChildGatewayId; label: string }> => [
@@ -611,10 +616,10 @@ function ProcessTable(props: { client: PmClient }) {
   );
 }
 
-/** 本机进程管理：始终打回环地址，与「网关连接」当前指向的远程网关无关 */
-export function ProcessesPage() {
-  const pmBase = localProcessBase();
-  const client = useMemo(() => new PmClient(pmBase, () => ''), [pmBase]);
+/** 进程管理：操作当前打开的这台网关（web 与 gateway 同端口） */
+export function ProcessesPage(props: { token: string }) {
+  const pmBase = processApiBase();
+  const client = useMemo(() => new PmClient(pmBase, () => props.token), [pmBase, props.token]);
 
   return (
     <Row gutter={[16, 16]}>
@@ -622,7 +627,7 @@ export function ProcessesPage() {
         <Alert
           type="info"
           showIcon
-          message={`进程管理始终操作本机网关 ${pmBase}，与「网关设置」里切换的连接地址无关。`}
+          message={`进程管理操作当前打开的网关 ${pmBase}（web 与网关同端口）。本机用 127.0.0.1 打开即管本机，用远程部署地址打开即管那台机器；与「网关设置」里切换的连接地址无关。`}
         />
       </Col>
       <Col xs={24}>

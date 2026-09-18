@@ -531,7 +531,7 @@ export interface PmProcess {
   logFile: string;
 }
 
-/** 系统信息 + 本机进程管理客户端（进程接口打本机回环，与当前网关连接地址无关） */
+/** 系统信息 + 进程管理客户端（打当前打开的网关，web 与 gateway 同端口） */
 export class PmClient {
   constructor(
     private base: string,

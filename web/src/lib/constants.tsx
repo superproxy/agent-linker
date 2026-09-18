@@ -10,9 +10,9 @@ import {
   SettingOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
-import { rememberLocalBase as rememberLocalBaseImpl, localProcessBase as localProcessBaseImpl } from './local-base';
+import { processApiBase as processApiBaseImpl } from './local-base';
 
-export { DEFAULT_BASE, LS_LOCAL_BASE_KEY, isLoopbackBase, isLoopbackHostname } from './local-base';
+export { DEFAULT_BASE, isLoopbackBase, isLoopbackHostname, initialGatewayBase, alignToPageOrigin } from './local-base';
 
 export const LS_KEY = 'linkagent.gw.base';
 export const LS_TAB_KEY = 'linkagent.gw.tab';
@@ -122,13 +122,9 @@ export function newProfileId(): string {
   return `gw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function rememberLocalBase(url: string): void {
-  rememberLocalBaseImpl(url);
-}
-
-/** 本机进程管理入口：优先页面同源回环，其次上次记住的本机地址，最后默认 127.0.0.1:8787 */
-export function localProcessBase(): string {
-  return localProcessBaseImpl(window.location.origin);
+/** 进程管理打当前打开的后台地址（与「网关连接」无关） */
+export function processApiBase(): string {
+  return processApiBaseImpl(window.location.origin);
 }
 
 export function errText(e: unknown): string {

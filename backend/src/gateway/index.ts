@@ -295,7 +295,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     };
   });
 
-  // ── 本机进程管理（仅回环 + 管理员）：/api/system/info + /api/pm/* ──
+  // ── 进程管理（管理员；web 与网关同端口，打开哪台就管哪台）：/api/system/info + /api/pm/* ──
   const pm = new ProcessManager(layout.root);
   registerPmApi(app, {
     pm,

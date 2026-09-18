@@ -3,12 +3,12 @@ import { Spin } from 'antd';
 import { ApiError, AuthClient, type UserPublic } from './api';
 import {
   ALL_TABS,
-  DEFAULT_BASE,
   LS_KEY,
   LS_TAB_KEY,
   LS_TOKEN_KEY,
+  initialGatewayBase,
+  alignToPageOrigin,
   readToken,
-  rememberLocalBase,
   type TabId,
 } from './lib/constants';
 import { useRefreshTick } from './lib/hooks';
@@ -43,7 +43,9 @@ const isTabAllowed = (tab: TabId, auth: AuthState): boolean => {
 };
 
 export function App() {
-  const [base, setBase] = useState(() => localStorage.getItem(LS_KEY) ?? DEFAULT_BASE);
+  const [base, setBase] = useState(() =>
+    initialGatewayBase(window.location.origin, localStorage.getItem(LS_KEY)),
+  );
   const [, setTokenState] = useState(readToken);
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
   const [tab, setTab] = useState<TabId>(() => {
@@ -71,10 +73,6 @@ export function App() {
   }, [authClient]);
 
   useEffect(() => {
-    rememberLocalBase(base);
-  }, [base]);
-
-  useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
 
@@ -98,8 +96,7 @@ export function App() {
   }, [base]);
 
   const applyBase = (next: string) => {
-    const url = next.trim().replace(/\/+$/, '');
-    rememberLocalBase(url);
+    const url = alignToPageOrigin(window.location.origin, next.trim());
     localStorage.setItem(LS_KEY, url);
     window.location.reload();
   };
@@ -227,7 +224,7 @@ function PageRouter(props: {
     case 'accounts':
       return isAdmin ? <AccountsPage base={base} token={token} onAuthError={onAuthError} /> : null;
     case 'processes':
-      return isAdmin ? <ProcessesPage /> : null;
+      return isAdmin ? <ProcessesPage token={token} /> : null;
     case 'settings':
       return isAdmin ? (
         <SettingsPage

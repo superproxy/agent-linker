@@ -4,7 +4,6 @@ import { ApiOutlined } from '@ant-design/icons';
 import { PmClient, type SystemInfo } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { notify } from '../lib/notify';
-import { rememberLocalBase } from '../lib/constants';
 
 export function SettingsPage(props: {
   base: string;
@@ -28,7 +27,6 @@ export function SettingsPage(props: {
       notify.error('网关地址需以 http:// 或 https:// 开头');
       return;
     }
-    rememberLocalBase(url);
     props.onApplyBase(url);
   };
 
@@ -60,7 +58,7 @@ export function SettingsPage(props: {
         >
           {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} /> : null}
           <div className="sub-muted" style={{ marginBottom: 8 }}>
-            管理后台连接的网关地址（输入完整后点击「切换并重连」才会切换）。本机进程请到侧栏「进程管理」，与此处地址无关。
+            管理后台连接的网关地址（输入完整后点击「切换并重连」才会切换）。进程管理始终跟你打开后台的那个地址走（本机 127 / 远程部署地址），与此处无关。
           </div>
           <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
             <Input
