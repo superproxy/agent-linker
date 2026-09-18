@@ -1,7 +1,7 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import {
-  DEFAULT_ADMIN_PASSWORD,
   DEFAULT_ADMIN_USERNAME,
   USERNAME_PATTERN,
   type SessionRecord,
@@ -9,7 +9,7 @@ import {
   type UserRole,
 } from '@linkagent/shared';
 import { createKvJsonStore, type KvJsonStore } from '../store/kv.js';
-import { hashPassword, verifyPassword } from './password.js';
+import { generateAdminPassword, hashPassword, verifyPassword } from './password.js';
 
 /**
  * 用户与会话存储（.runtime-state/users/）：
@@ -21,24 +21,75 @@ import { hashPassword, verifyPassword } from './password.js';
 const SESSION_TOKEN_BYTES = 32;
 
 export class UserStore {
+  private readonly stateDir: string;
   private readonly accounts: KvJsonStore<UserRecord>;
   private readonly sessions: KvJsonStore<SessionRecord>;
 
   constructor(stateDir: string) {
+    this.stateDir = stateDir;
     this.accounts = createKvJsonStore<UserRecord>(join(stateDir, 'accounts'));
     this.sessions = createKvJsonStore<SessionRecord>(join(stateDir, 'sessions'));
   }
 
-  /** 首次启动初始化默认 admin（store 为空时）；已存在用户则不动 */
-  ensureDefaultAdmin(): void {
-    if (this.list().length > 0) return;
-    this.create({
-      username: DEFAULT_ADMIN_USERNAME,
-      password: DEFAULT_ADMIN_PASSWORD,
-      role: 'admin',
-      displayName: '管理员',
-      mustChangePassword: true,
-    });
+  private initialPasswordFile(): string {
+    return join(this.stateDir, 'admin-initial-password');
+  }
+
+  /** 读取尚未改密的初始 admin 明文（文件不存在则无） */
+  readInitialAdminPassword(): string | null {
+    const p = this.initialPasswordFile();
+    if (!existsSync(p)) return null;
+    try {
+      const v = readFileSync(p, 'utf8').trim();
+      return v || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeInitialAdminPassword(password: string): void {
+    mkdirSync(this.stateDir, { recursive: true });
+    const p = this.initialPasswordFile();
+    writeFileSync(p, `${password}\n`, { encoding: 'utf8', mode: 0o600 });
+    try {
+      chmodSync(p, 0o600);
+    } catch {
+      /* Windows 等不支持 chmod 时忽略 */
+    }
+  }
+
+  private clearInitialAdminPassword(): void {
+    const p = this.initialPasswordFile();
+    if (!existsSync(p)) return;
+    try {
+      unlinkSync(p);
+    } catch {
+      /* 并发删除忽略 */
+    }
+  }
+
+  /**
+   * 账号库为空时创建 admin，口令随机生成（不使用固定弱密码）。
+   * 已有用户则不动；若初始口令文件仍在则一并返回，供回环登录页展示。
+   */
+  ensureDefaultAdmin(): { created: boolean; password: string | null } {
+    if (this.list().length > 0) {
+      return { created: false, password: this.readInitialAdminPassword() };
+    }
+    const password = generateAdminPassword();
+    try {
+      this.create({
+        username: DEFAULT_ADMIN_USERNAME,
+        password,
+        role: 'admin',
+        displayName: '管理员',
+        mustChangePassword: true,
+      });
+    } catch {
+      return { created: false, password: this.readInitialAdminPassword() };
+    }
+    this.writeInitialAdminPassword(password);
+    return { created: true, password };
   }
 
   list(): UserRecord[] {
@@ -82,6 +133,7 @@ export class UserStore {
       passwordHash: hashPassword(newPassword),
       mustChangePassword,
     });
+    if (username === DEFAULT_ADMIN_USERNAME) this.clearInitialAdminPassword();
   }
 
   setDisplayName(username: string, displayName: string | undefined): void {

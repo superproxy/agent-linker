@@ -113,11 +113,6 @@ export class AuthGuard {
         : { status: 'token' };
     }
 
-    // local 模式：回环请求无凭据也识别为本机默认用户（免登录）；非回环无 token → none
-    if (!token && this.opts.mode === 'local' && isLoopbackIp(req.ip)) {
-      return { status: 'local', user: LOCAL_DEFAULT_USER };
-    }
-
     if (token) {
       const session = this.store.resolveSession(token, this.sessionTtlMs);
       if (session) {
@@ -141,6 +136,11 @@ export class AuthGuard {
         this.opts.channelTokens?.touch(token);
         return { status: 'channelUser', channel: channelRec.channel, userId: channelRec.userId };
       }
+    }
+
+    // local 模式回环：无凭据或过期/无效浏览器 token 都回退为本机用户（免登录、免密码）
+    if (this.opts.mode === 'local' && isLoopbackIp(req.ip)) {
+      return { status: 'local', user: LOCAL_DEFAULT_USER };
     }
 
     return { status: 'none' };

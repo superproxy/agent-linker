@@ -102,11 +102,12 @@ auth:
 | 会话 token | Web 管理后台（浏览器）登录后自动携带 | 账号密码登录 `/api/auth/login` 签发 |
 | 个人 API token（`pat_` 前缀） | 登录账号本人用 OpenAI 兼容客户端（Chatbox 等）以 `Authorization: Bearer pat_…` 直连 `/v1`，权限等同该账号 | 后台「我的 Token」自助获取/轮换/吊销，落盘 `.runtime-state/users/personal-tokens/` |
 
-- 首次启动且账号库为空时，自动创建默认管理员 **admin / admin123**，**首次登录强制改密**；
+- 首次**需要登录**的访问（token 模式，或 local 模式从非本机打开）且账号库为空时，生成随机管理员密码（用户名 **admin**），**仅本机回环的登录页与网关日志展示明文**，并落盘 `.runtime-state/users/admin-initial-password`（0600）；**首次登录强制改密**，改密后删除该文件；
+- **local（本机）模式**：回环访问免登录、无需密码（浏览器里过期 token 也不挡）；
 - 账号数据落盘 `.runtime-state/users/`（密码用 scrypt + 随机 salt 哈希，禁止明文）；
 - admin 登录后可在后台「用户管理」新增/删除账号、重置密码（角色 `admin` / `user`）；
 - 会话默认 7 天有效并滑动续期，退出登录或改密相关会话立即失效；
-- 忘记 admin 密码：停止网关后删除 `.runtime-state/users/accounts/admin.json`，重启会重新初始化默认 admin。
+- 忘记 admin 密码：停止网关后删除 `.runtime-state/users/accounts/admin.json` 与 `admin-initial-password`（若有），下次需要登录时会重新生成。
 
 ### 4.2 启动方式
 

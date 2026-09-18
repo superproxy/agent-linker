@@ -171,11 +171,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
 
   // ── 用户登录体系：账号密码 + 会话 token（与 gateway token 并存）──
   const userStore = new UserStore(layout.usersState);
-  // token/open 模式保留默认 admin 账号（兼容旧行为）；local 模式以「本机默认用户」免登录，
-  // 仅当已有账号存储时才初始化 admin，避免本机模式强推 admin/admin123 改密流程。
-  if (auth.mode === 'token' || auth.mode === 'open') {
-    userStore.ensureDefaultAdmin();
-  }
+  // local 模式回环免登录，不预创建 admin；token 模式在首次需要登录的 /api/auth/me 时再生成随机密码。
   // 渠道终端用户级凭据（微信 bot 代用户直连网关）：.runtime-state/users/channel-tokens/
   const channelTokenStore = new ChannelTokenStore(layout.usersState);
   // 登录账号个人 API token（用户自助，OpenAI 客户端直连 /v1）：.runtime-state/users/personal-tokens/

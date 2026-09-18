@@ -33,3 +33,8 @@ export function validatePassword(password: string): string | null {
   }
   return null;
 }
+
+/** 首次访问生成的管理员口令（足够长，避免弱默认值） */
+export function generateAdminPassword(): string {
+  return randomBytes(18).toString('base64url');
+}

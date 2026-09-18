@@ -27,7 +27,7 @@ import { SettingsPage } from './pages/Settings';
 
 type AuthState =
   | { status: 'loading' }
-  | { status: 'login'; error?: string }
+  | { status: 'login'; error?: string; initialAdmin?: { username: string; password: string } }
   | { status: 'disabled' }
   | { status: 'token' }
   | { status: 'ready'; user: UserPublic };
@@ -58,10 +58,10 @@ export function App() {
     try {
       const me = await authClient.me(readToken());
       if (!me.authEnabled) setAuth({ status: 'disabled' });
-      else if (me.local) setAuth({ status: 'disabled' });
+      else if (me.local && me.user) setAuth({ status: 'ready', user: me.user });
       else if (me.user) setAuth({ status: 'ready', user: me.user });
       else if (me.tokenAuth) setAuth({ status: 'token' });
-      else setAuth({ status: 'login' });
+      else setAuth({ status: 'login', initialAdmin: me.initialAdmin });
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setAuth({ status: 'login' });
       else setAuth({ status: 'login', error: e instanceof Error ? e.message : String(e) });
@@ -128,6 +128,7 @@ export function App() {
       <LoginPage
         base={base}
         error={auth.error}
+        initialAdmin={auth.initialAdmin}
         onApplyBase={applyBase}
         onLogin={doLogin}
       />

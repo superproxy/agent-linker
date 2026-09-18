@@ -1,0 +1,7 @@
+server:
+  host: 127.0.0.1
+  port: 8787
+auth:
+  mode: local
+  token: test-local-token
+  sessionTtlDays: 7

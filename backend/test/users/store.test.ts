@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME } from '@linkagent/shared';
+import { DEFAULT_ADMIN_USERNAME } from '@linkagent/shared';
 import { hashPassword, verifyPassword, validatePassword } from '../../src/gateway/users/password.js';
 import { AuthError, UserStore } from '../../src/gateway/users/store.js';
 import { AuthGuard } from '../../src/gateway/users/auth.js';
@@ -27,20 +27,25 @@ test('validatePassword：长度至少 8 位', () => {
   assert.equal(validatePassword('12345678'), null);
 });
 
-test('ensureDefaultAdmin：空 store 初始化 admin/admin123 且要求改密；已有用户时不重复创建', () => {
+test('ensureDefaultAdmin：空 store 随机生成 admin 密码且要求改密；已有用户时不重复创建', () => {
   const dir = tmpDir();
   const store1 = new UserStore(dir);
-  store1.ensureDefaultAdmin();
+  const first = store1.ensureDefaultAdmin();
+  assert.equal(first.created, true);
+  assert.ok(first.password && first.password.length >= 8);
   const admin = store1.get(DEFAULT_ADMIN_USERNAME);
   assert.ok(admin);
   assert.equal(admin?.role, 'admin');
   assert.equal(admin?.mustChangePassword, true);
-  assert.equal(verifyPassword(DEFAULT_ADMIN_PASSWORD, admin!.passwordHash), true);
+  assert.equal(verifyPassword(first.password!, admin!.passwordHash), true);
+  assert.equal(store1.readInitialAdminPassword(), first.password);
 
-  // 改密后重新打开实例，ensureDefaultAdmin 不应覆盖
+  // 改密后重新打开实例，ensureDefaultAdmin 不应覆盖，且清除初始明文
   store1.setPassword(DEFAULT_ADMIN_USERNAME, 'new-pass-123', false);
+  assert.equal(store1.readInitialAdminPassword(), null);
   const store2 = new UserStore(dir);
-  store2.ensureDefaultAdmin();
+  const second = store2.ensureDefaultAdmin();
+  assert.equal(second.created, false);
   assert.equal(store2.list().length, 1);
   assert.equal(verifyPassword('new-pass-123', store2.get(DEFAULT_ADMIN_USERNAME)!.passwordHash), true);
   assert.equal(store2.get(DEFAULT_ADMIN_USERNAME)?.mustChangePassword, false);

@@ -60,7 +60,7 @@ export function DashboardLayout(props: {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isAdmin = props.currentUser?.role === 'admin';
   const canAdmin = props.authMode !== 'ready' || isAdmin;
-  const showMyToken = props.authMode === 'ready';
+  const showMyToken = props.authMode === 'ready' && props.currentUser?.username !== 'local';
   const activeMeta = ALL_TABS.find((t) => t.id === props.active);
 
   const [healthOk, setHealthOk] = useState(false);
@@ -115,11 +115,13 @@ export function DashboardLayout(props: {
             disabled: true,
           },
           { type: 'divider' as const },
-          { key: 'pwd', icon: <SafetyCertificateOutlined />, label: '修改密码' },
-          { type: 'divider' as const },
           ...(props.currentUser.username === 'local'
             ? []
-            : [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true }]),
+            : [
+                { key: 'pwd', icon: <SafetyCertificateOutlined />, label: '修改密码' },
+                { type: 'divider' as const },
+                { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+              ]),
         ]
       : [{ key: 'clear', icon: <LogoutOutlined />, label: '清除 API Key' }]),
   ];

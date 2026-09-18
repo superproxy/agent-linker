@@ -187,4 +187,7 @@ test('local 模式：回环无凭据 → local 默认用户；gateway token → 
   // 非回环且无 token → 拒绝
   assert.equal(guard.resolve(req(undefined, '10.0.0.9')).status, 'none');
   assert.equal(guard.checkAuth(req(undefined, '10.0.0.9')), false);
+
+  // 回环上过期/无效浏览器 token 仍免登录
+  assert.equal(guard.resolve(req('Bearer deadbeef', '127.0.0.1')).status, 'local');
 });

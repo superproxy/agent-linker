@@ -13,6 +13,7 @@ const runtimeHome = mkdtempSync(join(tmpdir(), 'linkagent-auth-home-'));
 
 let built: Built;
 let app: FastifyInstance;
+let initialAdminPassword = '';
 
 before(async () => {
   process.env.LINKAGENT_HOME = runtimeHome;
@@ -21,6 +22,12 @@ before(async () => {
     definitions: [{ id: 'opencode', type: 'opencode', displayName: 'OpenCode' }] as never,
   });
   app = built.app;
+  const boot = await app.inject({ method: 'GET', url: '/api/auth/me', remoteAddress: '127.0.0.1' });
+  assert.equal(boot.statusCode, 401);
+  const body = boot.json() as { initialAdmin?: { username: string; password: string } };
+  assert.equal(body.initialAdmin?.username, 'admin');
+  assert.ok(body.initialAdmin?.password);
+  initialAdminPassword = body.initialAdmin.password;
 });
 
 after(async () => {
@@ -33,8 +40,10 @@ after(async () => {
 const login = (username: string, password: string) =>
   app.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password } });
 
-test('默认 admin/admin123 可登录，返回会话 token 且标记 mustChangePassword', async () => {
-  const res = await login('admin', 'admin123');
+test('首次访问生成随机 admin 密码（非 admin123），可登录且标记 mustChangePassword', async () => {
+  assert.notEqual(initialAdminPassword, 'admin123');
+  assert.equal((await login('admin', 'admin123')).statusCode, 401);
+  const res = await login('admin', initialAdminPassword);
   assert.equal(res.statusCode, 200, res.body);
   const body = res.json() as { token: string; user: { username: string; role: string; mustChangePassword: boolean } };
   assert.ok(body.token.length >= 32);
@@ -59,7 +68,7 @@ test('未携带凭据访问受保护接口 → 401；静态 token 与会话 toke
   const staticAuth = await app.inject({ method: 'GET', url: '/api/agents', headers: { authorization: 'Bearer test-static-token' } });
   assert.equal(staticAuth.statusCode, 200);
 
-  const sess = await login('admin', 'admin123');
+  const sess = await login('admin', initialAdminPassword);
   const token = (sess.json() as { token: string }).token;
   const sessionAuth = await app.inject({ method: 'GET', url: '/api/agents', headers: { authorization: `Bearer ${token}` } });
   assert.equal(sessionAuth.statusCode, 200);
@@ -68,7 +77,7 @@ test('未携带凭据访问受保护接口 → 401；静态 token 与会话 toke
 test('GET /api/auth/me：无凭据 401；会话返回用户；静态 token 返回 tokenAuth', async () => {
   assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me' })).statusCode, 401);
 
-  const token = ((await login('admin', 'admin123')).json() as { token: string }).token;
+  const token = ((await login('admin', initialAdminPassword)).json() as { token: string }).token;
   const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${token}` } });
   assert.equal(me.statusCode, 200);
   const meBody = me.json() as { authEnabled: boolean; user: { username: string } | null; tokenAuth?: boolean };
@@ -82,7 +91,7 @@ test('GET /api/auth/me：无凭据 401；会话返回用户；静态 token 返�
 });
 
 test('改密：原密码错误 401；弱密码 400；成功后用新密码登录、mustChangePassword 解除', async () => {
-  const token = ((await login('admin', 'admin123')).json() as { token: string }).token;
+  const token = ((await login('admin', initialAdminPassword)).json() as { token: string }).token;
   const change = (oldPassword: string, newPassword: string) =>
     app.inject({
       method: 'POST',
@@ -92,10 +101,10 @@ test('改密：原密码错误 401；弱密码 400；成功后用新密码登录
     });
 
   assert.equal((await change('wrong-old', 'new-pass-123')).statusCode, 401);
-  assert.equal((await change('admin123', 'short')).statusCode, 400);
-  assert.equal((await change('admin123', 'admin123')).statusCode, 400);
+  assert.equal((await change(initialAdminPassword, 'short')).statusCode, 400);
+  assert.equal((await change(initialAdminPassword, initialAdminPassword)).statusCode, 400);
 
-  const ok = await change('admin123', 'new-pass-123');
+  const ok = await change(initialAdminPassword, 'new-pass-123');
   assert.equal(ok.statusCode, 200, ok.body);
 
   // 旧密码登录失败，新密码成功

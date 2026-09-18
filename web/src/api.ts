@@ -364,6 +364,8 @@ export interface MeInfo {
   tokenAuth?: boolean;
   /** local 模式：回环免登录的「本机默认用户」或持 gateway token */
   local?: boolean;
+  /** 首次需要登录时生成的初始管理员（仅本机回环返回明文） */
+  initialAdmin?: { username: string; password: string };
 }
 
 export class AuthClient {
@@ -373,14 +375,21 @@ export class AuthClient {
     return this.base.replace(/\/$/, '') + path;
   }
 
-  /** 当前鉴权态；401 表示需要登录 */
+  /** 当前鉴权态；未登录返回 user 为空，回环首次访问可能带 initialAdmin */
   async me(token: string): Promise<MeInfo> {
     const res = await fetch(this.url('/api/auth/me'), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
-    if (res.status === 401) throw new ApiError(401, await errorMessage(res));
-    if (!res.ok) throw new Error(`me ${res.status}`);
-    return (await res.json()) as MeInfo;
+    const data = (await res.json().catch(() => ({}))) as MeInfo & { error?: { message?: string } };
+    if (res.status === 401) {
+      return {
+        authEnabled: true,
+        user: null,
+        ...(data.initialAdmin ? { initialAdmin: data.initialAdmin } : {}),
+      };
+    }
+    if (!res.ok) throw new Error(data.error?.message ?? `me ${res.status}`);
+    return data;
   }
 
   async login(username: string, password: string): Promise<{ token: string; user: UserPublic }> {

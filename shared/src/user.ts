@@ -15,9 +15,8 @@ export const USERNAME_PATTERN = /^[A-Za-z0-9._-]{1,32}$/;
 /** 密码最小长度 */
 export const MIN_PASSWORD_LENGTH = 8;
 
-/** 默认管理员账号（首次启动自动初始化） */
+/** 默认管理员账号（账号库为空时，首次需要登录的访问才生成） */
 export const DEFAULT_ADMIN_USERNAME = 'admin';
-export const DEFAULT_ADMIN_PASSWORD = 'admin123';
 
 /** 用户落盘记录（.runtime-state/users/accounts/<username>.json，含密码哈希，禁止直接对外返回） */
 export interface UserRecord {
@@ -70,13 +69,17 @@ export interface LoginResponse {
   user: UserPublic;
 }
 
-/** GET /api/auth/me 响应：authEnabled=false 时网关完全不鉴权（本地开发模式） */
+/** GET /api/auth/me 响应：authEnabled=false 时网关完全不鉴权（open 模式） */
 export interface MeResponse {
   authEnabled: boolean;
   /** 会话 token 有效时返回登录用户 */
   user?: UserPublic | null;
   /** 静态 token 鉴权（机器凭据，无对应用户实体） */
   tokenAuth?: boolean;
+  /** local 模式：回环免登录的本机默认用户，或持 gateway token */
+  local?: boolean;
+  /** 首次需要登录时生成的初始管理员（仅回环 401 响应携带明文，改密后不再返回） */
+  initialAdmin?: { username: string; password: string };
 }
 
 export interface ChangePasswordRequest {

@@ -38,8 +38,8 @@
 
 ## 鉴权与多账号
 
-- 三种网关鉴权模式：`local`（回环免登录）/ `token`（静态管理员 token）/ 账号会话；可开关。
-- 登录账号 + 角色（admin/user）、首登强制改密、scrypt 加盐哈希；个人长期 API token（`pat_`）、渠道用户 token（`ct_`）、任务 key（`k_`）分级凭据（详见 `docs/architecture.md` 的「鉴权与凭据模型」）。
+- 三种网关鉴权模式：`local`（回环免登录、无需密码）/ `token`（静态管理员 token 或账号会话）/ `open`（不鉴权）。
+- 登录账号 + 角色（admin/user）、需要登录时首次访问才生成随机 admin 密码并强制改密、scrypt 加盐哈希；个人长期 API token（`pat_`）、渠道用户 token（`ct_`）、任务 key（`k_`）分级凭据（详见 `docs/architecture.md` 的「鉴权与凭据模型」）。
 
 ## 运维与进程守护
 

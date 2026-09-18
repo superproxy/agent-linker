@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
+  DEFAULT_ADMIN_USERNAME,
   USERNAME_PATTERN,
   USER_ROLES,
   toUserPublic,
@@ -9,7 +10,7 @@ import {
 } from '@linkagent/shared';
 import { validatePassword } from './password.js';
 import { AuthError, type UserStore } from './store.js';
-import { type AuthGuard } from './auth.js';
+import { isLoopbackIp, type AuthGuard } from './auth.js';
 import type { PersonalTokenStore } from './personal-token-store.js';
 
 type HeaderCarrier = { headers: Record<string, string | string[] | undefined> };
@@ -102,14 +103,19 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
   app.get('/api/auth/me', async (request: FastifyRequest, reply: FastifyReply) => {
     const state = guard.resolve(request as HeaderCarrier);
     if (state.status === 'none') {
-      return reply.code(401).send(errBody('未登录或凭据已失效', 'unauthorized'));
+      // token 模式、或 local 模式非回环：第一次需要登录时才生成 admin 随机密码
+      const initialAdmin = bootstrapInitialAdmin(request, store, guard);
+      return reply.code(401).send({
+        ...errBody('未登录或凭据已失效', 'unauthorized'),
+        ...(initialAdmin ? { initialAdmin } : {}),
+      });
     }
     if (state.status === 'session' || state.status === 'personal') {
       // 会话 / 个人 API token 都对应一个登录账号，返回该账号本人
       return reply.send({ authEnabled: true, user: toUserPublic(state.user) });
     }
     if (state.status === 'local') {
-      // 本机默认用户（回环免登录 / gateway token）
+      // 本机默认用户（回环免登录 / gateway token）——不创建、不索要 admin 密码
       return reply.send({ authEnabled: true, user: toUserPublic(state.user), local: true });
     }
     if (state.status === 'token') {
@@ -245,4 +251,22 @@ export function registerUserApi(
     request.log.info({ user: username, by: guard.sessionUser(request as HeaderCarrier)?.username ?? 'token' }, '管理员重置密码');
     return reply.send({ ok: true, mustChangePassword: mustChange });
   });
+}
+
+/** 账号库为空且当前请求需要登录时生成 admin；明文仅回环返回 */
+function bootstrapInitialAdmin(
+  request: FastifyRequest,
+  store: UserStore,
+  guard: AuthGuard,
+): { username: string; password: string } | undefined {
+  if (!guard.enabled) return undefined;
+  const r = store.ensureDefaultAdmin();
+  if (r.created && r.password) {
+    request.log.warn(
+      `已生成初始管理员 ${DEFAULT_ADMIN_USERNAME}，密码：${r.password}（仅本机回环登录页展示，请立即改密）`,
+    );
+  }
+  const password = r.password;
+  if (!password || !isLoopbackIp(request.ip)) return undefined;
+  return { username: DEFAULT_ADMIN_USERNAME, password };
 }
