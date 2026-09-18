@@ -160,6 +160,20 @@ export async function buildServer(options?: { configPath?: string; definitions?:
 
   const app = Fastify({ logger: { level: 'info' } });
   await app.register(cors, { origin: true });
+  // Fastify 5：Content-Type 为 json 且 body 为空会 400。后台若干 POST（批准节点等）无 body。
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    const raw = typeof body === 'string' ? body : '';
+    if (!raw.trim()) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(raw) as unknown);
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
 
   // ── web 管理端静态资源（只在网关 8787 单端口提供，不再有独立 vite dev server）──
   // 布局层按形态探测：dist→<root>/web，dev→web/dist（index.html + assets 同时存在才算产物）。
@@ -182,7 +196,7 @@ export async function buildServer(options?: { configPath?: string; definitions?:
 
   // ── 用户登录体系：账号密码 + 会话 token（与 gateway token 并存）──
   const userStore = new UserStore(layout.usersState);
-  // local 模式回环免登录，不预创建 admin；token 模式在首次需要登录的 /api/auth/me 时再生成随机密码。
+  // local 模式按运行模式免登录，不预创建 admin；token 模式在首次需要登录的 /api/auth/me 时再生成随机密码。
   // 渠道终端用户级凭据（微信 bot 代用户直连网关）：.runtime-state/users/channel-tokens/
   const channelTokenStore = new ChannelTokenStore(layout.usersState);
   // 登录账号个人 API token（用户自助，OpenAI 客户端直连 /v1）：.runtime-state/users/personal-tokens/

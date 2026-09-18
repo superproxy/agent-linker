@@ -125,10 +125,29 @@ export interface ChildProcessRuntime {
   gatewayToken: string;
 }
 
+/** 比较回连目标是否为同一网关（忽略 http/ws、localhost/127.0.0.1） */
+export function sameGatewayOrigin(a: string, b: string): boolean {
+  const key = (raw: string): string => {
+    const trimmed = raw.trim();
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+    try {
+      const u = new URL(withScheme);
+      const proto = u.protocol === 'https:' || u.protocol === 'wss:' ? 'https' : 'http';
+      let host = u.hostname.toLowerCase();
+      if (host === 'localhost' || host === '::1') host = '127.0.0.1';
+      const port = u.port || (proto === 'https' ? '443' : '80');
+      return `${proto}://${host}:${port}`;
+    } catch {
+      return trimmed.replace(/\/+$/, '').toLowerCase();
+    }
+  };
+  return key(a) === key(b);
+}
+
 /**
  * 子进程共享的回连参数：env > 配置段 > 推导缺省。
- * @param envUrl / envToken  调用方传入的环境变量值（已读取，缺省空串）
- * @param sectionUrl / sectionToken  配置段里显式填写的值
+ * 回连本机网关时，token 还可回退 gateway.auth.token / token 文件；
+ * 回连另一台网关时不再套用本机令牌（否则会被对端 401）。
  */
 export function resolveChildRuntime(
   config: SharedConfig,
@@ -137,13 +156,10 @@ export function resolveChildRuntime(
   tokenFile?: string,
 ): ChildProcessRuntime {
   const gatewayUrl = env.url?.trim() || section.gatewayUrl?.trim() || deriveGatewayBase(config);
-  // token：env > 配置段 > gateway.auth.token > token 文件（只读，不创建）
-  // tokenFile 显式透传以支持测试/多实例 layout 隔离；缺省回退全局安装布局。
-  const gatewayToken =
-    env.token?.trim() ||
-    section.gatewayToken?.trim() ||
-    config.gateway.auth.token.trim() ||
-    readGatewayTokenFile(tokenFile);
+  const explicitToken = env.token?.trim() || section.gatewayToken?.trim() || '';
+  if (explicitToken) return { gatewayUrl, gatewayToken: explicitToken };
+  const localToken = config.gateway.auth.token.trim() || readGatewayTokenFile(tokenFile);
+  const gatewayToken = sameGatewayOrigin(gatewayUrl, deriveGatewayBase(config)) ? localToken : '';
   return { gatewayUrl, gatewayToken };
 }
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # linkagent node 启停脚本（远程节点连接器，反向 WebSocket 连入网关）
+# Windows 请用 scripts/node.ps1，或根目录 pnpm node:*（scripts/node-ctl.mjs 按平台分发）。
 #   scripts/node.sh                       启动默认节点（若已在运行则提示）
 #   scripts/node.sh start [name]          启动节点（可给实例名，支持本机多实例）
 #   scripts/node.sh stop [name]           停止

@@ -7,7 +7,7 @@ import type { PersonalTokenStore } from './personal-token-store.js';
 /**
  * 鉴权态解析结果：
  * - disabled：open 模式（不鉴权，本地开发）
- * - local：local 模式回环免登录的「本机默认用户」，或持 gateway token 的默认用户（管理员）
+ * - local：local 模式下的「本机默认用户」（管理员），不区分访问地址；或持 gateway token 的默认用户
  * - token：token 模式下的静态 gateway token（机器客户端 / 节点连接器，管理员级）
  * - session：账号密码登录会话（Web UI 用户，携带用户实体与角色）
  * - personal：登录账号的个人 API token（pat_），等同该账号本人，可直连 /v1，不额外授予管理接口
@@ -54,7 +54,7 @@ export function isLoopbackIp(ip: string | undefined): boolean {
 }
 
 /**
- * 统一鉴权守卫：gateway token / 登录会话 / local 回环免登录并存，另支持两类作用域受限凭据
+ * 统一鉴权守卫：gateway token / 登录会话 / local 模式本机用户并存，另支持两类作用域受限凭据
  * （任务 key 直连 / 渠道终端用户 token）。
  * checkAuth 兼容既有 (req)=>boolean 签名（tasks/nodes/weixin API 注册处零改动）。
  */
@@ -138,8 +138,9 @@ export class AuthGuard {
       }
     }
 
-    // local 模式回环：无凭据或过期/无效浏览器 token 都回退为本机用户（免登录、免密码）
-    if (this.opts.mode === 'local' && isLoopbackIp(req.ip)) {
+    // local 模式：按运行模式识别为本机管理员，不区分回环 / 局域网 / 公网访问地址。
+    // 无效或过期的浏览器 token 同样回退为本机用户（免登录）。公网暴露请改用 token 模式。
+    if (this.opts.mode === 'local') {
       return { status: 'local', user: LOCAL_DEFAULT_USER };
     }
 

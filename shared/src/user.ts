@@ -76,7 +76,7 @@ export interface MeResponse {
   user?: UserPublic | null;
   /** 静态 token 鉴权（机器凭据，无对应用户实体） */
   tokenAuth?: boolean;
-  /** local 模式：回环免登录的本机默认用户，或持 gateway token */
+  /** local 模式：按运行模式免登录的本机默认用户，或持 gateway token */
   local?: boolean;
   /** 首次需要登录时生成的初始管理员（仅回环 401 响应携带明文，改密后不再返回） */
   initialAdmin?: { username: string; password: string };

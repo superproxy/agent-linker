@@ -64,7 +64,7 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
   const throttle = new LoginThrottle();
 
   app.post('/api/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
-    // open 模式不鉴权，登录无意义；local 模式回环免登录，账号登录仅用于非回环/多用户场景
+    // open 模式不鉴权，登录无意义；local 模式按运行模式免登录，账号登录仅用于多用户场景
     if (!guard.enabled) {
       return reply.code(400).send(errBody('网关未开启鉴权（auth.mode=open），无需登录', 'auth_disabled'));
     }
@@ -104,7 +104,7 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
   app.get('/api/auth/me', async (request: FastifyRequest, reply: FastifyReply) => {
     const state = guard.resolve(request as HeaderCarrier);
     if (state.status === 'none') {
-      // token 模式、或 local 模式非回环：第一次需要登录时才生成 admin 随机密码
+      // token 模式首次需要登录时才生成 admin 随机密码（local 模式按运行模式免登录，不走这里）
       const initialAdmin = bootstrapInitialAdmin(request, store, guard);
       return reply.code(401).send({
         ...errBody('未登录或凭据已失效', 'unauthorized'),
@@ -116,7 +116,7 @@ export function registerAuthApi(app: FastifyInstance, store: UserStore, guard: A
       return reply.send({ authEnabled: true, user: toUserPublic(state.user) });
     }
     if (state.status === 'local') {
-      // 本机默认用户（回环免登录 / gateway token）——不创建、不索要 admin 密码
+      // 本机默认用户（local 模式免登录 / gateway token）——不创建、不索要 admin 密码
       return reply.send({ authEnabled: true, user: toUserPublic(state.user), local: true });
     }
     if (state.status === 'token') {

@@ -197,7 +197,18 @@ class NodeConnector {
         resolve();
       });
       ws.on('error', (err) => {
-        if (!opened) reject(err);
+        if (!opened) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/\b401\b/.test(msg)) {
+            reject(
+              new Error(
+                '网关返回 401：令牌不被目标网关接受。请使用该网关后台颁发的机器凭证（nt_）或它的静态 token；本机签发的 nt_ 不能拿到另一台网关上用。',
+              ),
+            );
+            return;
+          }
+          reject(err);
+        }
       });
     });
   }

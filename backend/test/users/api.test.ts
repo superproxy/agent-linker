@@ -198,6 +198,17 @@ test('登出后会话 token 立即失效', async () => {
   );
 });
 
+test('Content-Type 为 json 且 body 为空时不报 FST_ERR_CTP_EMPTY_JSON_BODY', async () => {
+  const token = ((await login('admin', 'new-pass-123')).json() as { token: string }).token;
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/auth/logout',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    payload: '',
+  });
+  assert.equal(res.statusCode, 200);
+});
+
 test('个人 API token：未登录 401；ensure 幂等；rotate 换发；DELETE 吊销；pat_ 可直连受保护接口', async () => {
   // 未登录 → 401
   assert.equal((await app.inject({ method: 'GET', url: '/api/personal-tokens' })).statusCode, 401);

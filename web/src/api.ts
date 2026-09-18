@@ -11,6 +11,22 @@ export class ApiError extends Error {
   }
 }
 
+/** Fastify 5 在 Content-Type: json 且 body 为空时报 FST_ERR_CTP_EMPTY_JSON_BODY */
+function jsonFetchInit(token: string, init?: RequestInit): RequestInit {
+  const method = String(init?.method ?? 'GET').toUpperCase();
+  const writes = method === 'POST' || method === 'PUT' || method === 'PATCH';
+  const body = init?.body ?? (writes ? '{}' : undefined);
+  return {
+    ...init,
+    ...(body !== undefined ? { body } : {}),
+    headers: {
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
+  };
+}
+
 /** 从 fetch Response 解析后端统一错误体 {error:{message}} / {error:string} */
 async function errorMessage(res: Response): Promise<string> {
   const body = await res.text().catch(() => '');
@@ -267,17 +283,8 @@ export class AdminClient {
     return this.base.replace(/\/$/, '') + path;
   }
 
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.token) h.Authorization = `Bearer ${this.token}`;
-    return h;
-  }
-
   private async request(path: string, init?: RequestInit): Promise<unknown> {
-    const res = await fetch(this.url(path), {
-      ...init,
-      headers: { ...this.headers(), ...(init?.headers ?? {}) },
-    });
+    const res = await fetch(this.url(path), jsonFetchInit(this.token ?? '', init));
     if (!res.ok) {
       const msg = await errorMessage(res);
       // 401/403 抛 ApiError，上层据此跳登录 / 提示权限
@@ -362,7 +369,7 @@ export interface MeInfo {
   authEnabled: boolean;
   user?: UserPublic | null;
   tokenAuth?: boolean;
-  /** local 模式：回环免登录的「本机默认用户」或持 gateway token */
+  /** local 模式：按运行模式免登录的「本机默认用户」或持 gateway token */
   local?: boolean;
   /** 首次需要登录时生成的初始管理员（仅本机回环返回明文） */
   initialAdmin?: { username: string; password: string };
@@ -478,14 +485,7 @@ export class UserAdminClient {
   }
 
   private async request(path: string, init?: RequestInit): Promise<unknown> {
-    const res = await fetch(this.url(path), {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.getToken()}`,
-        ...(init?.headers ?? {}),
-      },
-    });
+    const res = await fetch(this.url(path), jsonFetchInit(this.getToken(), init));
     if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
     return res.json().catch(() => ({}));
   }
@@ -543,14 +543,7 @@ export class PmClient {
   }
 
   private async request(path: string, init?: RequestInit): Promise<unknown> {
-    const res = await fetch(this.url(path), {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.getToken()}`,
-        ...(init?.headers ?? {}),
-      },
-    });
+    const res = await fetch(this.url(path), jsonFetchInit(this.getToken(), init));
     if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
     return res.json().catch(() => ({}));
   }
@@ -721,14 +714,7 @@ export class OpsClient {
   }
 
   private async request(path: string, init?: RequestInit): Promise<unknown> {
-    const res = await fetch(this.url(path), {
-      ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.getToken()}`,
-        ...(init?.headers ?? {}),
-      },
-    });
+    const res = await fetch(this.url(path), jsonFetchInit(this.getToken(), init));
     if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
     return res.json().catch(() => ({}));
   }

@@ -19,7 +19,7 @@ export const agentDefSchema = z.object({
 
 /**
  * 鉴权模式：
- * - local（默认，本机）：回环请求免登录识别为「本机默认用户」；非回环必须携带永久 gateway token。
+ * - local（默认）：按运行模式识别为「本机默认用户」（管理员），免登录；不区分访问地址。公网请用 token 模式。
  * - token：强制令牌，任何来源（含本机浏览器）都需 gateway token 或账号会话，等同旧 enabled=true。
  * - open：完全不鉴权，等同旧 enabled=false（仅建议绑定回环）。
  */

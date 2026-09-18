@@ -226,6 +226,41 @@ test('resolveChildRuntime：token 回退顺序 env > 段 > gateway.auth.token > 
   assert.equal(resolveChildRuntime(cfg2, {}, {}, tokenFile).gatewayToken, 'file-tok');
 });
 
+test('resolveChildRuntime：回连远程网关时不套用本机 token 文件', () => {
+  const dir = tmpRoot();
+  const tokenFile = join(dir, 'gateway-token');
+  writeFileSync(tokenFile, 'local-file-tok\n');
+  const cfg = migrateConfig({ server: { host: '127.0.0.1', port: 8787 }, auth: { enabled: true, token: 'local-auth-tok' } });
+
+  const remote = resolveChildRuntime(
+    cfg,
+    { gatewayUrl: 'http://216.19.4.113:8787' },
+    {},
+    tokenFile,
+  );
+  assert.equal(remote.gatewayUrl, 'http://216.19.4.113:8787');
+  assert.equal(remote.gatewayToken, '');
+
+  const remoteEnv = resolveChildRuntime(
+    cfg,
+    { gatewayUrl: 'http://216.19.4.113:8787' },
+    { url: 'ws://216.19.4.113:8787' },
+    tokenFile,
+  );
+  assert.equal(remoteEnv.gatewayToken, '');
+
+  const remoteExplicit = resolveChildRuntime(
+    cfg,
+    { gatewayUrl: 'http://216.19.4.113:8787', gatewayToken: 'nt_remote' },
+    {},
+    tokenFile,
+  );
+  assert.equal(remoteExplicit.gatewayToken, 'nt_remote');
+
+  const local = resolveChildRuntime(cfg, {}, {}, tokenFile);
+  assert.equal(local.gatewayToken, 'local-auth-tok');
+});
+
 test('parse 往返：三段式 yaml 能被 migrateConfig 正确解析（含 enabled:false）', () => {
   const raw = parse(`
 gateway:

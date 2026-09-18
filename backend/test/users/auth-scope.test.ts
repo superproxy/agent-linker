@@ -161,7 +161,7 @@ test('未开启鉴权：一切凭据态为 disabled', () => {
   assert.equal(guard.checkAuth(req()), true);
 });
 
-test('local 模式：回环无凭据 → local 默认用户；gateway token → local；非回环无 token → none', () => {
+test('local 模式：无凭据即本机管理员，不区分访问地址；gateway token 同样映射为 local', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-authscope-local-'));
   const users = new UserStore(dir);
   const guard = new AuthGuard(users, {
@@ -184,10 +184,17 @@ test('local 模式：回环无凭据 → local 默认用户；gateway token → 
   // gateway token 同样映射为默认用户（任意来源）
   assert.equal(guard.resolve(req('Bearer gw-secret', '10.0.0.9')).status, 'local');
 
-  // 非回环且无 token → 拒绝
-  assert.equal(guard.resolve(req(undefined, '10.0.0.9')).status, 'none');
-  assert.equal(guard.checkAuth(req(undefined, '10.0.0.9')), false);
+  // 非回环无 token 仍按运行模式为本机管理员
+  const lan = guard.resolve(req(undefined, '10.0.0.9'));
+  assert.equal(lan.status, 'local');
+  if (lan.status === 'local') {
+    assert.equal(lan.user.username, 'local');
+    assert.equal(lan.user.role, 'admin');
+  }
+  assert.equal(guard.checkAuth(req(undefined, '10.0.0.9')), true);
+  assert.equal(guard.isAdmin(req(undefined, '10.0.0.9')), true);
 
-  // 回环上过期/无效浏览器 token 仍免登录
+  // 过期/无效浏览器 token 仍免登录
   assert.equal(guard.resolve(req('Bearer deadbeef', '127.0.0.1')).status, 'local');
+  assert.equal(guard.resolve(req('Bearer deadbeef', '10.0.0.9')).status, 'local');
 });

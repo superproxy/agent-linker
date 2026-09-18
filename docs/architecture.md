@@ -37,7 +37,7 @@
 
 `AuthGuard.resolve` 产出的凭据态：`disabled | token | local | session | personal | channelUser | none`；`resolveChat` 额外识别 `task`。
 
-- 静态 token（`auth.token`）：管理员级机器凭据；`local` 模式下回环无凭据映射为本机默认用户。
+- 静态 token（`auth.token`）：管理员级机器凭据；`local` 模式下无凭据即本机默认用户（不区分访问地址）。
 - 会话 token：浏览器登录。
 - **个人 API token（`pat_` 前缀）**：一个登录账号一枚长期 token，自助 4 接口 `GET/POST ensure/POST rotate/DELETE /api/personal-tokens`，语义等同账号本人（在 `checkAuth/sessionUser/isAuth/isAdmin` 与 `/api/auth/me` 中与 `session` 同等放行）。
 - **渠道用户 token（`ct_` 前缀）**：作用域凭据，仅代表其 `channel/userId`，只能访问 `/v1` 与自己的资源，不放行管理接口。
