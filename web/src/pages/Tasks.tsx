@@ -1,24 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Badge,
-  Button,
-  Collapse,
-  Form,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Table,
-  Tag,
-} from 'antd';
+import { Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { CommentOutlined, PlusOutlined } from '@ant-design/icons';
-import {
-  OpsClient,
-  type NodeInfo,
-  type TaskItem,
-  type UserTasks,
-} from '../api';
+import { OpsClient, type NodeInfo, type TaskItem, type UserTasks } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 import { EmptyHint } from '../components/common';
@@ -28,6 +12,13 @@ interface EditState {
   channel: string;
   userId: string;
   task?: TaskItem;
+}
+
+/** 平铺后的任务行：携带归属（渠道终端）与当前激活标记 */
+interface FlatTask extends TaskItem {
+  channel: string;
+  userId: string;
+  active: boolean;
 }
 
 export function TasksPage(props: {
@@ -93,8 +84,13 @@ export function TasksPage(props: {
     }
   };
 
-  const openCreate = (channel: string, userId: string) => {
-    setEditing({ channel, userId });
+  /** 最近活跃的渠道终端 = 当前用户归属（users 按活跃倒序，当前部署即自身的微信终端） */
+  const currentOwner = users && users.length > 0 ? users[0] : undefined;
+
+  const openCreate = () => {
+    const owner = currentOwner;
+    if (!owner) return;
+    setEditing({ channel: owner.channel, userId: owner.userId });
     form.setFieldsValue({ name: '', agentId: localAgents[0]?.id ?? '', nodeId: '', key: '', cwd: '' });
     setOpen(true);
     void ops
@@ -103,8 +99,8 @@ export function TasksPage(props: {
       .catch(() => undefined);
   };
 
-  const openEdit = (channel: string, userId: string, t: TaskItem) => {
-    setEditing({ channel, userId, task: t });
+  const openEdit = (t: FlatTask) => {
+    setEditing({ channel: t.channel, userId: t.userId, task: t });
     form.setFieldsValue({
       name: t.name,
       agentId: t.agentId,
@@ -145,15 +141,29 @@ export function TasksPage(props: {
     setOpen(false);
   };
 
-  const columns = (u: UserTasks): ColumnsType<TaskItem> => [
+  /** 平铺所有任务：不带用户维度，仅保留归属与当前激活标记用于操作 */
+  const flatTasks = useMemo<FlatTask[]>(
+    () =>
+      (users ?? []).flatMap((u) =>
+        u.tasks.map((t) => ({
+          ...t,
+          channel: u.channel,
+          userId: u.userId,
+          active: u.activeTaskId === t.id,
+        })),
+      ),
+    [users],
+  );
+
+  const columns: ColumnsType<FlatTask> = [
     {
       title: '任务名',
       dataIndex: 'name',
       key: 'name',
       render: (name: string, t) => (
         <Space size={8}>
-          {u.activeTaskId === t.id ? <Tag color="success" style={{ borderRadius: 999 }}>当前</Tag> : null}
-          <span style={{ fontWeight: u.activeTaskId === t.id ? 600 : 400 }}>{name}</span>
+          {t.active ? <Tag color="success" style={{ borderRadius: 999 }}>当前</Tag> : null}
+          <span style={{ fontWeight: t.active ? 600 : 400 }}>{name}</span>
         </Space>
       ),
     },
@@ -197,8 +207,8 @@ export function TasksPage(props: {
             icon={<CommentOutlined />}
             onClick={() =>
               props.onOpenChat({
-                channel: u.channel,
-                userId: u.userId,
+                channel: t.channel,
+                userId: t.userId,
                 taskId: t.id,
                 taskName: t.name,
                 agentId: t.agentId,
@@ -210,12 +220,12 @@ export function TasksPage(props: {
           >
             对话
           </Button>
-          {u.activeTaskId !== t.id ? (
-            <Button size="small" disabled={busy} onClick={() => void withBusy(() => ops.activateTask(u.channel, u.userId, t.id), '已激活任务')}>
+          {!t.active ? (
+            <Button size="small" disabled={busy} onClick={() => void withBusy(() => ops.activateTask(t.channel, t.userId, t.id), '已激活任务')}>
               激活
             </Button>
           ) : null}
-          <Button size="small" onClick={() => openEdit(u.channel, u.userId, t)}>
+          <Button size="small" onClick={() => openEdit(t)}>
             编辑
           </Button>
           <Button
@@ -229,7 +239,7 @@ export function TasksPage(props: {
                 okText: '删除',
                 okButtonProps: { danger: true },
               });
-              if (ok) await withBusy(() => ops.deleteTask(u.channel, u.userId, t.id), '任务已删除');
+              if (ok) await withBusy(() => ops.deleteTask(t.channel, t.userId, t.id), '任务已删除');
             }}
           >
             删除
@@ -239,70 +249,40 @@ export function TasksPage(props: {
     },
   ];
 
-  const channelLabel = (ch: string): string => (ch === 'weixin' ? '微信' : ch);
-
-  const panels = (users ?? []).map((u) => ({
-    key: `${u.channel}:${u.userId}`,
-    label: (
-      <Space size={10}>
-        <Tag color={u.channel === 'weixin' ? 'green' : 'default'} style={{ borderRadius: 999, marginInlineEnd: 0 }}>
-          {channelLabel(u.channel)}
-        </Tag>
-        <span className="sub-muted" style={{ fontSize: 12 }}>终端标识</span>
-        <code className="code-cell" style={{ fontSize: 12.5 }}>
-          {u.userId}
-        </code>
-        <Badge count={u.tasks.length} style={{ background: '#1f2937', color: '#aebdd4' }} />
-        <span className="sub-muted">当前任务 {u.activeTaskId || '—'}</span>
-      </Space>
-    ),
-    extra: (
-      <Button
-        size="small"
-        type="primary"
-        ghost
-        icon={<PlusOutlined />}
-        onClick={(e) => {
-          e.stopPropagation();
-          openCreate(u.channel, u.userId);
-        }}
-      >
-        新建任务
-      </Button>
-    ),
-    children: (
-      <Table
-        rowKey="id"
-        size="small"
-        columns={columns(u)}
-        dataSource={u.tasks}
-        pagination={false}
-        rowClassName={(t) => (u.activeTaskId === t.id ? 'task-active-row' : '')}
-      />
-    ),
-  }));
-
   return (
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
-      <p className="page-desc" style={{ marginBottom: 14 }}>
-        这里按<strong>渠道终端</strong>（微信 openid 等）分组展示多轮会话任务，仅用于会话隔离与路由，<strong>不是系统账号</strong>。
-        点「对话」进入该任务的持久会话页。终端在首次发起渠道消息时自动建档；Chatbox 等 OpenAI 客户端用任务 Key / Token 直连，不在这里产生终端。
+      <p className="page-desc" style={{ marginBottom: 12 }}>
+        这里列出当前用户（admin）的全部多轮会话任务，用于会话隔离与路由。终端在首次发起渠道消息时自动建档；
+        点「对话」进入该任务的持久会话页。Chatbox 等 OpenAI 客户端用任务 Key / Token 直连，不在这里产生终端。
       </p>
       {users === null ? (
         <Table loading showHeader={false} pagination={false} rowKey="x" columns={[{ title: '', dataIndex: 'x' }]} dataSource={[]} />
       ) : users.length === 0 ? (
         <EmptyHint text="暂无任务（微信终端首次发消息后自动创建）" />
       ) : (
-        <Collapse
-          defaultActiveKey={users.map((u) => `${u.channel}:${u.userId}`)}
-          items={panels}
-          style={{ background: 'transparent' }}
-        />
+        <>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Tag color="blue" style={{ borderRadius: 999, marginInlineEnd: 0 }}>
+              共 {flatTasks.length} 个任务
+            </Tag>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建任务
+            </Button>
+          </Space>
+          <Table
+            rowKey={(t) => `${t.channel}:${t.userId}:${t.id}`}
+            size="small"
+            columns={columns}
+            dataSource={flatTasks}
+            pagination={false}
+            rowClassName={(t) => (t.active ? 'task-active-row' : '')}
+          />
+        </>
       )}
 
       <Modal
-        title={editing?.task ? `编辑任务 · ${editing.task.name}` : `新建任务（${editing?.userId ?? ''}）`}
+        title={editing?.task ? `编辑任务 · ${editing.task.name}` : '新建任务'}
         open={open}
         onCancel={() => setOpen(false)}
         onOk={() => void submit()}

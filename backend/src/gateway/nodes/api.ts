@@ -14,7 +14,9 @@ type HeaderReq = { headers: Record<string, string | string[] | undefined> };
  *   GET    /api/nodes                                  可见节点（管理员全部；其他人本机+自己的机器）
  *   POST   /api/nodes/:nodeId/approve                  批准待审批节点（仅管理员）
  *   POST   /api/nodes/:nodeId/reject                   拒绝待审批节点（仅管理员）
- *   DELETE /api/nodes/:nodeId                          删除离线/待审批节点（管理员或属主）
+ *   POST   /api/nodes/:nodeId/disable                  临时停用节点：在线则关闭连接，重连被拒（仅管理员）
+ *   POST   /api/nodes/:nodeId/enable                   恢复已停用节点（仅管理员）
+ *   DELETE /api/nodes/:nodeId                          删除离线/已停用节点（管理员或属主）
  *   GET    /api/users/:channel/:userId/preferences     用户默认节点+agent（仅预填，不鉴权）
  *   PUT    /api/users/:channel/:userId/preferences     保存用户默认节点+agent
  */
@@ -110,6 +112,35 @@ export function registerNodeApi(
     } catch (err) {
       const code = /在线/.test(err instanceof Error ? err.message : String(err)) ? 409 : 404;
       return reply.code(code).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/nodes/:nodeId/disable', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
+    const { nodeId } = request.params as { nodeId: string };
+    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可停用' });
+    const body = request.body as { reason?: string } | null | undefined;
+    try {
+      const node = nodeManager.disableNode(nodeId, body?.reason?.trim() || undefined);
+      return { node };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = /不存在/.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  app.post('/api/nodes/:nodeId/enable', async (request, reply) => {
+    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
+    const { nodeId } = request.params as { nodeId: string };
+    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可启用' });
+    try {
+      const node = nodeManager.enableNode(nodeId);
+      return { node };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = /不存在/.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
     }
   });
 

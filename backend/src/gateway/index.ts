@@ -6,7 +6,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { loadSharedConfig, persistDefaultTaskAgentId, resolveGatewayAuth } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
-import { getLayout } from '../install/layout.js';
+import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
 import { AgentInstallError, runAgentInstall } from './agents/installCli.js';
@@ -102,7 +102,12 @@ function chunkDelta(
   };
 }
 
-export async function buildServer(options?: { configPath?: string; definitions?: AgentDefinition[] }): Promise<{
+export async function buildServer(options?: {
+  configPath?: string;
+  definitions?: AgentDefinition[];
+  /** 隔离运行态根目录：所有 .runtime-state 子目录（tasks/users/nodes/prefs...）都写到这里。集成测试用，避免污染真实状态。 */
+  stateRoot?: string;
+}): Promise<{
   app: FastifyInstance;
   manager: AgentManager;
   pluginManager: PluginManager | null;
@@ -129,7 +134,8 @@ export async function buildServer(options?: { configPath?: string; definitions?:
   const definitions = options?.definitions ?? (gw.agents.length > 0 ? gw.agents : defaultAgentDefinitions());
 
   // 安装布局：形态判定（dev/dist）与所有运行态路径的唯一来源
-  const layout = getLayout();
+  // 测试可传 stateRoot 把运行态指到临时根（createInstallLayout 可传任意 root），避免集成测试污染真实 .runtime-state
+  const layout = options?.stateRoot ? createInstallLayout(options.stateRoot) : getLayout();
 
   // ── 鉴权：local/token/open；gateway token 配置优先，空则自动生成落盘（三进程共享）──
   const auth = resolveGatewayAuth(config, layout.gatewayTokenFile);
@@ -814,7 +820,11 @@ export async function buildServer(options?: { configPath?: string; definitions?:
     {
       reloadBot: weixinBot ? () => weixinBot.reload() : undefined,
       ...(weixinMode === 'external'
-        ? { reloadUnavailableMessage: `微信由进程管理器托管（external 模式），请重启 weixin 进程：${layout.restartWeixinHint}` }
+        ? {
+            reloadUnavailableMessage:
+              '微信由进程管理器托管（external 模式），请在管理后台「本机 · 进程」页对对应账号实例执行重启，' +
+              `或在本机运行 ${layout.restartWeixinHint}（多账号可用 pm restart weixin:<accountId>）`,
+          }
         : {}),
     },
   );

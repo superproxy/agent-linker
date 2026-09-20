@@ -221,11 +221,11 @@ export class WeixinClient {
     return (await res.json()) as WeixinStatus;
   }
 
-  async startQr(): Promise<WeixinQrResult> {
+  async startQr(accountId?: string): Promise<WeixinQrResult> {
     const res = await fetch(this.url('/api/weixin/qr'), {
       method: 'POST',
       headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ force: true }),
+      body: JSON.stringify({ force: true, ...(accountId ? { accountId } : {}) }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -234,10 +234,11 @@ export class WeixinClient {
     return (await res.json()) as WeixinQrResult;
   }
 
-  async qrStatus(sessionKey: string | undefined, timeoutMs = 8_000): Promise<WeixinQrStatus> {
+  async qrStatus(sessionKey: string | undefined, timeoutMs = 8_000, accountId?: string): Promise<WeixinQrStatus> {
     const q = new URLSearchParams();
     if (sessionKey) q.set('sessionKey', sessionKey);
     q.set('timeoutMs', String(timeoutMs));
+    if (accountId) q.set('accountId', accountId);
     const res = await fetch(this.url(`/api/weixin/qr/status?${q}`), { headers: this.authHeaders() });
     if (!res.ok) throw new Error(`weixin qr status ${res.status}`);
     return (await res.json()) as WeixinQrStatus;
@@ -716,6 +717,8 @@ export interface NodeInfo {
   lastSeenAt?: number;
   remoteAddress?: string;
   ownerUsername?: string;
+  /** 是否被管理员临时停用；true 时不参与路由，连接被关 */
+  disabled?: boolean;
 }
 
 /** 节点接入信息（/api/nodes/enroll）：用于生成 env 与启动命令 */
@@ -928,6 +931,23 @@ export class OpsClient {
       method: 'POST',
       body: JSON.stringify(reason ? { reason } : {}),
     });
+  }
+
+  /** 临时停用节点：在线则关连接，路由层忽略；后续重连被拒 */
+  async disableNode(nodeId: string, reason?: string): Promise<NodeInfo> {
+    const data = (await this.request(`/api/nodes/${encodeURIComponent(nodeId)}/disable`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    })) as { node: NodeInfo };
+    return data.node;
+  }
+
+  /** 解除停用：节点下次重连可恢复 */
+  async enableNode(nodeId: string): Promise<NodeInfo> {
+    const data = (await this.request(`/api/nodes/${encodeURIComponent(nodeId)}/enable`, {
+      method: 'POST',
+    })) as { node: NodeInfo };
+    return data.node;
   }
 
   /** 节点 + 其上可路由 agent（任务弹窗级联选择用） */

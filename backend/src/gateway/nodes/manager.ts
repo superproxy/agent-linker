@@ -166,19 +166,22 @@ export class NodeManager {
     return { kind: 'invalid' };
   }
 
-  /** 节点连接是否已准入且在线（待审批返回 false） */
+  /** 节点连接是否已准入且在线（待审批返回 false；被管理员禁用返回 false） */
   isOnline(nodeId: string): boolean {
+    if (this.registry.get(nodeId)?.disabled === true) return false;
     return this.connections.get(nodeId)?.approved === true;
   }
 
-  /** 取已准入节点链路（供 RemoteNodeAdapter）；待审批/离线/未知返回 undefined */
+  /** 取已准入且未被禁用的节点链路（供 RemoteNodeAdapter）；其他情形返回 undefined */
   getLink(nodeId: string): NodeLink | undefined {
+    if (this.registry.get(nodeId)?.disabled === true) return undefined;
     const conn = this.connections.get(nodeId);
     return conn?.approved ? conn : undefined;
   }
 
-  /** 已准入在线节点的自报 agent id 列表（任务绑定校验用） */
+  /** 已准入在线节点的自报 agent id 列表（任务绑定校验用，被禁用时返回空） */
   onlineAgentIds(nodeId: string): string[] {
+    if (this.registry.get(nodeId)?.disabled === true) return [];
     const conn = this.connections.get(nodeId);
     return conn?.approved ? conn.agents.map((a) => a.id) : [];
   }
@@ -202,11 +205,12 @@ export class NodeManager {
 
   private toInfo(rec: NodeRecord | undefined, conn: NodeConnection | undefined): NodeInfo {
     const status: NodeAdmissionStatus = rec?.status ?? 'approved';
+    const disabled = rec?.disabled === true;
     return {
       nodeId: rec?.nodeId ?? conn!.nodeId,
       name: conn?.name ?? rec?.name ?? rec?.nodeId ?? '',
-      // 待审批连接虽保活，但在路由意义上尚未上线
-      online: conn?.approved === true,
+      // 待审批连接虽保活，但在路由意义上尚未上线；被禁用同上
+      online: conn?.approved === true && !disabled,
       agents: conn?.agents ?? rec?.agents ?? [],
       version: conn?.version ?? rec?.version,
       status: conn && !conn.approved ? 'pending' : status,
@@ -214,6 +218,7 @@ export class NodeManager {
       lastSeenAt: conn?.lastSeenAt ?? rec?.lastSeenAt,
       remoteAddress: conn?.remoteAddress,
       ...(rec?.ownerUsername ? { ownerUsername: rec.ownerUsername } : {}),
+      ...(disabled ? { disabled: true } : {}),
     };
   }
 
@@ -277,6 +282,44 @@ export class NodeManager {
       this.connections.delete(nodeId);
     }
     this.logger.warn(`节点准入拒绝: ${nodeId}`);
+  }
+
+  /**
+   * 管理员临时停用节点（独立于 status/准入）：
+   *   - 持久化 disabled=true，路由层忽略该节点
+   *   - 在线连接立即关闭（节点凭 secret 重连仍被拒）
+   *   - 待审批连接也立即关闭（避免继续保活）
+   * 返回更新后的 NodeInfo
+   */
+  disableNode(nodeId: string, reason = '管理员停用该节点'): NodeInfo {
+    const rec = this.registry.get(nodeId);
+    if (!rec) throw new Error(`节点不存在: ${nodeId}`);
+    const next: NodeRecord = { ...rec, disabled: true, lastSeenAt: Date.now() };
+    this.registry.upsert(next);
+    const conn = this.connections.get(nodeId);
+    const wasApproved = conn?.approved === true;
+    if (conn) {
+      this.send(conn.ws, { type: 'rejected', reason });
+      try {
+        conn.ws.close(4408, 'disabled');
+      } catch {
+        conn.ws.terminate();
+      }
+    }
+    this.logger.warn(`节点停用: ${nodeId}`);
+    if (wasApproved) this.emitChange(nodeId, false);
+    return this.toInfo(next, conn);
+  }
+
+  /** 解除停用；不主动连，等节点下次凭 secret/令牌重连；已为启用态时幂等 */
+  enableNode(nodeId: string): NodeInfo {
+    const rec = this.registry.get(nodeId);
+    if (!rec) throw new Error(`节点不存在: ${nodeId}`);
+    if (rec.disabled !== true) return this.toInfo(rec, this.connections.get(nodeId));
+    const next: NodeRecord = { ...rec, disabled: false, lastSeenAt: Date.now() };
+    this.registry.upsert(next);
+    this.logger.info(`节点启用: ${nodeId}`);
+    return this.toInfo(next, this.connections.get(nodeId));
   }
 
   /** 为已准入在线节点的每个自报 agent 创建远程适配器 */
@@ -384,6 +427,19 @@ export class NodeManager {
     // 3) 节点凭证（nodeId + secret）重连
     const requested = hello.nodeId?.trim();
     const rec = requested && NODE_ID_PATTERN.test(requested) ? this.registry.get(requested) : null;
+
+    // 被管理员临时停用：所有重连入口（token / node / secret）一律拒绝
+    if (rec?.disabled === true) {
+      this.send(ws, { type: 'rejected', reason: '该节点已被管理员停用' });
+      try {
+        ws.close(4408, 'disabled');
+      } catch {
+        ws.terminate();
+      }
+      this.logger.warn(`被禁用节点 ${rec.nodeId} 尝试重连，关闭`);
+      return;
+    }
+
     if (rec && rec.secret && secretEqual(hello.secret, rec.secret)) {
       const status = rec.status ?? 'approved';
       if (status === 'blocked') {

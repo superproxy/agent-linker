@@ -311,7 +311,105 @@ flowchart TD
 - 任务工作目录 `cwd` 落在执行节点（远程任务的文件操作发生在节点机）；
 - 用户默认偏好（PrefsStore）仅用于控制台新建任务时**预填**节点/agent，不参与任何鉴权。
 
-### 6.3 离线语义（不漂移）
+#### 6.2.1 用户初始化的默认任务建档触发点
+
+每个 `channel/userId` 的 `UserTasks` 在「**没有状态文件**」或「**所有任务被删空**」两种情况下，都需要自动建档一个 `default` 任务，保证 bot / OpenAI 客户端 / 控制台进来就能聊。检查入口是 `TaskService.load(channel, userId)`：读 store；存在则惰性补 `key/keyEnabled/nodeId/cwd`；不存在则构造 `default` 任务（含 key、初始 `agentId`/`nodeId`，按 `gateway.tasks.workspaceDir` 决定是否分配 cwd）落盘。
+
+触发点（按代码路径列出）：
+
+| 触发路径 | 落点 | 触发语义 |
+|---|---|---|
+| `POST /api/channel-tokens/ensure` | `users/channel-token-api.ts` L60 | 管理员为某渠道用户签发 token，立刻建档 |
+| `POST /api/channel-tokens/rotate` | 同上 L72 | 轮换 token 后立刻建档 |
+| `POST /api/bot/channel-token` | 同上 L106 | bot 进程首次引导换取用户 token 时建档 |
+| 消息路由 lockedTask 路径 | `tasks/api.ts` L296 | `decideTaskRouting` 兜底 |
+| 消息路由 taskKey 直连 | 同上 L324 | 同上 |
+| 消息路由 三元素 (channel+userId) | 同上 L349 | 同上（仅微信渠道进入） |
+| `TaskService.deleteTask` 删除最后一个非 default 任务 | `tasks/service.ts` L238-248 | 若 default 也被删，自动重建 default 任务 |
+
+**不触发的路径**：
+
+- `pat_` / admin 创建账号（`UserStore.createUser` / `PersonalTokenStore.ensure`）：没有 `channel/userId` 概念，与任务机制解耦；管理员用控制台/CLI 建账号后，用户首次通过 ct_ / 三元素接入才会建档。
+- `TaskService.deleteUser`（§6.4 关联）：一次性清空用户全部任务与状态；清空后下一次消息按 `load()` 重新建档，与上述触发点一致。
+- `TaskService.setDefaultAgentId`（管理后台改默认 agent）：仅影响**新建用户** / **重建 default** 时的初始 agentId；存量 default 是各自快照，不被批量改写。
+
+### 6.3 任务级 skill 注入（linkagent-tasks）
+
+让该任务调度的用户 agent（opencode / pi 等）原生具备「任务管理」能力。每个任务的
+工作目录（§6.2 `TaskItem.cwd`，由 `gateway.tasks.workspaceDir` 配置隔离；未配时该特性整体跳过）
+下同步写入两份配套文件：
+
+| 文件 | 内容 | 写入时机 | 写入方 |
+|---|---|---|---|
+| `.skills/linkagent-tasks/SKILL.md` | **通用模板**：教 agent 怎么调 `/api/tasks`，curl 示例里的 `baseUrl / channel / userId / token` 占位从 `.linkagent/identity.json` 取（不再写死示例 token） | `TaskService.load()` / `createTask()` 同步写一次 | `TaskService` |
+| `.linkagent/identity.json` | per-task 渲染：`{ baseUrl, channel, userId, taskId, taskKey, tokenKind: 'personal' \| 'channel', token }` | 同上；`setTaskAgent` / `setTaskNode` / `setTaskCwd` 等字段变更**不重写**（agent 已读，无需重建） | 同上 |
+
+**承载形式**：写到 cwd 下而非 prompt 注入——不依赖特定 agent 的 system prompt 支持；
+与各 agent 自带的 skills 目录约定解耦（`.skills/` 是约定俗成路径，是否扫描由各 agent
+自行决定；网关只保证文件存在 + 内容正确）。
+
+**Token 注入**：模板 + 身份文件——`SKILL.md` 是只读副本（仓库维护
+`skills/linkagent-tasks/SKILL.md` 单一一份），改 token 只需重写
+`.linkagent/identity.json`，不动 SKILL.md；改 SKILL.md 内容只需升级仓库源文件 +
+手动触发 skill 重写（见 §6.3.2 守卫落点）。
+
+**默认 token 选取**：`pat_`（真实账号）或 `ct_`（渠道终端），**不写**任务级
+`k_` —— `k_` 是任务级凭据（单任务直连），用它调 `/api/tasks` 只能管自己一个任务，
+不符合 skill 「用户级身份管理全部任务」的语义。改写 token 时：
+
+- `pat_`：`users/personal-token-store.ensure(username)` 幂等获取；新建账号同步触发；
+- `ct_`：`users/channel-token-store.issue(channel, userId)` 同理。
+
+#### 6.3.1 Skill 路径请求的鉴权约束
+
+带特殊 header `X-LinkAgent-Skill: 1` 的 `/api/tasks*` 请求**只允许**凭 `pat_` /
+`ct_` 通过，`k_` 一律 403。理由：skill 能力由 agent 在工作目录内触发，可能跨任务
+持有 `k_` 越权；强制真实身份保证 skill 调 API 的语义始终是「本人账号视角」。
+
+`decideTaskRouting` 同步识别该 header：命中时把 `input.lockedTask` 置为
+`undefined`（**不接受** taskKey 直连路径），强制走三元素路由或 legacy。
+
+#### 6.3.2 守卫落点
+
+- 网关入口（`backend/src/gateway/index.ts`）注册 `/api/tasks*` 时按
+  `request.headers['x-linkagent-skill']` 判别，命中后从 `auth` 取 `personal`
+  或 `session`（= `ct_`）态凭据；其他凭据（`k_`、local、静态 token、admin）一律 403。
+- `auth/me` / `auth/whoami` 不受影响（skill 模式只针对 `/api/tasks*` 写入/读出）。
+- 静态 token 本身是机器身份，与 skill「用户视角」语义不符，一并禁止。
+
+#### 6.3.3 不改的东西
+
+- 任务存储结构 `TaskItem` 不新增字段（skill 文件落盘在 cwd，运行时计算）。
+- 不动 `legacy` 路径（Chatbox 等接入仍走原 taskKey / 三元素路由）。
+- 不强制 agent 客户端使用 skill（agent 是否读 `.skills/` 是各 agent 自己的事；
+  网关只保证 skill 文件在那里 + token 正确）。
+- 不引入新鉴权凭据类型（`pat_` / `ct_` 已有）。
+- 仓库根 `skills/linkagent-tasks/SKILL.md` **保留**为外部编码助手（Claude Code /
+  Codex 等）的 skill 文档；cwd 注入的 SKILL.md 是它的副本（去除 curl 示例中的占位
+  token、改读 `.linkagent/identity.json`）。
+
+### 6.4 任务路由的节点来源（设计判断）
+
+Chatbox 等外部客户端接入必须携带 `taskKey`（见 §4.2 协议字段与 §5.1 请求处理流程），
+路由层 `decideTaskRouting` 根据 `taskKey` 全局反查到 `{channel, userId, task}` 三元组，
+**任务必有 `nodeId`** —— 任务管理创建/维护时设置，缺省归一化为 `local`（见 §6.1），
+因此「任务未指定 node、需在路由层随机挑选支持该 agent 的节点」这一 Chatbox 场景不存在。
+
+三种路由路径的节点来源约束：
+
+| 路由路径 | 触发条件 | `nodeId` 来源 |
+|---|---|---|
+| `taskKey` 直连 | 客户端携带 `taskKey`（任意客户端，含 Chatbox） | 反查到的任务 `nodeId`（可为 `local` 或显式远程节点） |
+| 三元素路由 | 客户端携带 `channel`（仅 weixin 白名单） + `userId` | 激活任务的 `nodeId` |
+| legacy | 无 `taskKey` 且无白名单 `channel` | 恒为 `local`（oneshot 路径，见 §5.1） |
+
+> 显式指定节点的场景（任务 `nodeId` 为某远程节点）：保持任务绑定的稳定性，不在路由层
+> 做随机漂移；节点离线按 §6.5 失败，不静默换机。
+>
+> 任务 `nodeId` 为 `local` 的场景：本机直出，不引入"随机选节点"逻辑；目的是保持本机兜底语义
+> 不被运行时随机化改变，避免后续节点管理与任务绑定语义分叉。
+
+### 6.5 离线语义（不漂移）
 
 | 场景 | 非流式 | 流式 SSE |
 |---|---|---|
@@ -379,3 +477,38 @@ stateDiagram-v2
   控制台 5s 轮询刷新，聊天台对离线路由置灰并在发送前拦截。
 - 扩展新 agent：在节点机安装对应 CLI 并加入 `LINKAGENT_NODE_AGENTS` 自报即可，无需改网关。
 - 协议演进：`shared/src/node.ts` 为前后端/网关节点共享的唯一类型源，新增可选字段保持向后兼容。
+
+---
+
+## 11. 决策记录（ADR）
+
+### ADR-001：微信渠道暂不支持机器人主动发送图片（2026-09-20）
+
+**背景**：摄像头拍照（`imagesnap`，照片存 `/tmp/home.jpg`）后，希望由网关通过个人微信把图片自动发出。
+
+**结论**：一期不做微信机器人主动发图。
+
+**依据**：
+
+- 微信渠道出站回推目前只实现纯文本：`backend/src/channels/ilink-client.ts` 的 `sendText`（`message_item` 仅 `TEXT`）。
+- ilink 协议虽定义了 `MessageItemType.IMAGE=2` 与入站 `image_item.url`，但仓库内**没有图片上传/发图接口**（入站可收图，出站缺「先上传拿 url 再推送」的链路）。
+- FaceTime 是独立系统，只能在视频通话中拍摄 Live Photo，无法把图片投递到微信，不能作为替代通道。
+
+**临时方案**：拍照后用预览打开/复制到桌面，由人工拖进微信发送。
+
+**后续启用条件**：拿到 ilink 图片上传 API 的协议资料后，在 `ilink-client.ts` 增加「上传图片 → 取 url → 以 `image_item` 推送」能力，并在拍照流程中调用；需同步补测试。
+
+### ADR-002：微信联系人个性化称呼回复规则（2026-09-20，待实现）
+
+**需求**：以下微信联系人被点名/发消息时，机器人按对应称呼回复：
+
+| 联系人 | 回复语 |
+|---|---|
+| 慧慧 | 官人 |
+| 婷婷 | 姐夫好 |
+| 44 | 饭友好 |
+
+**备注**：
+
+- 「44」「饭友好」为语音转写，原文用字待核实。
+- 当前仅记录规则，尚未实现；实现时在微信渠道（`backend/src/channels/weixin-bot.ts`）增加「联系人 → 回复语」映射层，命中后优先于默认对话流程返回对应文本；规则建议落盘到共享配置（`shared/src/config.ts`）以便后台管理，并补测试。

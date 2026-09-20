@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { ACP_AGENT_KINDS, defaultAgentDefinitions } from '@linkagent/shared';
 import type { AgentDefinition } from '@linkagent/shared';
 import { AgentManager } from '../../src/gateway/agents/manager.js';
+import { AcpWrapper } from '../../src/gateway/agents/acpWrapper.js';
 
 function freshManager(definitions: AgentDefinition[] = defaultAgentDefinitions()): AgentManager {
   return new AgentManager({
@@ -80,5 +81,32 @@ test('addAgent：id 重复 / 未知类型抛错', async () => {
     () => m.addAgent({ id: 'ghost', type: 'not-a-kind' } as unknown as AgentDefinition),
     /未知 agent 类型/,
   );
+  await m.dispose();
+});
+
+test('addAgent：definition.permissionPolicy 透传到 adapter（策略定义层，渠道共用）', async () => {
+  const m = freshManager();
+  await m.start();
+  const policy = {
+    autoApprove: ['bash:read', 'edit:read'],
+    autoDeny: ['bash:write'],
+    defaultAction: 'deny',
+  } as const;
+  m.addAgent({
+    id: 'codex',
+    type: 'codex',
+    displayName: 'Codex',
+    description: 'test',
+    permissionPolicy: policy,
+  });
+  const adapter = m.resolve('agent:codex');
+  assert.ok(adapter, 'resolve 应命中');
+  assert.ok(adapter instanceof AcpWrapper);
+  assert.deepEqual((adapter as AcpWrapper).permissionPolicy, policy);
+
+  // 未配策略的默认定义：undefined（跟随 permissionMode 兜底）
+  const plain = m.resolve('agent:opencode');
+  assert.ok(plain);
+  assert.equal((plain as AcpWrapper).permissionPolicy, undefined);
   await m.dispose();
 });

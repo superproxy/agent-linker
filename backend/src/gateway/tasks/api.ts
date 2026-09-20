@@ -218,11 +218,17 @@ export function registerTaskApi(
   });
 
   // DELETE /api/tasks/:taskId?channel=&userId=
+  // 管理凭据可删任意任务；渠道用户级凭据（ct_ token）只能删自己的（scope 校验）
   app.delete('/api/tasks/:taskId', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const params = request.params as { taskId: string };
     const query = request.query as { channel?: string; userId?: string };
     if (!query.channel || !query.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
+    if (!checkAuth(request)) {
+      const scope = resolveChannelScope?.(request);
+      if (!scope || scope.channel !== query.channel || scope.userId !== query.userId) {
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+    }
     if (!ensureTaskChannel(query.channel, reply)) return { error: `渠道 ${query.channel} 不支持任务机制（活动任务仅微信渠道）` };
     if (params.taskId === DEFAULT_TASK_ID) return reply.code(400).send({ error: '默认任务不可删除' });
     const state = service.load(query.channel, query.userId);

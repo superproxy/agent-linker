@@ -13,10 +13,11 @@
  *   2. gateway 内嵌：config.yaml 里 weixin.mode=weixin-bot（默认），gateway 启动后自动拉起本模块，
  *      与插件方式二选一，避免同时跑两套个人微信通道。
  *
- * 环境变量（独立进程模式）：
+ * 环境变量（独立进程模式；supervisor 托管时 LINKAGENT_GATEWAY_URL/TOKEN 会被显式置空屏蔽，
+ * 回连地址只认共享 config 的 weixin.gatewayUrl 或本机网关推导）：
  *   LINKAGENT_GATEWAY_URL    网关 base（默认 http://127.0.0.1:8787）
  *   LINKAGENT_GATEWAY_MODEL  模型（默认 agent:pi）
- *   LINKAGENT_GATEWAY_TOKEN  网关静态 token（网关开启 auth 时必填，进程管理器会自动注入）
+ *   LINKAGENT_GATEWAY_TOKEN  网关静态 token（网关开启 auth 时必填；托管时进程自读共享配置）
  *   LINKAGENT_ACCOUNT_ID     微信登录态账号 id（缺省取 accounts/ 下第一个）
  *   LINKAGENT_STATE_DIR      登录态目录（默认 <repo>/.runtime-state/plugins）
  */

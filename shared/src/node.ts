@@ -33,6 +33,11 @@ export interface NodeInfo {
   remoteAddress?: string;
   /** 用户颁发机器 token 接入时的属主登录名；网关 token / 匿名审批接入可为空 */
   ownerUsername?: string;
+  /**
+   * 是否被管理员临时停用：true 时不参与路由（resolveForRouting 走 'offline'），重连时被关
+   * ——独立于 status（准入），用于"暂不可用、可恢复"语义
+   */
+  disabled?: boolean;
 }
 
 /**

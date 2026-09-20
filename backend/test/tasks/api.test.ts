@@ -222,6 +222,74 @@ test('/api/tasks: 删除 default 拒绝（400）', async () => {
   }
 });
 
+test('/api/tasks DELETE: 渠道用户凭据可删自己的任务；越权/无凭据 401', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  // 管理凭据（Bearer admin）可全量操作；渠道用户凭据 ct_wx_9 只能删自己
+  registerTaskApi(
+    app,
+    svc,
+    (req) => (req.headers as Record<string, string | undefined>).authorization === 'Bearer admin',
+    undefined,
+    (req) => {
+      const h = (req.headers as Record<string, string | undefined>).authorization ?? '';
+      return h === 'Bearer ct_wx_9' ? { channel: 'weixin', userId: 'wx_9' } : null;
+    },
+  );
+  await app.ready();
+  try {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'weixin', userId: 'wx_9', name: '自己的', agentId: 'pi' },
+      headers: { authorization: 'Bearer admin' },
+    });
+    assert.equal(created.statusCode, 200);
+    const task = created.json();
+
+    // 持 wx_9 凭据：可删自己的任务
+    const own = await app.inject({
+      method: 'DELETE',
+      url: `/api/tasks/${task.id}?channel=weixin&userId=wx_9`,
+      headers: { authorization: 'Bearer ct_wx_9' },
+    });
+    assert.equal(own.statusCode, 200);
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/tasks?channel=weixin&userId=wx_9',
+      headers: { authorization: 'Bearer admin' },
+    });
+    assert.equal(list.json().tasks.length, 1); // 只剩 default
+
+    // 越权：wx_9 凭据删他人（wx_2）任务 → 401，任务不受影响
+    const other = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'weixin', userId: 'wx_2', name: '别人的', agentId: 'pi' },
+      headers: { authorization: 'Bearer admin' },
+    });
+    const otherTask = other.json();
+    const forbidden = await app.inject({
+      method: 'DELETE',
+      url: `/api/tasks/${otherTask.id}?channel=weixin&userId=wx_2`,
+      headers: { authorization: 'Bearer ct_wx_9' },
+    });
+    assert.equal(forbidden.statusCode, 401);
+    const otherList = await app.inject({
+      method: 'GET',
+      url: '/api/tasks?channel=weixin&userId=wx_2',
+      headers: { authorization: 'Bearer admin' },
+    });
+    assert.equal(otherList.json().tasks.find((t: { id: string }) => t.id === otherTask.id).name, '别人的');
+
+    // 无任何凭据 → 401
+    const anon = await app.inject({ method: 'DELETE', url: '/api/tasks/default?channel=weixin&userId=wx_9' });
+    assert.equal(anon.statusCode, 401);
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
 test('/api/tasks/all: 返回全部用户任务明细（管理后台任务页）', async () => {
   const app = await freshApp();
   try {

@@ -1,0 +1,4 @@
+{
+  "defaultPermissions": "approve-all",
+  "nonInteractivePermissions": "deny"
+}

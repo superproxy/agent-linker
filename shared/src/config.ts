@@ -1,8 +1,22 @@
 import { z } from 'zod';
-import { ACP_AGENT_KINDS, ACP_PERMISSION_MODES } from './adapter.js';
+import { ACP_AGENT_KINDS, ACP_PERMISSION_MODES, ACP_PERMISSION_POLICY_ACTIONS } from './adapter.js';
 import type { AgentDefinition } from './adapter.js';
 
-export type { AcpPermissionMode, NonInteractivePermissionPolicy, AgentDefinition } from './adapter.js';
+export type { AcpPermissionMode, NonInteractivePermissionPolicy, PermissionPolicySpec, PermissionPolicyAction, AgentDefinition } from './adapter.js';
+
+/** ACP 工具权限策略配置（对应 acpx createAcpRuntime 的 permissionPolicy） */
+export const permissionPolicySchema = z
+  .object({
+    /** 命中即自动放行的工具名（支持精确/子串匹配） */
+    autoApprove: z.array(z.string()).optional(),
+    /** 命中即自动拒绝的工具名（优先级高于 autoApprove） */
+    autoDeny: z.array(z.string()).optional(),
+    /** 命中即升级为需审批的工具名（网关无审批 UI，等同拒绝） */
+    escalate: z.array(z.string()).optional(),
+    /** 未命中任何规则时的兜底动作 */
+    defaultAction: z.enum(ACP_PERMISSION_POLICY_ACTIONS).optional(),
+  })
+  .optional();
 
 export const agentDefSchema = z.object({
   id: z.string().min(1),
@@ -12,6 +26,8 @@ export const agentDefSchema = z.object({
   cwd: z.string().optional(),
   // 缺省值在 AcpWrapper 侧兜底为 approve-reads（与 AgentDefinition.permissionMode 的 optional 一致）
   permissionMode: z.enum(ACP_PERMISSION_MODES).optional(),
+  // ACP 工具权限策略（优先于 permissionMode）；所有渠道（/v1、微信/企微 bot、openclaw 插件）共用同一定义层
+  permissionPolicy: permissionPolicySchema,
   env: z.record(z.string(), z.string()).optional(),
   command: z.array(z.string()).optional(),
   model: z.string().optional(),
@@ -84,6 +100,12 @@ export const weixinSectionSchema = z
     mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).default('weixin-bot'),
     /** 登录态账号 id（缺省取 accounts/ 下第一个） */
     accountId: z.string().default(''),
+    /**
+     * 多账号：账号 id 白名单（外部进程托管时生效，每个账号一个独立 bot 进程，
+     * 实例 id weixin:<accountId>，pid/日志独立，互不干扰）。
+     * 留空 = 单实例（跑 accountId 或 accounts/ 下第一个账号），保持旧行为。
+     */
+    accounts: z.array(z.string().min(1)).default([]),
     /** 对话模型（默认 agent:pi） */
     model: z.string().default('agent:pi'),
     /** 网关 base；缺省由 gateway.server 推导（0.0.0.0/:: 归一化到 127.0.0.1） */
@@ -91,7 +113,15 @@ export const weixinSectionSchema = z
     /** 回连网关的永久 token；缺省取 gateway.auth.token 或自动生成的 gateway-token */
     gatewayToken: z.string().default(''),
   })
-  .default({ enabled: true, mode: 'weixin-bot', accountId: '', model: 'agent:pi', gatewayUrl: '', gatewayToken: '' });
+  .default({
+    enabled: true,
+    mode: 'weixin-bot',
+    accountId: '',
+    accounts: [],
+    model: 'agent:pi',
+    gatewayUrl: '',
+    gatewayToken: '',
+  });
 export type WeixinSection = z.infer<typeof weixinSectionSchema>;
 
 /** node（executor）执行器进程段：本机/远程节点连接器 */

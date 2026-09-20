@@ -125,20 +125,28 @@ export class WeixinLoginService {
     return weixinChannel;
   }
 
-  /** 发起扫码登录：返回登录链接内容 + sessionKey（由调用方渲染二维码） */
-  async startQr(force = true): Promise<{ sessionKey?: string; qrContent: string }> {
+  /** 发起扫码登录：返回登录链接内容 + sessionKey（由调用方渲染二维码）；accountId 指定回写的账号文件 */
+  async startQr(force = true, accountId?: string): Promise<{ sessionKey?: string; qrContent: string }> {
     const h = await this.handle();
-    const start = await h.gateway.loginWithQrStart({ force, verbose: false });
+    const start = await h.gateway.loginWithQrStart({
+      force,
+      verbose: false,
+      ...(accountId ? { accountId } : {}),
+    });
     if (!start.qrDataUrl) {
       throw new Error(`获取二维码失败：${start.message ?? '未知错误'}`);
     }
     return { sessionKey: start.sessionKey, qrContent: start.qrDataUrl };
   }
 
-  /** 轮询扫码结果（阻塞到确认或超时） */
-  async waitQr(sessionKey?: string, timeoutMs = 8_000): Promise<QrWaitResult> {
+  /** 轮询扫码结果（阻塞到确认或超时）；accountId 需与 startQr 一致，确保回写目标账号 */
+  async waitQr(sessionKey?: string, timeoutMs = 8_000, accountId?: string): Promise<QrWaitResult> {
     const h = await this.handle();
-    const wait = await h.gateway.loginWithQrWait({ sessionKey, timeoutMs });
+    const wait = await h.gateway.loginWithQrWait({
+      sessionKey,
+      timeoutMs,
+      ...(accountId ? { accountId } : {}),
+    });
     return {
       connected: wait.connected === true,
       accountId: wait.accountId,
@@ -175,9 +183,9 @@ export function registerWeixinApi(
 
   app.post('/api/weixin/qr', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    const body = (request.body ?? {}) as { force?: boolean };
+    const body = (request.body ?? {}) as { force?: boolean; accountId?: string };
     try {
-      const { sessionKey, qrContent } = await service.startQr(body.force !== false);
+      const { sessionKey, qrContent } = await service.startQr(body.force !== false, body.accountId);
       let qrDataUrl: string | undefined;
       try {
         qrDataUrl = await qrDataUrlOf(qrContent);
@@ -192,10 +200,10 @@ export function registerWeixinApi(
 
   app.get('/api/weixin/qr/status', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    const q = request.query as { sessionKey?: string; timeoutMs?: string };
+    const q = request.query as { sessionKey?: string; timeoutMs?: string; accountId?: string };
     try {
       const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 30_000);
-      return await service.waitQr(q.sessionKey, timeoutMs);
+      return await service.waitQr(q.sessionKey, timeoutMs, q.accountId);
     } catch (err) {
       return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }

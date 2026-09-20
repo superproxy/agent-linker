@@ -20,6 +20,12 @@ import { AcpEngine, DEFAULT_LABELS, type AcpAgentKind } from '../gateway/agents/
  *   LINKAGENT_NODE_AGENTS  逗号分隔的 agent id（缺省上报网关默认：opencode/pi/workbuddy/trace-cli/cursor）
  *   LINKAGENT_NODE_STATE_DIR 节点状态目录（默认 .runtime-state/node；本机多实例时各自指定可避免 nodeId 冲突）
  *
+ * 两种运行场景（agent 来源不同）：
+ *   - 本机节点（supervisor 托管，config.yaml node.enabled=true 经 pm start 拉起）：
+ *     管理器会把 LINKAGENT_NODE_AGENTS 置空，只认共享 config 的 node.agents（缺省内置默认），环境变量不生效；
+ *   - 独立节点（node:connect / node:start / node.env 启动）：
+ *     环境变量优先，其次 config.node.agents，最后内置默认。
+ *
  * 两种准入方式：
  *   1) 令牌直连：LINKAGENT_GATEWAY_TOKEN 与网关 auth.token 一致，连上即上线；
  *   2) 审批接入：不提供 token，首次连接进入网关「待审批」队列，管理员在后台批准后才上线。
@@ -291,6 +297,8 @@ function main(): void {
     { url: process.env.LINKAGENT_GATEWAY_URL, token: process.env.LINKAGENT_GATEWAY_TOKEN },
   );
 
+  // supervisor 托管的本机节点会把 LINKAGENT_NODE_AGENTS 置空（空串走 falsy 分支），
+  // 因此本机节点只走 config.node.agents / 内置默认，环境变量不生效；独立节点仍环境变量优先。
   const envAgents = process.env.LINKAGENT_NODE_AGENTS
     ? process.env.LINKAGENT_NODE_AGENTS.split(',').map((s) => s.trim()).filter(Boolean)
     : null;

@@ -13,7 +13,10 @@
 - **任务（Task）模型**：可为每个渠道用户创建多个任务，各自绑定「机器（节点）+ agent + 工作目录」，任务 key（`k_`）直连锁定路由。
 - **Agent 是「按机器开通」的，不是全局配置**：
   - **本机节点 `local`**：agent 来自 `config.yaml` 的 `gateway.agents`，由网关进程在本机拉起；后台可启停、切模型、设为新任务默认（`GET /api/agents/by-node` 返回完整可编辑运行态）。
+  - **Agent 工具权限策略（`permissionPolicy`）**：agent 定义可配 `permissionPolicy`（`autoApprove`/`autoDeny`/`escalate`/`defaultAction`，按工具名匹配，优先于 `permissionMode`）。策略挂在本机 agent 定义层，**微信/企微 bot、openclaw 插件任务与 `/v1` 共用同一策略**——渠道消息按路由「代入」agentId（微信侧判断激活任务/默认 agent），最终都汇聚到网关定义层执行，不会因渠道不同而绕过。
   - **远程机器**：每台跑节点连接器（`backend/src/node/connector.ts`），用环境变量 `LINKAGENT_NODE_AGENTS`（或 `config.node.agents`）声明**本机开通了哪些 agent**，WebSocket 握手时自报注册；网关侧**只读**，不能远程改动其开通情况（需在该机器调整后重连生效）。
+  - **本机节点（supervisor 托管）不读环境变量**：`config.yaml node.enabled=true` 经进程管理器拉起的本机 node 连接器，其 agent 只认共享 config 的 `node.agents`（缺省内置默认），`LINKAGENT_NODE_AGENTS` 被管理器显式屏蔽——shell/systemd/docker 里残留的环境变量不会隐式改变本机节点上线内容；独立节点脚本/命令仍可用该环境变量。
+  - **本机进程回连地址只认本地配置**：supervisor 托管的本机 weixin / node 进程同样显式屏蔽 `LINKAGENT_GATEWAY_URL` / `LINKAGENT_GATEWAY_TOKEN`——回连地址只认共享 config 的 `weixin.gatewayUrl` / `node.gatewayUrl`（未配置则由 `gateway.server` 推导本机地址），残留环境变量不会把本机 bot/节点带到远程网关；独立进程（`node:connect`、直接跑 `weixin-bot`）仍环境变量优先。
   - 路由只在「在线且已自报该 agent」的节点上成立；离线节点不参与可路由列表。
 
 ## 多机器接入与审批
@@ -24,7 +27,8 @@
 
 - **个人微信 / 企业微信**：两种实现形态——插件运行时（openclaw 插件）或网关内嵌/独立进程的 botAgent（`channels/weixin-bot.ts`、`wecom-bot.ts`）。
 - `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起）。
-- 支持扫码登录、登录态热重启；渠道用户自动签发作用域凭据（`ct_`）。
+- **多账号**：`external` 模式下配置 `weixin.accounts`（账号 id 白名单），进程管理器为每个账号拉起独立 bot 进程（实例 `weixin:<accountId>`，pid/日志/登录态相互隔离）；后台「本机 · 进程」页可单独启停/重启/看日志，CLI 用 `pm start/stop/restart weixin:<accountId>`。未配置 `accounts` 保持单实例（跑 `accountId` 或第一个账号）。
+- 支持扫码登录、登录态热重启（内嵌模式）；渠道用户自动签发作用域凭据（`ct_`）。
 
 ## 管理后台（web /ui）
 

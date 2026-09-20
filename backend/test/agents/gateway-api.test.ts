@@ -1,11 +1,22 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildServer } from '../../src/gateway/index.js';
 
 type Built = Awaited<ReturnType<typeof buildServer>>;
 
+/** 集成测试临时状态根目录（after hook 统一清理），避免污染真实 .runtime-state */
+const TMP_ROOTS: string[] = [];
+after(() => {
+  for (const root of TMP_ROOTS) rmSync(root, { recursive: true, force: true });
+});
+
 async function freshBuilt(definitions: { id: string; type: string; displayName: string }[]): Promise<Built> {
-  return buildServer({ configPath: 'test/fixtures/gateway.test.yaml', definitions: definitions as never });
+  const stateRoot = mkdtempSync(join(tmpdir(), 'linkagent-agents-'));
+  TMP_ROOTS.push(stateRoot);
+  return buildServer({ configPath: 'test/fixtures/gateway.test.yaml', definitions: definitions as never, stateRoot });
 }
 
 test('GET /api/agents/catalog：返回全部支持类型与配置状态', async () => {

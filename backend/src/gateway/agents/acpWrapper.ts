@@ -61,6 +61,7 @@ export class AcpWrapper implements AgentAdapter {
       displayName: options.definition.displayName,
       description: options.definition.description,
       permissionMode: options.definition.permissionMode,
+      permissionPolicy: options.definition.permissionPolicy,
       env: options.definition.env,
       verbose: options.verbose,
       persistentIdleTimeoutMs: options.persistentIdleTimeoutMs ?? DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS,
@@ -70,6 +71,11 @@ export class AcpWrapper implements AgentAdapter {
   /** agent 后端类型（opencode / pi / workbuddy / trace-cli / cursor 等 ACP_AGENT_KINDS） */
   get type(): AcpAgentKind {
     return this.engine.agentName;
+  }
+
+  /** 生效中的工具权限策略（definition.permissionPolicy 透传值） */
+  get permissionPolicy(): AcpEngine['permissionPolicy'] {
+    return this.engine.permissionPolicy;
   }
 
   /** 当前生效的会话模型：运行时切换值优先，未切换则用 definition.model */

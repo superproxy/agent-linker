@@ -1,11 +1,11 @@
 /**
  * 进程管理 REST（管理员可用，操作的是当前这台网关进程）：
  *   GET  /api/system/info        网关只读信息 + 是否本机回环访问
- *   GET  /api/pm/status          gateway / weixin / node 运行态
- *   POST /api/pm/start           { targets: ['weixin'|'node'] }（不允许经 web 拉起 gateway）
- *   POST /api/pm/stop            { targets: ['weixin'|'node'] }（不允许经 web 停止 gateway）
+ *   GET  /api/pm/status          gateway / weixin（含 weixin:<id> 多账号实例）/ node 运行态
+ *   POST /api/pm/start           { targets: ['weixin'|'weixin:<id>'|'node'] }（不允许经 web 拉起 gateway）
+ *   POST /api/pm/stop            { targets: ['weixin'|'weixin:<id>'|'node'] }（不允许经 web 停止 gateway）
  *   POST /api/pm/restart         { targets: string[] }（gateway 仅允许 restart，走接力自重启）
- *   GET  /api/pm/logs/:id?tail=  某进程日志尾部文本
+ *   GET  /api/pm/logs/:id?tail=  某进程日志尾部文本（id 可为 weixin:<accountId>）
  *   GET  /api/pm/gateway-targets           weixin/node 当前挂载网关（token 只回是否已配置）
  *   PUT  /api/pm/gateway-targets/:id       { url, token? } 落盘后自动重启该进程（url 空串=切回本机）
  *
@@ -16,7 +16,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { readFileSync, existsSync } from 'node:fs';
 import { parse } from 'yaml';
 import { migrateConfig } from '@linkagent/shared';
-import { ProcessManager, type TargetId } from '../../supervisor/manager.js';
+import {
+  ProcessManager,
+  instOf,
+  isKnownTargetId,
+  type ProcessInstanceId,
+} from '../../supervisor/manager.js';
 import { persistChildGatewayTarget, type ChildSectionId, type ChildGatewayTarget } from '../config.js';
 import type { AuthGuard } from '../users/auth.js';
 
@@ -26,17 +31,17 @@ export function isLoopbackIp(ip: string | undefined): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
-/** 白名单校验 targets；gateway 不允许 start/stop（只能 restart） */
-export function normalizeTargets(input: unknown, opts: { allowGateway?: boolean } = {}): TargetId[] {
+/** 白名单校验 targets；gateway 不允许 start/stop（只能 restart）；weixin 支持 weixin:<accountId> 实例 */
+export function normalizeTargets(input: unknown, opts: { allowGateway?: boolean } = {}): ProcessInstanceId[] {
   const raw = Array.isArray(input) ? input : [input];
-  const out: TargetId[] = [];
+  const out: ProcessInstanceId[] = [];
   for (const item of raw) {
     if (typeof item !== 'string') throw new Error('targets 必须是字符串数组');
     const id = item.trim();
-    if (id !== 'gateway' && id !== 'weixin' && id !== 'node') {
-      throw new Error(`未知进程 "${id}"，可选：gateway | weixin | node`);
+    if (!isKnownTargetId(id)) {
+      throw new Error(`未知进程 "${id}"，可选：gateway | weixin | node | weixin:<accountId>`);
     }
-    if (id === 'gateway' && !opts.allowGateway) {
+    if (instOf(id).base === 'gateway' && !opts.allowGateway) {
       throw new Error('网关进程不允许经网页启动/停止（仅可重启），请在本机用 CLI 操作');
     }
     if (!out.includes(id)) out.push(id);
@@ -107,7 +112,7 @@ export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
 
   app.post('/api/pm/restart', async (request, reply) => {
     if (!guard(request, reply)) return;
-    let targets: TargetId[];
+    let targets: ProcessInstanceId[];
     try {
       targets = normalizeTargets((request.body as { targets?: unknown } | null)?.targets, { allowGateway: true });
     } catch (err) {
@@ -131,7 +136,7 @@ export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
   app.get('/api/pm/logs/:id', async (request, reply) => {
     if (!guard(request, reply)) return;
     const { id } = request.params as { id: string };
-    if (id !== 'gateway' && id !== 'weixin' && id !== 'node') {
+    if (!isKnownTargetId(id)) {
       return reply.code(400).send({ error: `未知进程 "${id}"` });
     }
     const q = request.query as { tail?: string };

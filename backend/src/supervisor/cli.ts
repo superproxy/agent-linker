@@ -1,31 +1,32 @@
 #!/usr/bin/env node
 /**
  * linkagent 单机进程管理器 CLI（仅编排拉起，不常驻守护）：
- *   tsx src/supervisor/cli.ts start   [all|gateway|weixin|node]  后台拉起（默认 all）
- *   tsx src/supervisor/cli.ts stop    [all|gateway|weixin|node]  停止
- *   tsx src/supervisor/cli.ts restart [all|gateway|weixin|node]  重启
- *   tsx src/supervisor/cli.ts status                            查看三进程状态
- *   tsx src/supervisor/cli.ts logs    [all|gateway|weixin|node]  跟随日志（默认 all）
+ *   tsx src/supervisor/cli.ts start   [all|gateway|weixin|weixin:<id>|node]  后台拉起（默认 all）
+ *   tsx src/supervisor/cli.ts stop    [all|gateway|weixin|weixin:<id>|node]  停止
+ *   tsx src/supervisor/cli.ts restart [all|gateway|weixin|weixin:<id>|node]  重启
+ *   tsx src/supervisor/cli.ts status                            查看进程状态（含微信多账号实例）
+ *   tsx src/supervisor/cli.ts logs    [all|gateway|weixin|weixin:<id>|node]  跟随日志（默认 all）
  *   tsx src/supervisor/cli.ts foreground [target]               前台联调（Ctrl-C 一起退出）
  *
+ * weixin 多账号：配置 weixin.accounts 后，start/stop/restart weixin 会作用于全部账号实例，
+ * 也可单独操作某个账号实例（weixin:<accountId>，pid/日志独立）。
  * 启动顺序：gateway 健康检查通过后再起 weixin、node；停止反序。
  */
 import { watch } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import {
-  ALL_TARGETS,
   ProcessManager,
   parseTargets,
-  type TargetId,
+  type ProcessInstanceId,
 } from './manager.js';
 
-const USAGE = `用法: linkagent-pm <start|stop|restart|status|logs|foreground> [all|gateway|weixin|node]`;
+const USAGE = `用法: linkagent-pm <start|stop|restart|status|logs|foreground> [all|gateway|weixin|weixin:<accountId>|node]`;
 
 /** 跨平台 tail -f：先打印文件末尾，再 watch 增量（零依赖） */
-function followLogs(pm: ProcessManager, ids: TargetId[]): void {
-  const positions = new Map<TargetId, number>();
+function followLogs(pm: ProcessManager, ids: ProcessInstanceId[]): void {
+  const positions = new Map<ProcessInstanceId, number>();
 
-  const printTail = (id: TargetId, lines: number): void => {
+  const printTail = (id: ProcessInstanceId, lines: number): void => {
     try {
       const text = readFileSync(pm.logFile(id), 'utf8');
       const arr = text.split('\n');
@@ -37,7 +38,7 @@ function followLogs(pm: ProcessManager, ids: TargetId[]): void {
     }
   };
 
-  const prefix = (id: TargetId, chunk: string): string =>
+  const prefix = (id: ProcessInstanceId, chunk: string): string =>
     chunk
       .split('\n')
       .filter((l) => l.length > 0)
@@ -104,13 +105,13 @@ async function main(): Promise<void> {
       pm.printStatus();
       break;
     case 'logs': {
-      const ids = parseTargets(targetArg ?? 'all');
+      const ids = targetArg ? pm.expand(parseTargets(targetArg)) : pm.allInstanceIds();
       console.log(`→ 跟随日志 ${ids.join(', ')}（Ctrl-C 退出，不影响后台进程）`);
       followLogs(pm, ids);
       break;
     }
     case 'foreground': {
-      const ids = targetArg ? parseTargets(targetArg) : ALL_TARGETS;
+      const ids = targetArg ? pm.expand(parseTargets(targetArg)) : pm.allInstanceIds();
       await pm.foreground(ids);
       break;
     }

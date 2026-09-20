@@ -80,9 +80,9 @@ export function StatCard(props: {
   );
 }
 
-/** 在线/离线/待审批/已拒绝 状态徽章 */
+/** 在线/离线/待审批/已拒绝/已禁用 状态徽章 */
 export function StateTag(props: {
-  state: 'on' | 'off' | 'pending' | 'blocked';
+  state: 'on' | 'off' | 'pending' | 'blocked' | 'disabled';
   labels?: Record<string, string>;
 }) {
   const map = {
@@ -90,6 +90,7 @@ export function StateTag(props: {
     off: { color: 'default', icon: <MinusCircleFilled />, text: '离线' },
     pending: { color: 'warning', icon: <ClockCircleOutlined />, text: '待审批' },
     blocked: { color: 'error', icon: <MinusCircleFilled />, text: '已拒绝' },
+    disabled: { color: 'default', icon: <MinusCircleFilled />, text: '已禁用' },
   } as const;
   const c = map[props.state];
   const text = props.labels?.[props.state] ?? c.text;

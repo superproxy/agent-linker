@@ -27,3 +27,15 @@ test('normalizeTargets：默认禁止 gateway 启停，allowGateway 时放行', 
   assert.deepEqual(normalizeTargets(['gateway'], { allowGateway: true }), ['gateway']);
   assert.deepEqual(normalizeTargets(['gateway', 'weixin'], { allowGateway: true }), ['gateway', 'weixin']);
 });
+
+test('normalizeTargets：支持 weixin:<accountId> 多账号实例，非法实例 id 拒绝', () => {
+  assert.deepEqual(normalizeTargets(['weixin:acc1']), ['weixin:acc1']);
+  assert.deepEqual(normalizeTargets('weixin:acc1'), ['weixin:acc1']);
+  assert.deepEqual(normalizeTargets(['weixin:acc1', 'weixin:acc1', 'node']), ['weixin:acc1', 'node']);
+  assert.deepEqual(normalizeTargets(['weixin:acc1', 'gateway'], { allowGateway: true }), [
+    'weixin:acc1',
+    'gateway',
+  ]);
+  assert.throws(() => normalizeTargets(['weixin:']), /未知进程/);
+  assert.throws(() => normalizeTargets(['weixin:好']), /未知进程/);
+});

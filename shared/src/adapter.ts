@@ -11,6 +11,26 @@ import type { ChatMessage } from './openai.js';
 export const ACP_PERMISSION_MODES = ['approve-all', 'approve-reads', 'deny-all'] as const;
 export type AcpPermissionMode = (typeof ACP_PERMISSION_MODES)[number];
 
+/** 策略动作：与 acpx 的 PermissionPolicyAction 一一对应 */
+export const ACP_PERMISSION_POLICY_ACTIONS = ['approve', 'deny', 'escalate'] as const;
+export type PermissionPolicyAction = (typeof ACP_PERMISSION_POLICY_ACTIONS)[number];
+
+/**
+ * ACP 工具权限策略（按工具名模式匹配，优先于 permissionMode；对应 acpx `createAcpRuntime` 的
+ * `permissionPolicy`，见 node_modules acpx runtime.d.ts）：
+ * - autoApprove：命中即自动放行（如 ["bash", "edit:write"]）；
+ * - autoDeny：命中即自动拒绝（写类高危工具按 agent 收紧时用，优先级高于 autoApprove）；
+ * - escalate：命中即升级为需要审批（本网关无审批 UI 时等同拒绝，留给带 UI 的宿主）；
+ * - defaultAction：未命中任何规则时的兜底动作（缺省不设 = 跟随 permissionMode）。
+ * 各字段均为字符串列表，支持 ACP 工具名的精确匹配与子串/前缀匹配。
+ */
+export interface PermissionPolicySpec {
+  autoApprove?: string[];
+  autoDeny?: string[];
+  escalate?: string[];
+  defaultAction?: PermissionPolicyAction;
+}
+
 /**
  * 支持的 ACP agent 类型（单一事实来源：config 校验、启动命令、管理目录均引用此列表）。
  * 默认启用列表见 defaultAgentDefinitions（opencode 原生 ACP；pi 经 pi-acp 桥接；workbuddy 经 `codebuddy --acp`；
@@ -88,6 +108,13 @@ export interface AgentDefinition {
   cwd?: string;
   /** 透传 ACP 权限模式；一期默认 approve-reads + 非交互 deny => 只读问答 */
   permissionMode?: AcpPermissionMode;
+  /**
+   * ACP 工具权限策略（按工具名匹配，优先于 permissionMode）。配置后对所有走该 agent 的渠道生效
+   * （/v1、微信/企微 bot、openclaw 插件任务，均汇聚到本机 AcpWrapper 定义层）。
+   * 例如放开只读工具的读权限、拦截高危写命令：
+   *   permissionPolicy: { autoApprove: ["bash:read", "edit:read"], autoDeny: ["bash:write"] }
+   */
+  permissionPolicy?: PermissionPolicySpec;
   /** 额外环境变量 */
   env?: Record<string, string>;
   /** ACP server 启动命令；缺省按 type 的内置默认（见 backend acpEngine DEFAULT_COMMANDS） */

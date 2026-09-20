@@ -1,5 +1,8 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildServer } from '../../src/gateway/index.js';
 import { decideTaskRouting } from '../../src/gateway/tasks/api.js';
 
@@ -10,8 +13,21 @@ type Built = Awaited<ReturnType<typeof buildServer>>;
  * 拉起 ilink 长轮询网络句柄，导致测试进程无法退出（process 永不 exit 而挂起）。
  * definitions 覆盖 config.agents，控制台/模型列表等能力不受影响。
  */
+/** 集成测试临时状态根目录（after hook 统一清理） */
+const TMP_ROOTS: string[] = [];
+after(() => {
+  for (const root of TMP_ROOTS) rmSync(root, { recursive: true, force: true });
+});
+
 async function freshBuilt(definitions: { id: string; type: string; displayName: string; model?: string }[]): Promise<Built> {
-  return buildServer({ configPath: 'test/fixtures/gateway.test.yaml', definitions: definitions as never });
+  // 状态目录隔离：构建真实网关但把 .runtime-state 指到临时根，避免测试用户（gw_test_* 等）污染真实任务数据
+  const stateRoot = mkdtempSync(join(tmpdir(), 'linkagent-gw-'));
+  TMP_ROOTS.push(stateRoot);
+  return buildServer({
+    configPath: 'test/fixtures/gateway.test.yaml',
+    definitions: definitions as never,
+    stateRoot,
+  });
 }
 
 test('GET /v1/models 正常（agent 列表）', async () => {

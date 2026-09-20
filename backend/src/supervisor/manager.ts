@@ -37,12 +37,53 @@ import {
 } from './proc.js';
 
 export type TargetId = ProcessTargetId;
+
+/**
+ * 进程实例 id：除三个基目标外，weixin 支持多账号实例 `weixin:<accountId>`
+ * （pid/日志独立，启动注入 LINKAGENT_ACCOUNT_ID，账号间互不干扰）。
+ * `weixin`（无后缀）是未配置 weixin.accounts 时的默认单实例。
+ */
+export type ProcessInstanceId = TargetId | `weixin:${string}`;
+
 export const ALL_TARGETS: TargetId[] = ['gateway', 'weixin', 'node'];
 
 /** 启动顺序：gateway 先就绪，再起微信与节点（二者依赖网关） */
 const START_ORDER: TargetId[] = ['gateway', 'weixin', 'node'];
 /** 停止顺序：反序，先停依赖方 */
 const STOP_ORDER: TargetId[] = ['node', 'weixin', 'gateway'];
+
+/** 是否合法进程目标 id（含 weixin:<accountId> 账号实例） */
+export function isKnownTargetId(id: string): id is ProcessInstanceId {
+  return (ALL_TARGETS as string[]).includes(id) || /^weixin:[A-Za-z0-9._-]+$/.test(id);
+}
+
+/** pid/log 文件名安全化（账号 id 中非文件名友好字符替换为 _） */
+export function safeAccountKey(accountId: string): string {
+  return accountId.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+export interface InstanceSpec {
+  base: TargetId;
+  label: string;
+  /** pid/log 文件名的键（如 weixin / weixin-acc1） */
+  pidKey: string;
+  /** 账号实例的账号 id（仅 weixin:<id> 有） */
+  accountId?: string;
+}
+
+/** 实例归一化：基目标 + 展示名 + pid 键 + 可选账号 id */
+export function instOf(id: ProcessInstanceId): InstanceSpec {
+  if (id === 'gateway' || id === 'weixin' || id === 'node') {
+    return { base: id, label: TARGETS[id].label, pidKey: id };
+  }
+  const accountId = id.slice('weixin:'.length);
+  return {
+    base: 'weixin',
+    label: `微信 bot · ${accountId}`,
+    pidKey: `weixin-${safeAccountKey(accountId)}`,
+    accountId,
+  };
+}
 
 export interface TargetSpec {
   id: TargetId;
@@ -59,7 +100,7 @@ export const TARGETS: Record<TargetId, TargetSpec> = {
 };
 
 export interface TargetStatus {
-  id: TargetId;
+  id: ProcessInstanceId;
   label: string;
   running: boolean;
   pid: number | null;
@@ -120,18 +161,18 @@ export class ProcessManager {
     return `http://${this.gw.host}:${this.gw.port}`;
   }
 
-  pidFile(id: TargetId): string {
-    return join(this.paths.stateDir, `${id}.pid`);
+  pidFile(id: ProcessInstanceId): string {
+    return join(this.paths.stateDir, `${instOf(id).pidKey}.pid`);
   }
 
-  logFile(id: TargetId): string {
-    return join(this.paths.logDir, `${id}.log`);
+  logFile(id: ProcessInstanceId): string {
+    return join(this.paths.logDir, `${instOf(id).pidKey}.log`);
   }
 
   /** 组装某目标的启动命令与环境变量（入口由布局层按形态给出：dist→server/*.mjs，dev→tsx 直跑 TS） */
-  private resolve(id: TargetId): { command: string; args: string[]; env: Record<string, string> } {
+  private resolve(id: ProcessInstanceId): { command: string; args: string[]; env: Record<string, string> } {
     const env: Record<string, string> = {};
-    const entry = this.layout.entry(id);
+    const entry = this.layout.entry(instOf(id).base);
     const args =
       this.layout.kind === 'dist'
         ? [entry]
@@ -140,40 +181,86 @@ export class ProcessManager {
   }
 
   /** 某进程在共享配置段里是否启用（pm start all 时 enabled:false 跳过；显式单起不拦截） */
-  isEnabled(id: TargetId): boolean {
-    if (id === 'weixin') return this.gw.shared.weixin.enabled;
-    if (id === 'node') return this.gw.shared.node.enabled;
+  isEnabled(id: ProcessInstanceId): boolean {
+    const base = instOf(id).base;
+    if (base === 'weixin') return this.gw.shared.weixin.enabled;
+    if (base === 'node') return this.gw.shared.node.enabled;
     return true;
   }
 
-  private envFor(id: TargetId): Record<string, string> {
-    switch (id) {
+  /** weixin 实例 id 列表：配置了 accounts → 每账号一个；否则默认单实例 */
+  weixinInstanceIds(): ProcessInstanceId[] {
+    const accounts = this.gw.shared.weixin.accounts ?? [];
+    return accounts.length > 0 ? accounts.map((a) => `weixin:${a}` as ProcessInstanceId) : ['weixin'];
+  }
+
+  /** 全量实例（状态/启动顺序展示：gateway → weixin 实例 → node） */
+  allInstanceIds(): ProcessInstanceId[] {
+    return ['gateway', ...this.weixinInstanceIds(), 'node'];
+  }
+
+  /** 展开：weixin → 账号实例列表（或默认单实例），其余原样；去重保序 */
+  expand(ids: ProcessInstanceId[]): ProcessInstanceId[] {
+    const out: ProcessInstanceId[] = [];
+    for (const id of ids) {
+      for (const x of id === 'weixin' ? this.weixinInstanceIds() : [id]) {
+        if (!out.includes(x)) out.push(x);
+      }
+    }
+    return out;
+  }
+
+  /** 按基目标在 order 中的次序排列实例（用于 start/stop/restart 的顺序控制） */
+  private orderByBase(ids: ProcessInstanceId[], order: TargetId[]): ProcessInstanceId[] {
+    const instances = this.expand(ids);
+    return order.flatMap((base) => instances.filter((id) => instOf(id).base === base));
+  }
+
+  private envFor(id: ProcessInstanceId): Record<string, string> {
+    const spec = instOf(id);
+    switch (spec.base) {
       case 'gateway':
         // 管理器托管微信：强制 gateway 走 external，不在进程内内嵌 bot（避免同账号重复收消息）
         return { LINKAGENT_WEIXIN_MODE: 'external' };
       case 'weixin':
-        // 回连 URL/token 由 weixin 进程自行读共享配置推导，supervisor 不再当二传手
-        return {};
+        // 回连 URL/token 由 weixin 进程自行读共享配置推导，supervisor 不再当二传手；
+        // 同时显式把 LINKAGENT_GATEWAY_URL/TOKEN 置空，覆盖父进程（shell/systemd/docker）
+        // 继承值，避免本机 bot 被残留环境变量带到远程网关（独立 weixin 进程仍可用环境变量）。
+        // 账号实例注入账号 id，weixin-bot 入口据此加载指定登录态（缺省取 accounts/ 下第一个）
+        return {
+          ...(spec.accountId ? { LINKAGENT_ACCOUNT_ID: spec.accountId } : {}),
+          LINKAGENT_GATEWAY_URL: '',
+          LINKAGENT_GATEWAY_TOKEN: '',
+        };
       case 'node':
-        // 节点名 env 仍注入（配置段 name 缺省时兜底 node-<hostname>）
-        return { LINKAGENT_NODE_NAME: this.gw.shared.node.name || `node-${hostname()}` };
+        // 节点名 env 仍注入（配置段 name 缺省时兜底 node-<hostname>）。
+        // 本机节点（supervisor 托管）的 agent 开通只认共享 config 的 node.agents：
+        // 显式把 LINKAGENT_NODE_AGENTS 置空，覆盖父进程（shell/systemd/docker）继承值，
+        // 避免环境变量隐式改变本机节点上线时自报的 agent（独立节点脚本仍可用该环境变量）。
+        // 回连地址同样置空 LINKAGENT_GATEWAY_URL/TOKEN，只认共享 config 或本机网关推导。
+        return {
+          LINKAGENT_NODE_NAME: this.gw.shared.node.name || `node-${hostname()}`,
+          LINKAGENT_NODE_AGENTS: '',
+          LINKAGENT_GATEWAY_URL: '',
+          LINKAGENT_GATEWAY_TOKEN: '',
+        };
     }
   }
 
-  isRunning(id: TargetId): boolean {
+  isRunning(id: ProcessInstanceId): boolean {
     return readPid(this.pidFile(id)) !== null;
   }
 
-  async start(ids: TargetId[] = START_ORDER): Promise<void> {
-    for (const id of ids) {
+  async start(ids: ProcessInstanceId[] = this.allInstanceIds()): Promise<void> {
+    for (const id of this.expand(ids)) {
       await this.startOne(id);
     }
   }
 
-  private async startOne(id: TargetId): Promise<void> {
-    const spec = TARGETS[id];
+  private async startOne(id: ProcessInstanceId): Promise<void> {
+    const spec = instOf(id);
     if (!this.isEnabled(id)) {
-      console.log(`⏭️  ${spec.label} 在配置中已禁用（${id}.enabled=false），跳过`);
+      console.log(`⏭️  ${spec.label} 在配置中已禁用（weixin.enabled=false / node.enabled=false），跳过`);
       return;
     }
     const existing = readPid(this.pidFile(id));
@@ -191,7 +278,7 @@ export class ProcessManager {
     }
     writePid(this.pidFile(id), child.pid);
 
-    if (id === 'gateway') {
+    if (spec.base === 'gateway') {
       const ready = await this.waitHealthy(20_000);
       if (ready) {
         console.log(`✅ ${spec.label} 已就绪：${this.baseUrl}/v1（日志 ${logFile}）`);
@@ -212,14 +299,14 @@ export class ProcessManager {
     }
   }
 
-  async stop(ids: TargetId[] = STOP_ORDER): Promise<void> {
-    for (const id of ids) {
+  async stop(ids: ProcessInstanceId[] = this.orderByBase(this.allInstanceIds(), STOP_ORDER)): Promise<void> {
+    for (const id of this.expand(ids)) {
       await this.stopOne(id);
     }
   }
 
-  private async stopOne(id: TargetId): Promise<void> {
-    const spec = TARGETS[id];
+  private async stopOne(id: ProcessInstanceId): Promise<void> {
+    const spec = instOf(id);
     const pid = readPid(this.pidFile(id));
     if (!pid) {
       console.log(`ℹ️  ${spec.label} 未在运行`);
@@ -233,20 +320,21 @@ export class ProcessManager {
     console.log(`✅ ${spec.label} 已停止`);
   }
 
-  async restart(ids: TargetId[] = START_ORDER): Promise<void> {
+  async restart(ids: ProcessInstanceId[] = this.allInstanceIds()): Promise<void> {
     // 重启：先按反序停掉指定目标，再按启动顺序拉起
-    const stopIds = STOP_ORDER.filter((id) => ids.includes(id));
-    const startIds = START_ORDER.filter((id) => ids.includes(id));
+    const stopIds = this.orderByBase(ids, STOP_ORDER);
+    const startIds = this.orderByBase(ids, START_ORDER);
     await this.stop(stopIds);
     await this.start(startIds);
   }
 
   status(): TargetStatus[] {
-    return START_ORDER.map((id) => {
+    return this.allInstanceIds().map((id) => {
       const pid = readPid(this.pidFile(id));
+      const spec = instOf(id);
       return {
         id,
-        label: TARGETS[id].label,
+        label: spec.label,
         running: pid !== null,
         pid,
         logFile: this.logFile(id),
@@ -277,13 +365,13 @@ export class ProcessManager {
     return false;
   }
 
-  private tailLog(id: TargetId, lines: number): void {
+  private tailLog(id: ProcessInstanceId, lines: number): void {
     const tail = this.readTailLog(id, lines);
     if (tail) console.log(tail);
   }
 
   /** 读取某目标日志文件的尾部 N 行（供 web 进程管理展示；无日志返回空串） */
-  readTailLog(id: TargetId, lines = 200): string {
+  readTailLog(id: ProcessInstanceId, lines = 200): string {
     try {
       const text = readFileSync(this.logFile(id), 'utf8');
       return text.trimEnd().split('\n').slice(-Math.max(1, lines)).join('\n');
@@ -358,7 +446,7 @@ const portFree=()=>new Promise((resolve)=>{
    * 前台联调：gateway 直接继承终端；weixin/node 用 attached 子进程（带前缀输出）。
    * Ctrl-C 时一并退出。不写 pid 文件（与后台模式互不干扰，但若端口占用 gateway 会报错）。
    */
-  async foreground(ids: TargetId[] = START_ORDER): Promise<void> {
+  async foreground(ids: ProcessInstanceId[] = this.allInstanceIds()): Promise<void> {
     const children: ReturnType<typeof spawnAttached>[] = [];
     let stopping = false;
 
@@ -374,15 +462,16 @@ const portFree=()=>new Promise((resolve)=>{
     process.on('SIGINT', () => void cleanup());
     process.on('SIGTERM', () => void cleanup());
 
-    for (const id of ids) {
+    for (const id of this.expand(ids)) {
+      const spec = instOf(id);
       const { command, args, env } = this.resolve(id);
-      console.log(`→ 前台启动 ${TARGETS[id].label} ...`);
+      console.log(`→ 前台启动 ${spec.label} ...`);
       const child = spawnAttached({ command, args, cwd: this.paths.root, env: this.envFor(id), logFile: null });
       children.push(child);
       child.on('exit', (code) => {
         if (!stopping) console.log(`[${id}] 退出 code=${code}`);
       });
-      if (id === 'gateway') {
+      if (spec.base === 'gateway') {
         const ready = await this.waitHealthy(20_000);
         if (!ready) console.warn('⚠️  gateway 健康检查超时，继续启动其余进程');
       } else {
@@ -394,9 +483,9 @@ const portFree=()=>new Promise((resolve)=>{
   }
 }
 
-/** 解析目标参数：all/缺省 → 全部；单个目标 → 仅该目标 */
-export function parseTargets(input?: string): TargetId[] {
-  if (!input || input === 'all') return ALL_TARGETS;
-  if ((ALL_TARGETS as string[]).includes(input)) return [input as TargetId];
-  throw new Error(`未知进程 "${input}"，可选：${['all', ...ALL_TARGETS].join(' | ')}`);
+/** 解析目标参数：all/缺省 → 全部基目标；单个目标 → 仅该目标（含 weixin:<accountId> 实例） */
+export function parseTargets(input?: string): ProcessInstanceId[] {
+  if (!input || input === 'all') return [...ALL_TARGETS];
+  if (isKnownTargetId(input)) return [input];
+  throw new Error(`未知进程 "${input}"，可选：${['all', ...ALL_TARGETS, 'weixin:<accountId>'].join(' | ')}`);
 }

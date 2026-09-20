@@ -16,6 +16,8 @@ export interface NodeRecord {
   secret?: string;
   /** 用户颁发机器 token 接入时的属主；网关 token / 匿名审批可为空 */
   ownerUsername?: string;
+  /** 是否被管理员临时停用：true 时路由层忽略，节点重连被关；非 disabled 时不显式落 */
+  disabled?: boolean;
   createdAt: number;
   lastSeenAt: number;
 }

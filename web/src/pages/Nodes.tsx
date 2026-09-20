@@ -57,20 +57,23 @@ export function NodesPage(props: {
 
   const columns: ColumnsType<NodeInfo> = [
     {
-      title: '节点',
+      title: '节点名称',
       key: 'name',
-      render: (_, n) => (
-        <div>
-          <code className="code-cell" style={{ fontSize: 13 }}>{n.name}</code>
-          {n.nodeId !== 'local' ? <div className="sub-muted">{n.nodeId}</div> : null}
-        </div>
-      ),
+      render: (_, n) => <code className="code-cell" style={{ fontSize: 13 }}>{n.name}</code>,
+    },
+    {
+      title: '节点 ID',
+      dataIndex: 'nodeId',
+      key: 'nodeId',
+      width: 180,
+      render: (v: string) => <code className="code-cell">{v}</code>,
     },
     {
       title: '状态',
       key: 'status',
-      width: 110,
+      width: 130,
       render: (_, n) => {
+        if (n.disabled) return <StateTag state="disabled" />;
         if (n.status === 'pending') return <StateTag state="pending" />;
         if (n.status === 'blocked') return <StateTag state="blocked" />;
         return <StateTag state={n.online ? 'on' : 'off'} />;
@@ -123,7 +126,7 @@ export function NodesPage(props: {
     {
       title: '操作',
       key: 'ops',
-      width: 210,
+      width: 280,
       render: (_, n) => {
         const isLocal = n.nodeId === 'local';
         const isPending = n.status === 'pending';
@@ -151,19 +154,59 @@ export function NodesPage(props: {
               </Button>
             </Space>
           );
+        if (n.disabled) {
+          return (
+            <Space size={6}>
+              <Button
+                size="small"
+                type="primary"
+                disabled={busyId === n.nodeId}
+                onClick={() => guard(n.nodeId)(ops.enableNode(n.nodeId))}
+              >
+                启用
+              </Button>
+              <Popconfirm
+                title={`删除节点「${n.name}」的注册信息？`}
+                description="删除后该节点需重新走接入流程。"
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+                onConfirm={() => guard(n.nodeId)(ops.deleteNode(n.nodeId))}
+              >
+                <Button size="small" danger disabled={busyId === n.nodeId}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
+          );
+        }
         return (
-          <Popconfirm
-            title={`删除节点「${n.name}」的注册信息？`}
-            description="离线节点可删除，在线节点会重新注册。"
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => guard(n.nodeId)(ops.deleteNode(n.nodeId))}
-          >
-            <Button size="small" danger disabled={n.online || busyId === n.nodeId}>
-              删除
-            </Button>
-          </Popconfirm>
+          <Space size={6}>
+            <Popconfirm
+              title={`停用节点「${n.name}」？`}
+              description="节点将被断开连接，路由层忽略；后续重连会被拒。管理员可重新启用。"
+              okText="停用"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => guard(n.nodeId)(ops.disableNode(n.nodeId))}
+            >
+              <Button size="small" disabled={busyId === n.nodeId}>
+                禁用
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              title={`删除节点「${n.name}」的注册信息？`}
+              description="在线节点会重新注册；建议先禁用再删除。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => guard(n.nodeId)(ops.deleteNode(n.nodeId))}
+            >
+              <Button size="small" danger disabled={n.online || busyId === n.nodeId}>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
         );
       },
     },

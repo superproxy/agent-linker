@@ -173,6 +173,18 @@ server {
 
 ### 5.2 三种启动方式
 
+> **本机节点（supervisor 托管）不读环境变量**：经进程管理器（`pm start`）拉起的
+> 本机 node 连接器，agent 开通只认共享 config 的 `node.agents`（缺省内置默认），
+> `LINKAGENT_NODE_AGENTS` 会被管理器置空屏蔽——shell / systemd / docker 残留的
+> 环境变量不会隐式改变本机节点上线内容。以下三种独立启动方式不受此限制，
+> `LINKAGENT_NODE_AGENTS` 仍环境变量优先。
+>
+> **本机进程回连地址只认本地配置**：supervisor 托管的本机 weixin / node 进程同样
+> 显式屏蔽 `LINKAGENT_GATEWAY_URL` / `LINKAGENT_GATEWAY_TOKEN`——回连地址只认共享
+> config 的 `weixin.gatewayUrl` / `node.gatewayUrl`（未配置则由 `gateway.server` 推导
+> 本机地址），残留环境变量不会把本机 bot / 节点带到远程网关。远程挂载请用后台
+> 「进程 → 挂载网关」写回 config，或在独立启动命令里显式传环境变量 / `--gatewayUrl`。
+
 ```bash
 # 1) 原生命令（最直接）
 pnpm --filter @linkagent/backend node:connect \

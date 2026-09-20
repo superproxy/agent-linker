@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntimeError, type AcpxRuntime } from 'acpx/runtime';
-import type { AgentDefinition, AgentDescriptor } from '@linkagent/shared';
+import type { AgentDefinition, AgentDescriptor, PermissionPolicySpec } from '@linkagent/shared';
 import { ACP_AGENT_KINDS } from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
 
@@ -213,6 +213,11 @@ export interface AcpEngineOptions {
   description?: string;
   /** 透传 ACP 权限模式；默认 approve-reads */
   permissionMode?: AgentDefinition['permissionMode'];
+  /**
+   * ACP 工具权限策略（按工具名匹配，优先于 permissionMode）。
+   * 挂在本机 agent 定义层，所有渠道（/v1、微信/企微 bot、openclaw 插件任务）共用同一策略。
+   */
+  permissionPolicy?: PermissionPolicySpec;
   /** 额外环境变量 */
   env?: Record<string, string>;
   verbose?: boolean;
@@ -278,6 +283,11 @@ export class AcpEngine {
     return this.options.command ?? DEFAULT_COMMANDS[this.agentName];
   }
 
+  /** 生效中的工具权限策略（definition 透传值；undefined = 跟随 permissionMode 兜底） */
+  get permissionPolicy(): PermissionPolicySpec | undefined {
+    return this.options.permissionPolicy;
+  }
+
   /** engine 默认工作目录：options.defaultCwd（展开 ~），否则进程 cwd */
   private baseCwd(): string {
     const fallback = this.options.defaultCwd?.trim();
@@ -306,6 +316,7 @@ export class AcpEngine {
       agentRegistry: createAgentRegistry({ overrides: { [this.agentName]: this.command() } }),
       permissionMode: this.options.permissionMode ?? 'approve-reads',
       nonInteractivePermissions: 'deny',
+      permissionPolicy: this.options.permissionPolicy,
       probeAgent: this.agentName,
       verbose: this.options.verbose ?? false,
     });

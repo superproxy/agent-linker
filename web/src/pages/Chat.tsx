@@ -156,9 +156,6 @@ export function ChatPage(
       <Tag color="blue" style={{ borderRadius: 999 }}>
         {session.taskName}
       </Tag>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        {session.channel}/{session.userId}
-      </Typography.Text>
       <Tag style={{ borderRadius: 999 }}>{session.agentId}</Tag>
       <Tag color={nodeOnline ? 'success' : 'error'} style={{ borderRadius: 999 }}>
         {nodeId === 'local' ? '本机' : nodeId}

@@ -4,16 +4,19 @@
  * 纯 HTTP 直连 ilinkai.weixin.qq.com，不复用 openclaw 插件包——协议细节
  * （headers / body 结构）从 @tencent-weixin/openclaw-weixin@2.4.8 实测提取：
  *   - getUpdates:   POST /ilink/bot/getupdates    长轮询收消息（35s）
- *   - sendMessage:  POST /ilink/bot/sendmessage   主动推送文本
+ *   - sendMessage:  POST /ilink/bot/sendmessage   主动推送文本/图片
+ * 图片出站：getuploadurl 取 CDN 上传参数 → AES-128-ECB 密文传 CDN → sendmessage 发 image_item。
  * 鉴权：Authorization: Bearer <bot_token> + AuthorizationType: ilink_bot_token。
  * 登录态复用现有扫码登录产物（openclaw-weixin/accounts/<id>.json，见 weixin-login.ts）。
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash, createCipheriv } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { getLayout } from '../install/layout.js';
 
 export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
+/** 图片 CDN 上传主机（novac2c 通道） */
+const ILINK_CDN_HOST = 'https://novac2c.cdn.weixin.qq.com';
 
 /** 插件声明的 ilink_appid 与客户端版本（2.4.8 → 0x020408），服务端按此识别调用方 */
 const ILINK_APP_ID = 'bot';
@@ -227,6 +230,108 @@ export async function sendText(params: SendTextParams): Promise<{ messageId: str
     msg,
     base_info: buildBaseInfo(),
   }, params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS);
+  if (resp.ret && resp.ret !== 0) {
+    throw new Error(`sendMessage ret=${resp.ret} errmsg=${resp.errmsg ?? '(none)'}`);
+  }
+  return { messageId: clientId };
+}
+
+// ── 图片出站（CDN 加密上传 + image_item 推送） ───────────────────────────
+
+/** AES-128-ECB + PKCS7 填充加密（ilink 媒体通道固定算法） */
+export function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
+  const cipher = createCipheriv('aes-128-ecb', key, null);
+  return Buffer.concat([cipher.update(plaintext), cipher.final()]);
+}
+
+export interface SendImageParams {
+  baseUrl: string;
+  token: string;
+  to: string;
+  /** JPEG/PNG 等图片明文 */
+  image: Buffer;
+  contextToken?: string;
+  runId?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * 主动推送一张图片：getuploadurl → CDN 上传密文 → sendmessage 发 image_item。
+ * 返回 client_id。ret!=0 或上传失败抛错。
+ */
+export async function sendImage(params: SendImageParams): Promise<{ messageId: string }> {
+  const timeoutMs = params.timeoutMs ?? DEFAULT_API_TIMEOUT_MS;
+  const fileKey = randomBytes(16).toString('hex');
+  const aesKey = randomBytes(16); // 16 字节原始 key
+  const rawSize = params.image.length;
+  const rawMd5 = createHash('md5').update(params.image).digest('hex');
+  const ciphertext = encryptAesEcb(params.image, aesKey);
+
+  // 1) 申请 CDN 上传参数
+  const upResp = await postJson(params.baseUrl, 'ilink/bot/getuploadurl', params.token, {
+    filekey: fileKey,
+    media_type: 1, // 1=IMG
+    to_user_id: params.to,
+    rawsize: rawSize,
+    rawfilemd5: rawMd5,
+    filesize: ciphertext.length,
+    no_need_thumb: true,
+    aeskey: aesKey.toString('hex'),
+    base_info: buildBaseInfo(),
+  }, timeoutMs);
+  if (upResp.ret && upResp.ret !== 0) {
+    throw new Error(`getuploadurl ret=${upResp.ret} errmsg=${upResp.errmsg ?? '(none)'}`);
+  }
+  const uploadParam = (upResp as { upload_param?: string }).upload_param;
+  if (!uploadParam) throw new Error('getuploadurl 未返回 upload_param');
+
+  // 2) CDN 上传密文（响应头 x-encrypted-param 为下载凭据）
+  const cdnUrl = `${ILINK_CDN_HOST}/c2c/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(fileKey)}`;
+  const cdnController = new AbortController();
+  const cdnTimer = setTimeout(() => cdnController.abort(), timeoutMs);
+  let cdnRes: Response;
+  try {
+    cdnRes = await fetch(cdnUrl, {
+      method: 'POST',
+      headers: { ...buildHeaders(params.token), 'Content-Type': 'application/octet-stream' },
+      body: ciphertext,
+      signal: cdnController.signal,
+    });
+  } finally {
+    clearTimeout(cdnTimer);
+  }
+  if (!cdnRes.ok) throw new Error(`CDN upload HTTP ${cdnRes.status}: ${(await cdnRes.text()).slice(0, 300)}`);
+  const encryptQueryParam = cdnRes.headers.get('x-encrypted-param');
+  if (!encryptQueryParam) throw new Error('CDN upload 未返回 x-encrypted-param 响应头');
+
+  // 3) sendmessage 发 image_item（aes_key = base64(hex 字符串)）
+  const clientId = `linkagent-${randomBytes(8).toString('hex')}`;
+  const msg = {
+    from_user_id: '',
+    to_user_id: params.to,
+    client_id: clientId,
+    message_type: MessageType.BOT,
+    message_state: MessageState.FINISH,
+    item_list: [
+      {
+        type: MessageItemType.IMAGE,
+        image_item: {
+          media: {
+            encrypt_query_param: encryptQueryParam,
+            aes_key: Buffer.from(aesKey.toString('hex'), 'utf8').toString('base64'),
+            encrypt_type: 1,
+          },
+          mid_size: ciphertext.length,
+        },
+      },
+    ],
+    ...(params.contextToken ? { context_token: params.contextToken } : {}),
+    ...(params.runId ? { run_id: params.runId } : {}),
+  };
+  const resp = await postJson(params.baseUrl, 'ilink/bot/sendmessage', params.token, {
+    msg,
+    base_info: buildBaseInfo(),
+  }, timeoutMs);
   if (resp.ret && resp.ret !== 0) {
     throw new Error(`sendMessage ret=${resp.ret} errmsg=${resp.errmsg ?? '(none)'}`);
   }

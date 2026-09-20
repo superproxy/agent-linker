@@ -35,27 +35,30 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
     };
   }, [refresh]);
 
-  const startScan = async () => {
+  const startScan = async (accountId?: string) => {
     setMsg(null);
     setScanning(true);
     setQr(null);
     try {
-      const r = await wx.startQr();
+      const r = await wx.startQr(accountId);
       if (!r.qrDataUrl) {
         setMsg({ type: 'error', text: '二维码图片生成失败，请稍后重试' });
         setScanning(false);
         return;
       }
       setQr(r.qrDataUrl);
-      setMsg({ type: 'info', text: '请用手机微信扫一扫完成绑定' });
+      setMsg({ type: 'info', text: accountId ? `请扫码重新绑定账号 ${accountId}` : '请用手机微信扫一扫完成绑定' });
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
         try {
-          const st = await wx.qrStatus(r.sessionKey, 8_000);
+          const st = await wx.qrStatus(r.sessionKey, 8_000, accountId);
           if (st.connected) {
             if (pollRef.current) clearInterval(pollRef.current);
             setScanning(false);
-            setMsg({ type: 'success', text: `绑定成功：账号 ${st.accountId ?? ''}。可点「重启渠道」立即生效。` });
+            setMsg({
+              type: 'success',
+              text: `绑定成功：账号 ${st.accountId ?? accountId ?? ''}。可点「重启渠道」立即生效。`,
+            });
             await refresh();
           }
         } catch (e) {
@@ -135,10 +138,13 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
               </div>
               <Space direction="vertical" size={4}>
                 {status.accounts.map((a) => (
-                  <div key={a.id}>
+                  <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <code className="code-cell">{a.id}</code>
                     {a.userId ? <span className="sub-muted"> · {a.userId}</span> : null}
                     {a.savedAt ? <span className="sub-muted"> · {a.savedAt}</span> : null}
+                    <Button size="small" disabled={scanning} onClick={() => void startScan(a.id)}>
+                      重新绑定
+                    </Button>
                   </div>
                 ))}
               </Space>

@@ -250,3 +250,90 @@ test('非 /api/nodes/ws 路径的 upgrade 返回 404', async () => {
   });
   await h.dispose();
 });
+
+test('disableNode 在线：关连接 + rec.disabled + change(false) + list 标 disabled', async () => {
+  const h = await startManager();
+  const events: Array<[string, boolean]> = [];
+  h.manager.onChange((id, online) => events.push([id, online]));
+  const { ws, nodeId } = await connectAndHandshake(h.url, hello({ nodeId: 'd1' }));
+  const oldClosed = closed(ws);
+
+  const updated = h.manager.disableNode(nodeId);
+  await oldClosed;
+  assert.equal(updated.disabled, true);
+  assert.equal(updated.online, false);
+  assert.equal(h.manager.isOnline(nodeId), false);
+  assert.equal(h.manager.getLink(nodeId), undefined);
+  assert.deepEqual(h.manager.onlineAgentIds(nodeId), []);
+  assert.ok(events.some(([id, on]) => id === nodeId && on === false));
+  const info = h.manager.list().find((n) => n.nodeId === nodeId);
+  assert.equal(info?.disabled, true);
+  assert.equal(info?.online, false);
+  await h.dispose();
+});
+
+test('disableNode 离线：仅落盘，不触发 change', async () => {
+  const h = await startManager();
+  const events: Array<[string, boolean]> = [];
+  h.manager.onChange((id, online) => events.push([id, online]));
+  const { ws } = await connectAndHandshake(h.url, hello({ nodeId: 'd2' }));
+  ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+
+  const updated = h.manager.disableNode('d2');
+  assert.equal(updated.disabled, true);
+  assert.equal(updated.online, false);
+  assert.deepEqual(events, [['d2', true], ['d2', false]]);
+  await h.dispose();
+});
+
+test('disableNode 不存在：抛错', async () => {
+  const h = await startManager();
+  assert.throws(() => h.manager.disableNode('ghost'), /不存在/);
+  await h.dispose();
+});
+
+test('disable → 重连被拒(4408 rejected)；enable → 解除标记', async () => {
+  const h = await startManager();
+  // 匿名申请进 rec(pending)，再批准，最后停用
+  const first = await connectAndHandshake(h.url, hello({ nodeId: 'cycle' }));
+  first.ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+  h.manager.approveNode('cycle');
+  h.manager.disableNode('cycle');
+
+  // 不带 secret 的 hello：rec 命中 + disabled=true → rejected(4408)
+  const ws = new WebSocket(h.url);
+  const got = await new Promise<{ type: string; closeCode: number }>((resolve, reject) => {
+    ws.on('open', () => ws.send(JSON.stringify(hello({ nodeId: 'cycle' }))));
+    ws.on('message', (raw) => {
+      const m = JSON.parse(raw.toString()) as GatewayToNode;
+      if (m.type === 'rejected' || m.type === 'welcome') {
+        ws.once('close', (code) => resolve({ type: m.type, closeCode: code }));
+      }
+    });
+    ws.on('error', reject);
+  });
+  assert.equal(got.type, 'rejected', 'disabled 节点重连收到 rejected');
+  assert.equal(got.closeCode, 4408, '关闭码 4408 = disabled');
+  ws.terminate();
+
+  // enable：标记解除，但无连接 → online 仍 false
+  const enabled = h.manager.enableNode('cycle');
+  assert.equal(enabled.disabled, undefined);
+  assert.equal(enabled.online, false);
+  await h.dispose();
+});
+
+test('enableNode 不存在：抛错；已启用态幂等', async () => {
+  const h = await startManager();
+  assert.throws(() => h.manager.enableNode('ghost'), /不存在/);
+  const { ws, nodeId } = await connectAndHandshake(h.url, hello({ nodeId: 'e1' }));
+  const before = h.manager.list().find((n) => n.nodeId === nodeId);
+  const after = h.manager.enableNode(nodeId);
+  assert.equal(after.disabled, undefined);
+  assert.equal(after.online, true);
+  assert.equal(before?.lastSeenAt, after.lastSeenAt, '幂等：不更新时间');
+  ws.close();
+  await h.dispose();
+});
