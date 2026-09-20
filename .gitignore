@@ -5,6 +5,7 @@ nohup.out
 .DS_Store
 .env
 backend/config/gateway.yaml
+backend/config/config.yaml
 .runtime-state/
 .tmp/
 opencode.json

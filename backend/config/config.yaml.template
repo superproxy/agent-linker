@@ -8,9 +8,8 @@ gateway:
     port: 8787
   auth:
     # 鉴权模式：
-    #   local（默认）：按运行模式识别为「本机默认用户」（管理员），免登录；
-    #                        不区分用 127.0.0.1 还是局域网/公网地址打开。
-    #                        他机/API 若要独立账号请改用 token 模式。
+    #   local（默认，本机）：回环请求免登录识别为「本机默认用户」；
+    #                        他机/手机/API 必须携带永久 gateway token，否则 401。
     #   token：强制令牌，任何来源（含本机浏览器）都需 gateway token 或账号会话。
     #   open ：完全不鉴权（仅建议绑回环）。
     mode: local
@@ -20,7 +19,39 @@ gateway:
     token: ""
     # 账号登录会话有效期（天），滑动续期；默认 7 天（token/local 模式下账号会话使用）
     sessionTtlDays: 7
-  # agents 省略：使用内置默认（opencode + pi + workbuddy + trace-cli + cursor）
+  # agents：自定义 agent 列表（覆盖内置默认 opencode/pi/workbuddy/trace-cli/cursor）。
+  # permissionMode 透传 ACP 权限模式（AcpWrapper 缺省 approve-reads + 非交互 deny = 只读问答）：
+  #   approve-all   自动批准全部权限请求（写文件/终端命令直接放行）
+  #   approve-reads 只读放行、写类操作需审批（headless 下审批一律拒绝）
+  #   deny-all      全部拒绝
+  # 注意：配置 agents 后以本列表为准，需要哪些 agent 就列全。
+  agents:
+    - id: opencode
+      type: opencode
+      displayName: OpenCode
+      description: 本地 opencode（经 ACP/acpx），全权限
+      permissionMode: approve-all
+    - id: pi
+      type: pi
+      displayName: Pi
+      description: 本地 pi（pi-coding-agent，经 pi-acp ACP 桥接），全权限
+      model: volcengine/deepseek-v4-flash-ga-260731
+      permissionMode: approve-all
+    - id: workbuddy
+      type: workbuddy
+      displayName: WorkBuddy
+      description: CodeBuddy Code CLI（经 codebuddy --acp），全权限
+      permissionMode: approve-all
+    - id: trace-cli
+      type: trace-cli
+      displayName: TraeCode CLI
+      description: TraeCode CLI（经 traecli acp serve），全权限
+      permissionMode: approve-all
+    - id: cursor
+      type: cursor
+      displayName: Cursor
+      description: Cursor CLI（经 agent acp），全权限
+      permissionMode: approve-all
   # agent 默认工作目录：未显式配 cwd 的 agent 在此目录下运行（缺省回退网关启动目录）
   # defaultCwd: /Users/yangxuezeng/linkagent/works
 
@@ -47,7 +78,8 @@ gateway:
 
 # ── weixin 个人微信进程 ───────────────────────────────────
 # 进程管理器（pm start all）按 enabled 决定是否拉起；gatewayUrl/gatewayToken
-# 缺省由 gateway 段自动推导，环境变量 LINKAGENT_GATEWAY_URL/TOKEN 可覆盖。
+# 缺省由 gateway 段自动推导；supervisor 托管时 LINKAGENT_GATEWAY_URL/TOKEN 被
+# 显式置空屏蔽（只认本配置段），独立启动 weixin-bot 仍可用环境变量覆盖。
 weixin:
   enabled: true
   # weixin-bot：gateway 进程内拉起（默认，单跑 gateway 时）
@@ -55,6 +87,9 @@ weixin:
   # external：独立进程（进程管理器托管时经环境变量自动切换，一般无需手填）
   mode: weixin-bot
   # accountId: ""            # 登录态账号 id（缺省取 accounts/ 下第一个）
+  # accounts: []             # 多账号白名单：external（进程管理器托管）时每个账号一个独立 bot 进程，
+  #                          # 实例 id weixin:<accountId>（pid/日志/登录态相互隔离）；
+  #                          # 留空 = 单实例（跑 accountId 或 accounts/ 下第一个账号）
   model: agent:pi # 对话模型（默认 agent:pi）
   # gatewayUrl: ""           # 缺省由 gateway.server 推导（0.0.0.0/:: 归一化到 127.0.0.1）
   # gatewayToken: ""         # 缺省取 gateway.auth.token 或自动生成的 gateway-token 文件
@@ -62,10 +97,6 @@ weixin:
   # ── node（executor）执行器进程 ────────────────────────────
 node:
   enabled: true
-  gatewayUrl: ""
-  # 不填令牌：，由该网关管理员在后台批准。
-  # 本机 UI 颁发的 nt_ 只对本机网关有效，填上去会被对端 401。
-  gatewayToken: ""
   # name: ""                # 节点展示名（缺省 node-<hostname>）
   # agents: []              # 上报的 agent id（空 = 网关默认 4 种）
   # gatewayUrl: ""          # 缺省由 gateway.server 推导
