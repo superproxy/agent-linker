@@ -1,12 +1,18 @@
 # pi 模型配置
 
-网关**不附带、不写死**任何厂商模型清单（包括火山方舟）。
+用仓库脚本安装 CLI 并生成 `~/.pi/agent` 配置（密钥走环境变量，不写进 git）：
 
-模型注册与默认会话模型由 **pi / pi-acp 自己安装和维护**：
+```bash
+pnpm setup:pi
+# 或：node scripts/setup-pi.mjs
+export ARK_API_KEY=你的火山方舟密钥
+```
 
-- `~/.pi/agent/models.json`
-- `~/.pi/agent/settings.json`（`defaultProvider` / `defaultModel`）
+模板：
 
-后台「安装」只装 CLI（`npm i -g pi-acp`，并需本机已有 `pi`）。装完后用 pi 自己的命令或配置加 provider，不要把 `volcengine/...` 写进 `config.yaml` 的 `agents[].model`。
+- `models.json.template` → `~/.pi/agent/models.json`（provider `my`，火山方舟 OpenAI 兼容）
+- `settings.json.template` → 合并进 `~/.pi/agent/settings.json` 的 `defaultProvider` / `defaultModel`
 
-网关 `agents[].model` 请留空，让 ACP 沿用 pi 默认；只有确认该 id 已出现在本机 `models.json` 时才覆盖。
+已有 `models.json` 默认不覆盖（`--force` 才覆盖）。`config.yaml` 的 `agents[].model` 请留空，让 ACP 沿用 pi 默认。
+
+完整说明见仓库 [`docs/pi.md`](../../../docs/pi.md)。

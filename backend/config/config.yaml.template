@@ -35,8 +35,8 @@ gateway:
       type: pi
       displayName: Pi
       description: 本地 pi（pi-coding-agent，经 pi-acp ACP 桥接），全权限
-      # 不要写死会话 model（尤其不要写 volcengine/doubao 等厂商 id）。
-      # 模型清单由本机 pi 自己维护（~/.pi/agent/models.json）；省略 model 则用 pi 默认。
+      # 会话 model 省略则用 pi 默认。云机初始化：pnpm setup:pi（生成 ~/.pi/agent 模型清单）。
+      # 不要把 volcengine/... 写进本字段；覆盖时须为本机 models.json 已有项，例如 my/doubao-seed-2-0-pro-260215
       permissionMode: approve-all
     - id: workbuddy
       type: workbuddy

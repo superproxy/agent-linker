@@ -53,6 +53,10 @@ pnpm --filter @linkagent/backend test
 - 不提交明文密钥；密码用 scrypt + 随机 salt 哈希（见 `users/store.ts`）。
 - `.runtime-state/`、`backend/config/config.yaml` 等本地运行态不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
 
+## Pi 安装与模型配置
+
+云机/新机：`pnpm setup:pi`（安装 pi CLI、pi-acp，生成 `~/.pi/agent/models.json`）。说明见 [`docs/pi.md`](pi.md)。
+
 ## Pi 沙箱报缺 ripgrep / socat
 
 `Sandbox initialization failed: Sandbox dependencies not available: ripgrep (rg) not found, socat not installed` 是 **跑 pi 的 Linux 机** 缺系统包，不是网关 yaml。装 `ripgrep` `socat` `bubblewrap`，完整步骤见 [`docs/pi.md`](pi.md)。Windows 本机不要装 `pi-sandbox`。

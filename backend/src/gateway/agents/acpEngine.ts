@@ -115,7 +115,7 @@ export function installGuideFor(kind: AcpAgentKind, platform = process.platform)
     case 'pi':
       return npmGlobal(
         'pi-acp',
-        '只装 ACP 桥接；模型清单由本机 pi CLI 自己维护（~/.pi/agent/models.json），网关不写死厂商模型。同时需要已装 pi-coding-agent。启动命令：npx -y pi-acp',
+        '只装 ACP 桥接。完整安装（pi CLI + 生成 ~/.pi/agent 模型配置）请在仓库根执行 pnpm setup:pi。启动命令：npx -y pi-acp',
       );
     case 'workbuddy':
       return {

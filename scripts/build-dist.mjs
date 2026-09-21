@@ -110,10 +110,16 @@ function copyConfigYaml(destFile) {
   const src = existsSync(live) ? live : template;
   if (!existsSync(src)) throw new Error('缺少 backend/config/config.yaml 或 config.yaml.template');
   cpSync(src, destFile);
+}
+
+/** destRoot = 独立包根（含 server/config、scripts） */
+function copyPiSetup(destRoot) {
   const piAgentSrc = join(REPO, 'backend', 'config', 'pi-agent');
   if (existsSync(piAgentSrc)) {
-    cpSync(piAgentSrc, join(dirname(destFile), 'pi-agent'), { recursive: true });
+    cpSync(piAgentSrc, join(destRoot, 'server', 'config', 'pi-agent'), { recursive: true });
   }
+  mkdirSync(join(destRoot, 'scripts'), { recursive: true });
+  cpSync(join(REPO, 'scripts', 'setup-pi.mjs'), join(destRoot, 'scripts', 'setup-pi.mjs'));
 }
 
 function npmInstall(dist) {
@@ -255,7 +261,7 @@ const NODE_README = `# linkagent-node 执行节点独立包
 
 ## 环境要求
 - Node.js >= 22.13（含 npm）
-- 本机已安装要上报的 agent CLI
+- 本机已安装要上报的 agent CLI（pi 可用 \`npm run setup:pi\` 安装并生成 ~/.pi/agent 配置）
 
 ## 目录
 \`\`\`
@@ -358,6 +364,7 @@ async function buildFull(dist, skipInstall) {
 
   step('4/6 复制运行资源', () => {
     copyConfigYaml(join(dist, 'server', 'config', 'config.yaml'));
+    copyPiSetup(dist);
     mkdirSync(join(dist, 'dev'), { recursive: true });
     cpSync(join(REPO, 'backend', 'src', 'dev', 'chat.html'), join(dist, 'dev', 'chat.html'));
     cpSync(join(REPO, 'web', 'dist'), join(dist, 'web'), { recursive: true });
@@ -385,6 +392,7 @@ async function buildFull(dist, skipInstall) {
             status: 'node server/pm.mjs status',
             logs: 'node server/pm.mjs logs',
             gateway: 'node server/gateway.mjs',
+            'setup:pi': 'node scripts/setup-pi.mjs',
           },
           dependencies: runtimeDependenciesFull(),
         },
@@ -526,6 +534,7 @@ async function buildNode(dist, skipInstall) {
     writeFileSync(join(dist, '.linkagent-root'), 'linkagent-node standalone deployment root\n');
     writeFileSync(join(dist, 'node.env.example'), NODE_ENV_EXAMPLE);
     writeFileSync(join(dist, 'README.md'), NODE_README);
+    copyPiSetup(dist);
     writeFileSync(
       join(dist, 'package.json'),
       `${JSON.stringify(
@@ -543,6 +552,7 @@ async function buildNode(dist, skipInstall) {
             status: 'node server/ctl.mjs status',
             logs: 'node server/ctl.mjs log',
             foreground: 'node server/ctl.mjs foreground',
+            'setup:pi': 'node scripts/setup-pi.mjs',
           },
           dependencies: runtimeDependenciesNode(),
         },

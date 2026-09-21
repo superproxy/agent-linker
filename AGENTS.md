@@ -20,6 +20,7 @@ web 后台 (/ui, React)                        ──┘                   (open
 
 ```bash
 pnpm install
+pnpm setup:pi                         # 可选：安装 pi / pi-acp 并生成 ~/.pi/agent 模型配置
 pnpm dev                              # 网关开发，缺省 0.0.0.0:8787
 pnpm typecheck                        # 全部包 tsc --noEmit
 pnpm --filter @linkagent/backend test # 后端测试（基线 190 passed）

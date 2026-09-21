@@ -1,0 +1,29 @@
+{
+  "providers": {
+    "my": {
+      "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+      "api": "openai-completions",
+      "apiKey": "${ARK_API_KEY}",
+      "models": [
+        { "id": "doubao-seed-2-0-pro-260215", "name": "Doubao Seed 2.0 Pro" },
+        { "id": "doubao-seed-2-0-lite-260428", "name": "Doubao Seed 2.0 Lite" },
+        { "id": "doubao-seed-2-0-mini-260428", "name": "Doubao Seed 2.0 Mini" },
+        { "id": "doubao-seed-1-8-251228", "name": "Doubao Seed 1.8" },
+        { "id": "doubao-seed-1-6-250615", "name": "Doubao Seed 1.6" },
+        { "id": "doubao-seed-1-6-flash-250828", "name": "Doubao Seed 1.6 Flash" },
+        { "id": "doubao-seed-1-6-vision-250815", "name": "Doubao Seed 1.6 Vision", "input": ["text", "image"] },
+        { "id": "doubao-seed-2-0-code-preview-260215", "name": "Doubao Seed 2.0 Code" },
+        {
+          "id": "deepseek-v4-pro-ga-260813",
+          "name": "DeepSeek V4 Pro",
+          "reasoning": true,
+          "compat": {
+            "thinkingFormat": "deepseek",
+            "requiresReasoningContentOnAssistantMessages": true
+          }
+        },
+        { "id": "deepseek-v4-flash-ga-260731", "name": "DeepSeek V4 Flash" }
+      ]
+    }
+  }
+}

@@ -11,28 +11,44 @@
 | `~/.pi/agent/settings.json` | `defaultProvider` / `defaultModel` | 网关未写 `agents[].model` 时沿用 |
 | `@erichll/pi-sandbox` | OS 级隔离 bash（及可选子 agent 进程树） | **Linux / macOS**；**Windows 不支持** |
 
-网关默认不绑死会话模型（`defaultAgentDefinitions` 的 pi 无 `model` 字段）。**不要**在 yaml 里写死 `volcengine/...`、`my/doubao-...` 等厂商模型；模型由本机 pi / pi-acp 安装注册。若覆盖 `agents[].model`，必须是该机 `~/.pi/agent/models.json` 已有项。
+网关默认不绑死会话模型（`defaultAgentDefinitions` 的 pi 无 `model` 字段）。云机用 **`pnpm setup:pi`** 安装 CLI 并生成 `~/.pi/agent` 清单；**不要**在 yaml 里写死 `volcengine/...`。若覆盖 `agents[].model`，必须是该机 `models.json` 已有项（模板 provider 为 `my`）。
 
 两种接法：
 
-- 云机同时跑网关：在该机装 pi + 模型文件 +（可选）沙箱。
+- 云机同时跑网关：在该机执行 `pnpm setup:pi`，再按需加沙箱。
 - 网关在别处：把这台 Linux 注册为节点，任务打到节点上的 pi。Windows 本机装沙箱无效。
 
-独立部署包可能带上 `server/config/pi-agent/README.md` 说明，**不附带厂商模型 JSON 模板**。
+独立部署包含 `scripts/setup-pi.mjs` 与 `server/config/pi-agent/` 模板，包根执行 `npm run setup:pi`。源码仓库执行 `pnpm setup:pi`。
 
-## 2. 模型初始化（交给 pi / ACP）
+## 2. 一键安装与生成配置
 
-网关不提供、也不要拷贝火山方舟等写死的 `models.json`。在跑 pi 的用户下：
+在跑 pi 的用户下（Node `>= 22`）：
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent   # pi CLI
-npm i -g pi-acp                                                    # 或后台点「安装」
-# 用 pi 自己的方式登录 / 注册 provider（写入 ~/.pi/agent/models.json、settings.json）
+pnpm setup:pi
+# 等价：node scripts/setup-pi.mjs
+export ARK_API_KEY=你的火山方舟密钥
 ```
 
-`pi` 需在 PATH（Node `>= 22`）。网关启动命令仍是 `npx -y pi-acp`。
+脚本会：
 
-改默认模型：编辑 pi 的 `settings.json`，或确认 `models.json` 已有该项后再在后台切换。`config.yaml` 的 `agents[].model` 请留空。
+1. `npm i -g --ignore-scripts @earendil-works/pi-coding-agent`
+2. `npm i -g pi-acp`
+3. 若 `~/.pi/agent/models.json` 不存在，从 `backend/config/pi-agent/models.json.template` 生成（`apiKey` 为 `${ARK_API_KEY}`）
+4. 合并 `settings.json` 的 `defaultProvider=my` / `defaultModel=doubao-seed-2-0-pro-260215`（不覆盖主题、已装包）
+
+常用参数：
+
+| 参数 | 含义 |
+|---|---|
+| `--skip-install` | 只写配置，不跑 npm 全局安装 |
+| `--force` | 覆盖已有 `models.json`，并强制写入默认模型字段 |
+| `--home=<dir>` | pi 主目录（默认 `~/.pi`） |
+| `--sandbox` | Linux/macOS：有 `rg`/`socat`/`bwrap` 时再 `pi install` 沙箱扩展；缺依赖只打印 apt 命令。Windows 跳过 |
+
+已有清单不想动：不要加 `--force`。后台「安装」仍只装 `pi-acp`；完整初始化请用本脚本。
+
+网关启动命令仍是 `npx -y pi-acp`。`config.yaml` 的 `agents[].model` 请留空。
 
 ## 3. 沙箱：不用 Docker
 
@@ -69,7 +85,11 @@ Ubuntu 24.04 若 `bwrap` 报 user namespace 被拒：给 bubblewrap 配 AppArmor
 
 安全包必须进用户全局 `~/.pi/agent/npm/`，不要装进工作区，否则 agent 能改沙箱配置。
 
+先装系统依赖（§3.1），再：
+
 ```bash
+pnpm setup:pi --sandbox
+# 或已装 CLI 时：
 pi install npm:@erichll/pi-auto-review
 pi install npm:@erichll/pi-sandbox
 pi list
@@ -102,10 +122,10 @@ pi list
 | bash 卡住等审批 | 出网未进 `allowedDomains`，且无人点审批 | 写 trusted `config.json` 白名单，或关沙箱只留 ACP 策略 |
 | `bwrap: ... Operation not permitted` | 云镜像关闭非特权 user namespace | AppArmor / sysctl，见 §3.1 |
 
-## 5. 网关不会代做的事
+## 5. 网关不会自动做的事
 
-- 不安装 `rg` / `socat` / `bwrap`
-- 不自动写入 `~/.pi`（避免覆盖本机已有 models / settings）
+- 启动网关**不会**改 `~/.pi`；要初始化请显式跑 `pnpm setup:pi`
+- 不代装 `rg` / `socat` / `bwrap`（`--sandbox` 只检测并提示）
 - 不把沙箱接到 Windows 本机 agent
 
 安全包、密钥、系统依赖都由云机操作者自己装。

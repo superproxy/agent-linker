@@ -105,7 +105,7 @@ plugins:
 ### 会话模型（model 字段）
 
 - 建会话后经 ACP `set_config_option('model')` 下发给 agent；
-- **pi**：不要在 yaml 写死 `volcengine/...` 等厂商模型。未配置 `model` 时沿用 pi 自己的 `~/.pi/agent/settings.json`；覆盖必须是本机 `models.json` 已注册项。模型由 pi/ACP 安装维护，见 [`docs/pi.md`](docs/pi.md)；
+- **pi**：未配置 `model` 时沿用 `~/.pi/agent/settings.json`。云机/新机用 `pnpm setup:pi` 安装 CLI 并生成模型清单（`docs/pi.md`）。覆盖 `agents[].model` 必须是本机 `models.json` 已有项（模板为 `my/<id>`），不要写死 `volcengine/...`；
 - opencode / workbuddy / trace-cli 配置了也会生效，未配置则沿用 agent 自身默认；
 - 模型写法统一为 `providerId/modelId`（须与 `~/.pi/agent/models.json` 的 `providers.<id>` 一致）。
 

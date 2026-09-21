@@ -8,6 +8,7 @@
     "node": ">=22.13"
   },
   "scripts": {
+    "setup:pi": "node scripts/setup-pi.mjs",
     "dev": "pnpm --filter @linkagent/backend dev",
     "start": "pnpm --filter @linkagent/backend start",
     "probe": "pnpm --filter @linkagent/backend probe",
