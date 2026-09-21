@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Descriptions, Row, Space, Spin, Tag } from 'antd';
+import { Alert, Button, Card, Col, Descriptions, Row, Space, Spin, Steps, Tag } from 'antd';
 import { QrcodeOutlined, ReloadOutlined } from '@ant-design/icons';
 import { WeixinClient, type WeixinStatus } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 
-export function WeixinPage(props: { base: string; token: string; onAuthError: AuthErrorHandler; onStatus?: (s: WeixinStatus | null) => void }) {
+export function WeixinPage(props: {
+  base: string;
+  token: string;
+  onAuthError: AuthErrorHandler;
+  onStatus?: (s: WeixinStatus | null) => void;
+  username?: string;
+}) {
   const wx = useMemo(() => new WeixinClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
   const [status, setStatus] = useState<WeixinStatus | null>(null);
@@ -125,6 +131,11 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
     }
   };
 
+  const slot = status?.bindAccountId || props.username || '';
+  const bound = !!status?.configured;
+  const running = !!status?.processRunning;
+  const stepCurrent = !slot ? 0 : !bound ? 1 : 2;
+
   return (
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={14}>
@@ -138,6 +149,33 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
           }
         >
           {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 14 }} /> : null}
+
+          <Steps
+            size="small"
+            current={stepCurrent}
+            style={{ marginBottom: 18 }}
+            items={[
+              {
+                title: '登录账号',
+                description: slot ? <code className="code-cell">{slot}</code> : '请先登录后台',
+              },
+              {
+                title: '扫码绑定',
+                description: bound ? '已绑定' : '用机器人微信号扫码',
+              },
+              {
+                title: '拉起进程',
+                description: bound ? (running ? '运行中' : '未运行，点重启') : '绑定成功后自动启动',
+              },
+            ]}
+          />
+
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 14 }}
+            message="微信进程按登录账号维护：注册或登录 → 本页扫码绑定 → 自动重启对应 weixin:<用户名>。pnpm restart:all 只拉起已绑定账号的实例。"
+          />
 
           <Descriptions
             column={1}

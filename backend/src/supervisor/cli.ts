@@ -8,8 +8,9 @@
  *   tsx src/supervisor/cli.ts logs    [all|gateway|weixin|weixin:<id>|node]  跟随日志（默认 all）
  *   tsx src/supervisor/cli.ts foreground [target]               前台联调（Ctrl-C 一起退出）
  *
- * weixin 多账号：配置 weixin.accounts 后，start/stop/restart weixin 会作用于全部账号实例，
- * 也可单独操作某个账号实例（weixin:<accountId>，pid/日志独立）。
+ * weixin 多账号：仅 weixin.accounts（扫码绑定的登录用户）有实例。
+ * start/stop/restart weixin 作用于全部已绑定账号；未绑定则跳过微信进程。
+ * 也可单独操作 weixin:<accountId>（pid/日志独立）。
  * 启动顺序：gateway 健康检查通过后再起 weixin、node；停止反序。
  */
 import { watch } from 'node:fs';

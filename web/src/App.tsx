@@ -253,7 +253,7 @@ function PageRouter(props: {
     case 'remote-nodes':
       return <NodesPage scope="remote" base={base} token={token} onAuthError={onAuthError} />;
     case 'weixin':
-      return <WeixinPage base={base} token={token} onAuthError={onAuthError} />;
+      return <WeixinPage base={base} token={token} onAuthError={onAuthError} username={username} />;
     case 'accounts':
       return isAdmin ? <AccountsPage base={base} token={token} onAuthError={onAuthError} /> : null;
     case 'processes':

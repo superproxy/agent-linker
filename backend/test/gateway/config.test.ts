@@ -295,6 +295,7 @@ test('persistEnsureWeixinAccount：写入 accounts 并切 external；remove 去�
   assert.deepEqual(ids, ['alice']);
   const cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
   assert.equal(cfg.weixin.mode, 'external');
+  assert.equal(cfg.weixin.enabled, true);
   assert.deepEqual(cfg.weixin.accounts, ['alice']);
   persistEnsureWeixinAccount(file, 'alice');
   persistEnsureWeixinAccount(file, 'bob');

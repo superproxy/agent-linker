@@ -260,11 +260,11 @@ test('ProcessManager：extraWeixinAccounts 与 yaml 合并为多实例', () => {
   assert.deepEqual(pm.expand(['weixin']), ['weixin:alice', 'weixin:bob']);
 });
 
-test('ProcessManager：未配置 weixin.accounts 保持单实例（默认 weixin，兼容旧行为）', () => {
+test('ProcessManager：未绑定微信账号时 all 不含微信进程', () => {
   const root = tmpRoot();
   const pm = new ProcessManager(root);
-  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'weixin', 'node']);
-  assert.deepEqual(pm.expand(['weixin']), ['weixin']);
+  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'node']);
+  assert.deepEqual(pm.expand(['weixin']), []);
   const env = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('weixin');
   assert.equal(env.LINKAGENT_ACCOUNT_ID, undefined);
   assert.equal(env.LINKAGENT_GATEWAY_URL, '');

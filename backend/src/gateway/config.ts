@@ -292,6 +292,7 @@ export function persistEnsureWeixinAccount(path: string, accountId: string): str
   if (!ids.includes(id)) ids.push(id);
   map.set('accounts', ids);
   map.set('mode', 'external');
+  map.set('enabled', true);
   writeFileSync(p, doc.toString(), 'utf8');
   const reparsed = migrateConfig(parse(readFileSync(p, 'utf8')));
   if (!reparsed.weixin.accounts.includes(id)) {
@@ -299,6 +300,9 @@ export function persistEnsureWeixinAccount(path: string, accountId: string): str
   }
   if (reparsed.weixin.mode !== 'external') {
     throw new Error('持久化校验失败：weixin.mode 未更新为 external');
+  }
+  if (reparsed.weixin.enabled !== true) {
+    throw new Error('持久化校验失败：weixin.enabled 未打开');
   }
   return [...reparsed.weixin.accounts];
 }

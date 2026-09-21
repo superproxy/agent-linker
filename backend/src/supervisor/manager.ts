@@ -190,15 +190,24 @@ export class ProcessManager {
     return true;
   }
 
-  /** weixin 实例 id 列表：yaml accounts ∪ 运行时额外账号；都空则默认单实例 */
-  weixinInstanceIds(): ProcessInstanceId[] {
+  /** 已绑定的微信账号 id（yaml ∪ 运行时）；未绑定则不维护进程 */
+  weixinAccountList(): string[] {
     const yaml = this.gw.shared.weixin.accounts ?? [];
     const extra = this.extraWeixinAccounts?.() ?? [];
     const accounts: string[] = [];
     for (const a of [...yaml, ...extra]) {
       if (a && !accounts.includes(a)) accounts.push(a);
     }
-    return accounts.length > 0 ? accounts.map((a) => `weixin:${a}` as ProcessInstanceId) : ['weixin'];
+    return accounts;
+  }
+
+  /**
+   * weixin 实例：每个已绑定登录用户一个 `weixin:<username>`。
+   * 未绑定（accounts 空）不占位默认 `weixin`——`restart:all` 不会空拉一份立刻退出的进程。
+   * 扫码绑定后写入 accounts，再 restart 对应实例。
+   */
+  weixinInstanceIds(): ProcessInstanceId[] {
+    return this.weixinAccountList().map((a) => `weixin:${a}` as ProcessInstanceId);
   }
 
   /** 全量实例（状态/启动顺序展示：gateway → weixin 实例 → node） */
@@ -264,16 +273,23 @@ export class ProcessManager {
    * 页面「重启渠道」只操作 weixin:<账号>，旧进程继续用过期 token 打 getUpdates。
    */
   private async reapOrphanDefaultWeixin(ids: ProcessInstanceId[]): Promise<void> {
-    const touchingAccount = this.expand(ids).some((id) => instOf(id).base === 'weixin' && id !== 'weixin');
-    if (!touchingAccount) return;
+    const mentionsWeixin =
+      ids.some((id) => instOf(id).base === 'weixin') ||
+      this.expand(ids).some((id) => instOf(id).base === 'weixin');
+    if (!mentionsWeixin) return;
     if (!readPid(this.pidFile('weixin'))) return;
-    console.log('→ 停止遗留的默认微信进程 weixin（已切换为 weixin:<账号> 实例）');
+    console.log('→ 停止遗留的默认微信进程 weixin（已改为按登录用户 weixin:<账号> 维护）');
     await this.stopOne('weixin');
   }
 
   async start(ids: ProcessInstanceId[] = this.allInstanceIds()): Promise<void> {
+    const requestedWeixin = ids.some((id) => instOf(id).base === 'weixin');
     await this.reapOrphanDefaultWeixin(ids);
-    for (const id of this.expand(ids)) {
+    const expanded = this.expand(ids);
+    if (requestedWeixin && !expanded.some((id) => instOf(id).base === 'weixin')) {
+      console.log('ℹ️  尚未绑定微信账号，跳过微信进程。请用后台登录账号在「微信登录」扫码绑定后再重启。');
+    }
+    for (const id of expanded) {
       await this.startOne(id);
     }
   }
