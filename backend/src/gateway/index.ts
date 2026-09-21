@@ -886,10 +886,12 @@ export async function buildServer(options?: {
       isProcessRunning: (accountId) => pm.isRunning(`weixin:${accountId}` as ProcessInstanceId),
       async onBound(accountId) {
         channelTokenStore.revokeForOwner('weixin', accountId);
+        weixinLoginService.clearChannelTokenCache(accountId);
         const accounts = persistEnsureWeixinAccount(configPath, accountId);
         config.weixin = { ...config.weixin, accounts, mode: 'external' };
         if (weixinBot) await weixinBot.stop().catch(() => {});
-        await pm.start([`weixin:${accountId}` as ProcessInstanceId]);
+        // start 遇已运行会跳过，旧进程内存里仍持有 ct_；必须重启才能丢掉缓存
+        await pm.restart([`weixin:${accountId}` as ProcessInstanceId]);
       },
       async restartAccount(accountId) {
         const accounts = persistEnsureWeixinAccount(configPath, accountId);

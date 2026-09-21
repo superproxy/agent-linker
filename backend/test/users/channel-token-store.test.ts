@@ -73,6 +73,21 @@ test('按 owner 隔离：同 peer 不同绑定账号各持一枚；revokeForOwne
   assert.notEqual(alice2.token, alice.token);
 });
 
+test('revokeForOwner 同时清掉无归属旧票；ensure 带 owner 时不复用无归属 ct_', () => {
+  const { store } = freshStore();
+  const legacy = store.ensure('weixin', 'wx_old');
+  assert.equal(legacy.ownerUsername, undefined);
+
+  store.revokeForOwner('weixin', 'alice');
+  assert.equal(store.resolve(legacy.token), null);
+
+  const leftover = store.ensure('weixin', 'wx_peer');
+  const owned = store.ensure('weixin', 'wx_peer', undefined, 'alice');
+  assert.notEqual(owned.token, leftover.token);
+  assert.equal(store.resolve(leftover.token), null);
+  assert.equal(owned.ownerUsername, 'alice');
+});
+
 test('不同用户互不影响；list 返回全部记录', () => {
   const { store } = freshStore();
   const a = store.ensure('weixin', 'a');

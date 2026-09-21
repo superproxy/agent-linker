@@ -63,11 +63,13 @@ export class ChannelTokenStore {
 
   /**
    * 获取某渠道用户的现有 token；没有则签发一枚（幂等：同一 owner+用户长期复用一枚）。
-   * ownerUsername 有值时只匹配该登录用户的微信槽，避免重新绑定后仍拿到旧凭据。
+   * ownerUsername 有值时只匹配该登录用户的微信槽；同 peer 的无归属旧票会被吊销后重签。
    */
   ensure(channel: string, userId: string, label?: string, ownerUsername?: string): ChannelTokenRecord {
     const existing = this.find(channel, userId, ownerUsername);
     if (existing) return existing;
+    const owner = ownerUsername?.trim();
+    if (owner) this.revokeUnowned(channel, userId);
     return this.issue(channel, userId, label, ownerUsername);
   }
 
@@ -127,7 +129,15 @@ export class ChannelTokenStore {
     const owner = ownerUsername.trim();
     if (!owner) return;
     for (const r of this.kv.list()) {
-      if (r.channel === channel && r.ownerUsername === owner) this.kv.delete(r.token);
+      if (r.channel !== channel) continue;
+      // 无 owner 的旧数据无法按槽吊销，绑定时一并清掉，避免后台仍显示原来的 ct_
+      if (r.ownerUsername === owner || !r.ownerUsername) this.kv.delete(r.token);
+    }
+  }
+
+  private revokeUnowned(channel: string, userId: string): void {
+    for (const r of this.kv.list()) {
+      if (r.channel === channel && r.userId === userId && !r.ownerUsername) this.kv.delete(r.token);
     }
   }
 }

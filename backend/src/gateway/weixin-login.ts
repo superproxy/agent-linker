@@ -116,10 +116,34 @@ export class WeixinLoginService {
    * 不存在的文件视为已解绑（幂等）。
    */
   unbind(accountId: string): { accountId: string; removed: string[] } {
+    const id = this.assertAccountId(accountId);
+    const removed = this.removeAccountFiles(id, [
+      `${id}.json`,
+      `${id}.sync.json`,
+      `${id}.context-tokens.json`,
+      `${id}.user-tokens.json`,
+    ]);
+    return { accountId: id, removed };
+  }
+
+  /**
+   * 重新绑定时只清 bot 侧 ct_ 缓存，保留登录态 json。
+   * 否则独立 bot 进程会从 user-tokens.json 把已吊销的 ct_ 再读回来。
+   */
+  clearChannelTokenCache(accountId: string): { accountId: string; removed: string[] } {
+    const id = this.assertAccountId(accountId);
+    const removed = this.removeAccountFiles(id, [`${id}.context-tokens.json`, `${id}.user-tokens.json`]);
+    return { accountId: id, removed };
+  }
+
+  private assertAccountId(accountId: string): string {
     const id = accountId.trim();
     if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error(`非法微信账号槽: ${accountId}`);
+    return id;
+  }
+
+  private removeAccountFiles(id: string, names: string[]): string[] {
     const dir = this.accountsDir();
-    const names = [`${id}.json`, `${id}.sync.json`, `${id}.context-tokens.json`, `${id}.user-tokens.json`];
     const removed: string[] = [];
     for (const name of names) {
       const file = join(dir, name);
@@ -127,7 +151,7 @@ export class WeixinLoginService {
       rmSync(file, { force: true });
       removed.push(name);
     }
-    return { accountId: id, removed };
+    return removed;
   }
 
   /** 懒加载 openclaw-weixin channel 插件（模拟 register 提取 gateway.loginWithQr*） */

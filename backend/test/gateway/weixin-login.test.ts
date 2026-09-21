@@ -201,11 +201,15 @@ test('WeixinLoginService.unbind：删除账号槽登录态且不影响其它账�
   writeFileSync(join(dir, 'alice.json'), acc('alice'));
   writeFileSync(join(dir, 'alice.sync.json'), '{}');
   writeFileSync(join(dir, 'alice.context-tokens.json'), '{}');
+  writeFileSync(join(dir, 'alice.user-tokens.json'), '{}');
   writeFileSync(join(dir, 'bob.json'), acc('bob'));
   const svc = new WeixinLoginService({ stateDir });
   assert.equal(svc.status().configured, true);
+  const cache = svc.clearChannelTokenCache('alice');
+  assert.deepEqual(cache.removed.sort(), ['alice.context-tokens.json', 'alice.user-tokens.json']);
+  assert.equal(existsSync(join(dir, 'alice.json')), true);
   const r = svc.unbind('alice');
-  assert.deepEqual(r.removed.sort(), ['alice.context-tokens.json', 'alice.json', 'alice.sync.json']);
+  assert.deepEqual(r.removed.sort(), ['alice.json', 'alice.sync.json']);
   assert.equal(existsSync(join(dir, 'alice.json')), false);
   assert.equal(existsSync(join(dir, 'bob.json')), true);
   const left = svc.status().accounts.map((a) => a.id);

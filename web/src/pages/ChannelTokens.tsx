@@ -120,7 +120,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
     <div>
       <p className="page-desc">
         每个渠道终端（微信 openid）一枚终端级 token（<code>ct_</code> 前缀），微信 bot 代该终端直连网关，只能访问其本人的会话任务，不能触碰管理接口。
-        重新绑定或取消绑定微信会吊销该账号槽下已签发的凭据，下次消息自动签发新 token。「获取 / 签发」对已有终端会重新生成。
+        重新绑定或取消绑定微信会吊销该账号槽的 <code>ct_</code> 并重启 bot（清本地缓存），下次消息自动签发新 token。后台「Key」页的 <code>k_</code> 是任务直连 key，换绑微信不会更换。「获取 / 签发」对已有终端会重新生成。
       </p>
 
       <Space.Compact style={{ marginBottom: 14, width: '100%', maxWidth: 560 }}>

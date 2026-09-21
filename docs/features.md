@@ -29,7 +29,7 @@
 - **个人微信 / 企业微信**：两种实现形态——插件运行时（openclaw 插件）或网关内嵌/独立进程的 botAgent（`channels/weixin-bot.ts`、`wecom-bot.ts`）。
 - `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起）。
 - **多账号**：每个**登录用户**绑定自己的微信（账号槽 = 用户名，进程 `weixin:<username>`）。扫码成功后写入 `weixin.accounts` 并将 `weixin.mode` 设为 `external`，由进程管理器为该用户单独拉起 bot（pid/日志/登录态隔离）。管理员在「本机 · 进程」可见全部实例；普通用户只在「微信登录」页看自己的绑定与进程状态。yaml 里仍可用 `weixin.accounts` 预置账号；未配置且无人绑定时保持单实例 `weixin`。
-- 支持扫码登录与**取消绑定**（删除该用户登录态、从 `weixin.accounts` 移除并停止 `weixin:<用户名>`）；绑定成功后自动拉起/重启对应用户的微信进程，并**吊销该账号槽已签发的渠道凭据 `ct_`**，下次消息重新生成。渠道用户自动签发作用域凭据（`ct_`）。
+- 支持扫码登录与**取消绑定**（删除该用户登录态、从 `weixin.accounts` 移除并停止 `weixin:<用户名>`）；绑定成功后**重启**对应用户的微信进程（`pm start` 遇已运行会跳过），并吊销该账号槽的渠道凭据 `ct_`、清掉 bot 本地 `user-tokens.json` 缓存，下次消息重新签发。后台「Key」页的任务 key（`k_`）挂在登录用户任务空间上，换绑微信不会换发。
 - **任务切换**：每个登录用户一份任务列表。微信里 `/task list|use|new|default` 由该用户的微信连接器解析并写入同一空间；后台「激活」写同一 `activeTaskId`，连接器短缓存后按新任务路由。不同联系人共用任务列表，对话上下文按联系人分开。
 
 ## 管理后台（web /ui）
