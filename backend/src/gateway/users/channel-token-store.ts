@@ -22,6 +22,8 @@ export interface ChannelTokenRecord {
   channel: string;
   /** 渠道内用户 id（微信 from_user_id） */
   userId: string;
+  /** 登录用户微信账号槽（weixin:<id>）；缺省为旧数据 */
+  ownerUsername?: string;
   /** 备注名（可选，管理后台展示） */
   label?: string;
   createdAt: string;
@@ -60,24 +62,26 @@ export class ChannelTokenStore {
   }
 
   /**
-   * 获取某渠道用户的现有 token；没有则签发一枚（幂等：同一用户长期复用一枚，
-   * 与「长期有效 + 可手动吊销/轮换」的策略一致）。
+   * 获取某渠道用户的现有 token；没有则签发一枚（幂等：同一 owner+用户长期复用一枚）。
+   * ownerUsername 有值时只匹配该登录用户的微信槽，避免重新绑定后仍拿到旧凭据。
    */
-  ensure(channel: string, userId: string, label?: string): ChannelTokenRecord {
-    const existing = this.find(channel, userId);
+  ensure(channel: string, userId: string, label?: string, ownerUsername?: string): ChannelTokenRecord {
+    const existing = this.find(channel, userId, ownerUsername);
     if (existing) return existing;
-    return this.issue(channel, userId, label);
+    return this.issue(channel, userId, label, ownerUsername);
   }
 
   /** 强制为某渠道用户签发一枚新 token（不影响旧 token；调用方可随后 revoke 旧的实现轮换） */
-  issue(channel: string, userId: string, label?: string): ChannelTokenRecord {
+  issue(channel: string, userId: string, label?: string, ownerUsername?: string): ChannelTokenRecord {
     const ch = channel.trim();
     const uid = userId.trim();
     if (!ch || !uid) throw new Error('channel 与 userId 必填');
+    const owner = ownerUsername?.trim();
     const record: ChannelTokenRecord = {
       token: newChannelToken(),
       channel: ch,
       userId: uid,
+      ...(owner ? { ownerUsername: owner } : {}),
       ...(label?.trim() ? { label: label.trim() } : {}),
       createdAt: new Date().toISOString(),
     };
@@ -85,11 +89,15 @@ export class ChannelTokenStore {
     return record;
   }
 
-  /** 查到某渠道用户的唯一（最新）token 记录；无则 null */
-  find(channel: string, userId: string): ChannelTokenRecord | null {
-    const all = this.kv.list().filter((r) => r.channel === channel && r.userId === userId);
+  /** 查到某渠道用户的 token；指定 owner 时只看该账号槽（不含无归属旧记录） */
+  find(channel: string, userId: string, ownerUsername?: string): ChannelTokenRecord | null {
+    const owner = ownerUsername?.trim();
+    const all = this.kv.list().filter((r) => {
+      if (r.channel !== channel || r.userId !== userId) return false;
+      if (owner) return r.ownerUsername === owner;
+      return true;
+    });
     if (all.length === 0) return null;
-    // 理论上一个用户只有一枚（ensure 幂等）；多枚时取最近创建
     all.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     return all[0] ?? null;
   }
@@ -104,10 +112,22 @@ export class ChannelTokenStore {
     this.kv.delete(token.trim());
   }
 
-  /** 删除某渠道用户的全部 token（删除用户时级联清理） */
-  revokeForUser(channel: string, userId: string): void {
+  /** 删除某渠道用户的 token；指定 owner 时只删该账号槽 */
+  revokeForUser(channel: string, userId: string, ownerUsername?: string): void {
+    const owner = ownerUsername?.trim();
     for (const r of this.kv.list()) {
-      if (r.channel === channel && r.userId === userId) this.kv.delete(r.token);
+      if (r.channel !== channel || r.userId !== userId) continue;
+      if (owner && r.ownerUsername !== owner) continue;
+      this.kv.delete(r.token);
+    }
+  }
+
+  /** 删除某登录用户微信槽下全部渠道凭据（重新绑定 / 取消绑定时吊销旧 ct_） */
+  revokeForOwner(channel: string, ownerUsername: string): void {
+    const owner = ownerUsername.trim();
+    if (!owner) return;
+    for (const r of this.kv.list()) {
+      if (r.channel === channel && r.ownerUsername === owner) this.kv.delete(r.token);
     }
   }
 }

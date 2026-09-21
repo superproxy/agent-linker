@@ -94,7 +94,7 @@ export class HttpUserTokenProvider implements UserTokenProvider {
         'Content-Type': 'application/json',
         ...(this.opts.gatewayToken ? { Authorization: `Bearer ${this.opts.gatewayToken}` } : {}),
       },
-      body: JSON.stringify({ channel, userId }),
+      body: JSON.stringify({ channel, userId, ownerUsername: this.opts.accountId }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');

@@ -39,6 +39,7 @@ export function registerChannelTokenApi(
     channel: r.channel,
     userId: r.userId,
     ...(r.label ? { label: r.label } : {}),
+    ...(r.ownerUsername ? { ownerUsername: r.ownerUsername } : {}),
     createdAt: r.createdAt,
     ...(r.lastUsedAt ? { lastUsedAt: r.lastUsedAt } : {}),
     tokenPreview: `${r.token.slice(0, 6)}…`,
@@ -51,11 +52,11 @@ export function registerChannelTokenApi(
 
   app.post('/api/channel-tokens/ensure', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!requireAdmin(request, reply)) return reply;
-    const body = request.body as { channel?: string; userId?: string; label?: string } | null | undefined;
+    const body = request.body as { channel?: string; userId?: string; label?: string; ownerUsername?: string } | null | undefined;
     const channel = body?.channel?.trim();
     const userId = body?.userId?.trim();
     if (!channel || !userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    const rec = tokens.ensure(channel, userId, body?.label);
+    const rec = tokens.ensure(channel, userId, body?.label, body?.ownerUsername?.trim());
     // 确保该渠道用户已有任务建档（开箱可聊），与 bot 首条消息行为一致
     taskService.load(channel, userId);
     return { token: rec.token, channel: rec.channel, userId: rec.userId };
@@ -63,12 +64,14 @@ export function registerChannelTokenApi(
 
   app.post('/api/channel-tokens/rotate', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!requireAdmin(request, reply)) return reply;
-    const body = request.body as { channel?: string; userId?: string; label?: string } | null | undefined;
+    const body = request.body as { channel?: string; userId?: string; label?: string; ownerUsername?: string } | null | undefined;
     const channel = body?.channel?.trim();
     const userId = body?.userId?.trim();
     if (!channel || !userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    tokens.revokeForUser(channel, userId); // 轮换：先吊销旧 token
-    const rec = tokens.issue(channel, userId, body?.label);
+    const owner = body?.ownerUsername?.trim();
+    const prev = tokens.find(channel, userId, owner);
+    tokens.revokeForUser(channel, userId, owner);
+    const rec = tokens.issue(channel, userId, body?.label ?? prev?.label, owner ?? prev?.ownerUsername);
     taskService.load(channel, userId);
     return { token: rec.token, channel: rec.channel, userId: rec.userId };
   });
@@ -98,11 +101,12 @@ export function registerChannelTokenApi(
       return reply.code(400).send({ error: '网关未开启鉴权，无需换取用户 token' });
     }
     if (!requireAdmin(request, reply)) return reply;
-    const body = request.body as { channel?: string; userId?: string; label?: string } | null | undefined;
+    const body = request.body as { channel?: string; userId?: string; label?: string; ownerUsername?: string; accountId?: string } | null | undefined;
     const channel = body?.channel?.trim();
     const userId = body?.userId?.trim();
     if (!channel || !userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    const rec = tokens.ensure(channel, userId, body?.label);
+    const owner = body?.ownerUsername?.trim() || body?.accountId?.trim();
+    const rec = tokens.ensure(channel, userId, body?.label, owner);
     taskService.load(channel, userId);
     return { token: rec.token };
   });

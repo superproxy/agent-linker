@@ -44,6 +44,11 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
     }
   };
 
+  const issueOrRotate = (uid: string) => {
+    const exists = (rows ?? []).some((r) => r.channel === 'weixin' && r.userId === uid);
+    return exists ? ops.rotateChannelToken('weixin', uid) : ops.ensureChannelToken('weixin', uid);
+  };
+
   const columns: ColumnsType<ChannelTokenInfo> = [
     {
       title: '凭据',
@@ -60,6 +65,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
             {r.channel === 'weixin' ? '微信' : r.channel}
           </Tag>
           <code className="code-cell">{r.userId}</code>
+          {r.ownerUsername ? <span className="sub-muted">{r.ownerUsername}</span> : null}
         </Space>
       ),
     },
@@ -114,7 +120,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
     <div>
       <p className="page-desc">
         每个渠道终端（微信 openid）一枚终端级 token（<code>ct_</code> 前缀），微信 bot 代该终端直连网关，只能访问其本人的会话任务，不能触碰管理接口。
-        它代表的是渠道终端而非系统账号；真实用户（系统账号）的长期凭据见「我的 Token」，Chatbox 任务级直连请用「Key 管理」里的任务 key。
+        重新绑定或取消绑定微信会吊销该账号槽下已签发的凭据，下次消息自动签发新 token。「获取 / 签发」对已有终端会重新生成。
       </p>
 
       <Space.Compact style={{ marginBottom: 14, width: '100%', maxWidth: 560 }}>
@@ -125,7 +131,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
           placeholder="微信终端 id（from_user_id / openid）"
           onPressEnter={() =>
             userId.trim() &&
-            void run('ensure', () => ops.ensureChannelToken('weixin', userId.trim())).then(() => setUserId(''))
+            void run('ensure', () => issueOrRotate(userId.trim())).then(() => setUserId(''))
           }
         />
         <Button
@@ -133,7 +139,7 @@ export function ChannelTokensPage(props: { base: string; token: string; onAuthEr
           disabled={!userId.trim() || busyKey === 'ensure'}
           loading={busyKey === 'ensure'}
           onClick={() =>
-            void run('ensure', () => ops.ensureChannelToken('weixin', userId.trim())).then(() => setUserId(''))
+            void run('ensure', () => issueOrRotate(userId.trim())).then(() => setUserId(''))
           }
         >
           获取 / 签发

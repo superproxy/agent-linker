@@ -698,6 +698,7 @@ export interface ChannelUserSummary {
 export interface ChannelTokenInfo {
   channel: string;
   userId: string;
+  ownerUsername?: string;
   label?: string;
   createdAt: string;
   lastUsedAt?: string;

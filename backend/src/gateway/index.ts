@@ -851,7 +851,7 @@ export async function buildServer(options?: {
             ...(auth.token ? { gatewayToken: auth.token } : {}),
             // 内嵌模式：直接在进程内为每个微信用户签发/复用用户级 token（无需 HTTP 引导）
             userTokenProvider: new InProcessUserTokenProvider((channel, userId) =>
-              channelTokenStore.ensure(channel, userId).token,
+              channelTokenStore.ensure(channel, userId, undefined, config.weixin?.accountId).token,
             ),
             log: (...args: unknown[]) => app.log.info(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')),
             errLog: (...args: unknown[]) => app.log.error(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')),
@@ -885,6 +885,7 @@ export async function buildServer(options?: {
       },
       isProcessRunning: (accountId) => pm.isRunning(`weixin:${accountId}` as ProcessInstanceId),
       async onBound(accountId) {
+        channelTokenStore.revokeForOwner('weixin', accountId);
         const accounts = persistEnsureWeixinAccount(configPath, accountId);
         config.weixin = { ...config.weixin, accounts, mode: 'external' };
         if (weixinBot) await weixinBot.stop().catch(() => {});
@@ -897,6 +898,7 @@ export async function buildServer(options?: {
         await pm.restart([`weixin:${accountId}` as ProcessInstanceId]);
       },
       async onUnbound(accountId) {
+        channelTokenStore.revokeForOwner('weixin', accountId);
         const next = persistRemoveWeixinAccount(configPath, accountId);
         config.weixin = { ...config.weixin, accounts: next };
         await pm.stop([`weixin:${accountId}` as ProcessInstanceId]);

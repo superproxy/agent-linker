@@ -59,6 +59,20 @@ test('轮换：revokeForUser 吊销旧 token，重新 ensure 签发新 token', (
   assert.ok(store.resolve(fresh.token));
 });
 
+test('按 owner 隔离：同 peer 不同绑定账号各持一枚；revokeForOwner 只清自己的', () => {
+  const { store } = freshStore();
+  const alice = store.ensure('weixin', 'wx_same', undefined, 'alice');
+  const bob = store.ensure('weixin', 'wx_same', undefined, 'bob');
+  assert.notEqual(alice.token, bob.token);
+  assert.equal(store.ensure('weixin', 'wx_same', undefined, 'alice').token, alice.token);
+
+  store.revokeForOwner('weixin', 'alice');
+  assert.equal(store.resolve(alice.token), null);
+  assert.ok(store.resolve(bob.token));
+  const alice2 = store.ensure('weixin', 'wx_same', undefined, 'alice');
+  assert.notEqual(alice2.token, alice.token);
+});
+
 test('不同用户互不影响；list 返回全部记录', () => {
   const { store } = freshStore();
   const a = store.ensure('weixin', 'a');
