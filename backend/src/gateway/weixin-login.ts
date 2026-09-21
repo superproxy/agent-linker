@@ -8,7 +8,7 @@
  *   4. 前端轮询 loginWithQrWait() 直到 connected
  *   5. 插件自动把 bot_token + ilink_bot_id 写入 accounts/；可选 POST /api/weixin/reload 热重启 adapter
  */
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getLayout } from '../install/layout.js';
@@ -69,6 +69,8 @@ export interface WeixinLoginDeps {
   onBound?: (accountId: string) => void | Promise<void>;
   /** 重启该用户的微信进程（优先于内嵌 reloadBot） */
   restartAccount?: (accountId: string) => void | Promise<void>;
+  /** 取消绑定后停进程并从 weixin.accounts 移除 */
+  onUnbound?: (accountId: string) => void | Promise<void>;
   isProcessRunning?: (accountId: string) => boolean;
 }
 
@@ -107,6 +109,25 @@ export class WeixinLoginService {
       /* 无可用账号 */
     }
     return { configured: accounts.length > 0, accounts, activeAccountId };
+  }
+
+  /**
+   * 取消绑定：删除该账号槽的登录态及附属文件（sync / context-tokens / user-tokens）。
+   * 不存在的文件视为已解绑（幂等）。
+   */
+  unbind(accountId: string): { accountId: string; removed: string[] } {
+    const id = accountId.trim();
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error(`非法微信账号槽: ${accountId}`);
+    const dir = this.accountsDir();
+    const names = [`${id}.json`, `${id}.sync.json`, `${id}.context-tokens.json`, `${id}.user-tokens.json`];
+    const removed: string[] = [];
+    for (const name of names) {
+      const file = join(dir, name);
+      if (!existsSync(file)) continue;
+      rmSync(file, { force: true });
+      removed.push(name);
+    }
+    return { accountId: id, removed };
   }
 
   /** 懒加载 openclaw-weixin channel 插件（模拟 register 提取 gateway.loginWithQr*） */
@@ -180,6 +201,7 @@ export async function qrDataUrlOf(content: string): Promise<string> {
  *  - POST /api/weixin/qr              发起扫码登录 → { sessionKey, qrContent, qrDataUrl(PNG) }
  *  - GET  /api/weixin/qr/status      轮询扫码结果（loginWithQrWait，阻塞至确认/超时）
  *  - POST /api/weixin/reload          重启该用户的 weixin:<id> 进程或内嵌 adapter
+ *  - POST /api/weixin/unbind          取消绑定（删登录态、停 weixin:<id>）
  */
 export function registerWeixinApi(
   app: FastifyInstance,
@@ -309,6 +331,29 @@ export function registerWeixinApi(
       return { ok: true };
     } catch (err) {
       return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/weixin/unbind', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!requireAuth(request, reply)) return;
+    const body = (request.body ?? {}) as { accountId?: string };
+    const accountId = resolveAccountId(request, body.accountId);
+    if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
+    if (!accountId) return reply.code(400).send({ error: '账号槽必填' });
+    try {
+      const result = service.unbind(accountId);
+      try {
+        await deps.onUnbound?.(accountId);
+      } catch (err) {
+        return reply.code(500).send({
+          error: `登录态已清除，但停止微信进程失败：${err instanceof Error ? err.message : String(err)}`,
+          accountId,
+          removed: result.removed,
+        });
+      }
+      return { ok: true, accountId, removed: result.removed };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 }

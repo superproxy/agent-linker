@@ -896,6 +896,12 @@ export async function buildServer(options?: {
         if (weixinBot) await weixinBot.stop().catch(() => {});
         await pm.restart([`weixin:${accountId}` as ProcessInstanceId]);
       },
+      async onUnbound(accountId) {
+        const next = persistRemoveWeixinAccount(configPath, accountId);
+        config.weixin = { ...config.weixin, accounts: next };
+        await pm.stop([`weixin:${accountId}` as ProcessInstanceId]);
+        if (weixinBot) await weixinBot.stop().catch(() => {});
+      },
       reloadBot: weixinBot ? () => weixinBot.reload() : undefined,
       ...(weixinMode === 'external'
         ? {

@@ -3,7 +3,7 @@ import { Alert, Button, Card, Col, Descriptions, Row, Space, Spin, Tag } from 'a
 import { QrcodeOutlined, ReloadOutlined } from '@ant-design/icons';
 import { WeixinClient, type WeixinStatus } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
-import { notify } from '../lib/notify';
+import { confirmAsync, notify } from '../lib/notify';
 
 export function WeixinPage(props: { base: string; token: string; onAuthError: AuthErrorHandler; onStatus?: (s: WeixinStatus | null) => void }) {
   const wx = useMemo(() => new WeixinClient(props.base, () => props.token), [props.base, props.token]);
@@ -12,6 +12,7 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
   const [err, setErr] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [unbinding, setUnbinding] = useState(false);
   const [msg, setMsg] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -94,6 +95,32 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
     }
   };
 
+  const unbind = async () => {
+    const slot = status?.bindAccountId;
+    const ok = await confirmAsync({
+      title: '取消绑定微信机器人？',
+      content: '将停止该账号的微信进程并删除本机登录态，之后需要重新扫码才能收发消息。任务空间不会删除。',
+      okText: '取消绑定',
+      okButtonProps: { danger: true },
+    });
+    if (!ok) return;
+    setUnbinding(true);
+    setMsg({ type: 'info', text: '正在取消绑定…' });
+    try {
+      await wx.unbind(slot);
+      cancelScan();
+      setMsg({ type: 'success', text: '已取消绑定' });
+      notify.success('已取消微信绑定');
+      await refresh();
+    } catch (e) {
+      if (!props.onAuthError(e)) {
+        setMsg({ type: 'error', text: `取消绑定失败：${e instanceof Error ? e.message : String(e)}` });
+      }
+    } finally {
+      setUnbinding(false);
+    }
+  };
+
   return (
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={14}>
@@ -169,8 +196,13 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
             </Button>
             {scanning ? <Button onClick={cancelScan}>取消</Button> : null}
             {status?.configured ? (
-              <Button icon={<ReloadOutlined />} onClick={() => void reloadChannel()}>
+              <Button icon={<ReloadOutlined />} onClick={() => void reloadChannel()} disabled={unbinding}>
                 重启渠道
+              </Button>
+            ) : null}
+            {status?.configured ? (
+              <Button danger loading={unbinding} disabled={scanning} onClick={() => void unbind()}>
+                取消绑定
               </Button>
             ) : null}
           </Space>

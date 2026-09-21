@@ -7,6 +7,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { registerWeixinApi, WeixinLoginService } from '../../src/gateway/weixin-login.js';
 
 interface StartCall {
@@ -108,6 +111,7 @@ test('非管理员无登录会话 → 微信接口 403', async () => {
   try {
     assert.equal((await app.inject({ method: 'GET', url: '/api/weixin/status' })).statusCode, 403);
     assert.equal((await app.inject({ method: 'POST', url: '/api/weixin/qr', payload: {} })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/weixin/unbind', payload: {} })).statusCode, 403);
   } finally {
     await app.close();
   }
@@ -157,4 +161,54 @@ test('普通用户扫码强制本人账号槽，看不到其他人账号', async
   } finally {
     await app.close();
   }
+});
+
+test('POST /api/weixin/unbind：普通用户只能解绑自己，并回调 onUnbound', async () => {
+  const { service } = buildStub();
+  const seen: string[] = [];
+  (service as { unbind: (id: string) => { accountId: string; removed: string[] } }).unbind = (id) => {
+    seen.push(`svc:${id}`);
+    return { accountId: id, removed: [`${id}.json`] };
+  };
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, {
+    isAdmin: () => false,
+    sessionUser: () => ({ username: 'alice' }),
+    onUnbound: (id) => {
+      seen.push(`cb:${id}`);
+    },
+  });
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/weixin/unbind',
+      payload: { accountId: 'admin' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(seen, ['svc:alice', 'cb:alice']);
+    assert.equal((res.json() as { accountId: string }).accountId, 'alice');
+  } finally {
+    await app.close();
+  }
+});
+
+test('WeixinLoginService.unbind：删除账号槽登录态且不影响其它账号', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-unbind-'));
+  const dir = join(stateDir, 'openclaw-weixin', 'accounts');
+  mkdirSync(dir, { recursive: true });
+  const acc = (id: string) =>
+    JSON.stringify({ token: `tok-${id}`, userId: `wx_${id}`, savedAt: '2026-01-01' });
+  writeFileSync(join(dir, 'alice.json'), acc('alice'));
+  writeFileSync(join(dir, 'alice.sync.json'), '{}');
+  writeFileSync(join(dir, 'alice.context-tokens.json'), '{}');
+  writeFileSync(join(dir, 'bob.json'), acc('bob'));
+  const svc = new WeixinLoginService({ stateDir });
+  assert.equal(svc.status().configured, true);
+  const r = svc.unbind('alice');
+  assert.deepEqual(r.removed.sort(), ['alice.context-tokens.json', 'alice.json', 'alice.sync.json']);
+  assert.equal(existsSync(join(dir, 'alice.json')), false);
+  assert.equal(existsSync(join(dir, 'bob.json')), true);
+  const left = svc.status().accounts.map((a) => a.id);
+  assert.deepEqual(left, ['bob']);
+  assert.throws(() => svc.unbind('../evil'), /非法微信账号槽/);
 });

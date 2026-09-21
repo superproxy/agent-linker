@@ -260,6 +260,18 @@ export class WeixinClient {
       throw new Error(`weixin reload ${res.status} ${body.slice(0, 200)}`);
     }
   }
+
+  async unbind(accountId?: string): Promise<void> {
+    const res = await fetch(this.url('/api/weixin/unbind'), {
+      method: 'POST',
+      headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(accountId ? { accountId } : {}),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`weixin unbind ${res.status} ${body.slice(0, 200)}`);
+    }
+  }
 }
 
 /** 管理后台 agent 运行态（/api/agents） */
