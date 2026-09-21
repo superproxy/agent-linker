@@ -18,7 +18,7 @@ let msgSeq = 0;
 
 function sessionFingerprint(s: ChatSession | null): string {
   if (!s) return 'oneshot';
-  return `${s.channel}:${s.userId}:${s.taskId}`;
+  return `${s.ownerUsername ?? ''}:${s.channel}:${s.userId}:${s.taskId}`;
 }
 
 export function ChatPage(
@@ -107,6 +107,7 @@ export function ChatPage(
               userId: session.userId,
               task: session.taskId,
               agent: session.agentId,
+              ...(session.ownerUsername ? { ownerUsername: session.ownerUsername } : {}),
             }
         : { signal: abort.signal };
       for await (const d of client.streamChat(

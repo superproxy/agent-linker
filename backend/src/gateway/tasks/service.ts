@@ -83,13 +83,20 @@ export class TaskService {
   }
 
   /** 读用户状态；不存在则预置 default 任务并落盘（开箱可聊） */
-  load(channel: string, userId: string): UserTasks {
-    const existing = this.store.read(channel, userId);
-    if (existing) return this.ensureKeys(existing);
+  load(channel: string, userId: string, ownerUsername?: string): UserTasks {
+    const existing = this.store.read(channel, userId, ownerUsername);
+    if (existing) {
+      if (ownerUsername && existing.ownerUsername !== ownerUsername) {
+        existing.ownerUsername = ownerUsername;
+        this.store.write(existing);
+      }
+      return this.ensureKeys(existing);
+    }
     const workspace = this.taskWorkspaceDir(userId, DEFAULT_TASK_ID);
     const fresh: UserTasks = {
       channel,
       userId,
+      ...(ownerUsername ? { ownerUsername } : {}),
       activeTaskId: DEFAULT_TASK_ID,
       tasks: [
         {
@@ -181,14 +188,14 @@ export class TaskService {
    * 全局反查：key → {channel, userId, task}（跨用户；用于单 key 直连路由）。
    * 遍历用户状态文件实现，个人部署量级下足够，且永远读最新数据、无索引一致性问题。
    */
-  findByKey(key: string): { channel: string; userId: string; task: TaskItem } | undefined {
+  findByKey(key: string): { channel: string; userId: string; ownerUsername?: string; task: TaskItem } | undefined {
     const k = key.trim();
     if (!k) return undefined;
     for (const u of this.store.list()) {
-      const state = this.store.read(u.channel, u.userId);
+      const state = this.store.read(u.channel, u.userId, u.ownerUsername);
       if (!state) continue;
       const task = state.tasks.find((t) => t.key === k);
-      if (task) return { channel: u.channel, userId: u.userId, task };
+      if (task) return { channel: u.channel, userId: u.userId, ...(u.ownerUsername ? { ownerUsername: u.ownerUsername } : {}), task };
     }
     return undefined;
   }
@@ -203,21 +210,37 @@ export class TaskService {
   }
 
   /** 全部用户的任务明细（管理后台「任务」页用：平铺每个用户的全部任务） */
-  listAllTasks(): Array<{ channel: string; userId: string; activeTaskId: string; tasks: TaskItem[] }> {
-    return this.store.list().map((u) => {
-      const state = this.store.read(u.channel, u.userId);
-      return {
-        channel: u.channel,
-        userId: u.userId,
-        activeTaskId: state?.activeTaskId ?? u.activeTaskId,
-        tasks: state?.tasks ?? [],
-      };
-    });
+  listAllTasks(ownerUsername?: string): Array<{
+    channel: string;
+    userId: string;
+    ownerUsername?: string;
+    activeTaskId: string;
+    tasks: TaskItem[];
+  }> {
+    return this.store
+      .list()
+      .filter((u) => !ownerUsername || u.ownerUsername === ownerUsername)
+      .map((u) => {
+        const state = this.store.read(u.channel, u.userId, u.ownerUsername);
+        return {
+          channel: u.channel,
+          userId: u.userId,
+          ...(u.ownerUsername ? { ownerUsername: u.ownerUsername } : {}),
+          activeTaskId: state?.activeTaskId ?? u.activeTaskId,
+          tasks: state?.tasks ?? [],
+        };
+      });
   }
 
   /** 删除用户全部状态（默认任务也一并删除，无痕重建） */
-  deleteUser(channel: string, userId: string): void {
-    this.store.remove(channel, userId);
+  deleteUser(channel: string, userId: string, ownerUsername?: string): void {
+    this.store.remove(channel, userId, ownerUsername);
+  }
+
+  deleteOwnedBy(ownerUsername: string): void {
+    for (const u of this.store.list()) {
+      if (u.ownerUsername === ownerUsername) this.store.remove(u.channel, u.userId, ownerUsername);
+    }
   }
 
   activateTask(state: UserTasks, id: string): TaskItem {

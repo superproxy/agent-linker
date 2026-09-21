@@ -70,6 +70,7 @@ export interface ChatStreamOpts {
   userId?: string;
   task?: string;
   agent?: string;
+  ownerUsername?: string;
 }
 
 export class GatewayClient {
@@ -120,6 +121,7 @@ export class GatewayClient {
       body.userId = extra.userId;
       if (extra.task) body.task = extra.task;
       if (extra.agent) body.agent = extra.agent;
+      if (extra.ownerUsername) body.ownerUsername = extra.ownerUsername;
     }
     const res = await fetch(this.url('/v1/chat/completions'), {
       method: 'POST',
@@ -186,6 +188,9 @@ export interface WeixinStatus {
   configured: boolean;
   accounts: WeixinAccountInfo[];
   activeAccountId?: string;
+  bindAccountId?: string;
+  processId?: string;
+  processRunning?: boolean;
 }
 
 export interface WeixinQrResult {
@@ -244,8 +249,12 @@ export class WeixinClient {
     return (await res.json()) as WeixinQrStatus;
   }
 
-  async reload(): Promise<void> {
-    const res = await fetch(this.url('/api/weixin/reload'), { method: 'POST', headers: this.authHeaders() });
+  async reload(accountId?: string): Promise<void> {
+    const res = await fetch(this.url('/api/weixin/reload'), {
+      method: 'POST',
+      headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(accountId ? { accountId } : {}),
+    });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`weixin reload ${res.status} ${body.slice(0, 200)}`);
@@ -285,8 +294,8 @@ export interface RemoteNodeAgentView {
 
 /** 按机器聚合的 agent 开通视图（/api/agents/by-node） */
 export interface AgentsByNode {
-  defaultAgentId: string;
-  local: {
+  defaultAgentId?: string;
+  local?: {
     nodeId: 'local';
     name: string;
     online: true;
@@ -667,6 +676,7 @@ export interface ChildGatewayTargetInfo {
 export interface ChannelUserSummary {
   channel: string;
   userId: string;
+  ownerUsername?: string;
   activeTaskId: string;
   taskCount: number;
   updatedAt: number;
@@ -698,6 +708,7 @@ export interface TaskItem {
 export interface UserTasks {
   channel: string;
   userId: string;
+  ownerUsername?: string;
   activeTaskId: string;
   tasks: TaskItem[];
 }
@@ -806,6 +817,7 @@ export class OpsClient {
     nodeId?: string;
     key?: string;
     cwd?: string;
+    ownerUsername?: string;
   }): Promise<TaskItem> {
     return (await this.request('/api/tasks', { method: 'POST', body: JSON.stringify(input) })) as TaskItem;
   }
@@ -815,10 +827,11 @@ export class OpsClient {
     userId: string,
     taskId: string,
     patch: { name?: string; keyEnabled?: boolean; cwd?: string | null },
+    ownerUsername?: string,
   ): Promise<TaskItem> {
     const data = (await this.request(`/api/tasks/${encodeURIComponent(taskId)}`, {
       method: 'PATCH',
-      body: JSON.stringify({ channel, userId, ...patch }),
+      body: JSON.stringify({ channel, userId, ...patch, ...(ownerUsername ? { ownerUsername } : {}) }),
     })) as { task: TaskItem };
     return data.task;
   }
@@ -829,24 +842,32 @@ export class OpsClient {
     taskId: string,
     agentId: string,
     nodeId?: string,
+    ownerUsername?: string,
   ): Promise<TaskItem> {
     const data = (await this.request(`/api/tasks/${encodeURIComponent(taskId)}/agent`, {
       method: 'PATCH',
-      body: JSON.stringify({ channel, userId, agentId, ...(nodeId ? { nodeId } : {}) }),
+      body: JSON.stringify({
+        channel,
+        userId,
+        agentId,
+        ...(nodeId ? { nodeId } : {}),
+        ...(ownerUsername ? { ownerUsername } : {}),
+      }),
     })) as { task: TaskItem };
     return data.task;
   }
 
-  async activateTask(channel: string, userId: string, taskId: string): Promise<TaskItem> {
+  async activateTask(channel: string, userId: string, taskId: string, ownerUsername?: string): Promise<TaskItem> {
     const data = (await this.request(`/api/tasks/${encodeURIComponent(taskId)}/activate`, {
       method: 'PATCH',
-      body: JSON.stringify({ channel, userId }),
+      body: JSON.stringify({ channel, userId, ...(ownerUsername ? { ownerUsername } : {}) }),
     })) as { task: TaskItem };
     return data.task;
   }
 
-  async deleteTask(channel: string, userId: string, taskId: string): Promise<void> {
+  async deleteTask(channel: string, userId: string, taskId: string, ownerUsername?: string): Promise<void> {
     const q = new URLSearchParams({ channel, userId });
+    if (ownerUsername) q.set('owner', ownerUsername);
     await this.request(`/api/tasks/${encodeURIComponent(taskId)}?${q.toString()}`, { method: 'DELETE' });
   }
 
@@ -952,12 +973,12 @@ export class OpsClient {
 
   /** 节点 + 其上可路由 agent（任务弹窗级联选择用） */
   async nodeAgents(): Promise<{
-    local: { nodeId: string; name: string; online: boolean; agents: { id: string; displayName?: string }[] };
+    local?: { nodeId: string; name: string; online: boolean; agents: { id: string; displayName?: string }[] };
     nodes: NodeInfo[];
     agents: { id: string; displayName?: string }[];
   }> {
     return (await this.request('/api/node-agents')) as {
-      local: { nodeId: string; name: string; online: boolean; agents: { id: string; displayName?: string }[] };
+      local?: { nodeId: string; name: string; online: boolean; agents: { id: string; displayName?: string }[] };
       nodes: NodeInfo[];
       agents: { id: string; displayName?: string }[];
     };

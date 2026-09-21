@@ -24,7 +24,7 @@ import { StatCard } from '../components/common';
 import type { PageProps } from './types';
 
 export function Overview(props: PageProps) {
-  const { base, token, onAuthError } = props;
+  const { base, token, onAuthError, isAdmin = true } = props;
   const client = useMemo(() => new GatewayClient(base, () => token), [base, token]);
   const admin = useMemo(() => new AdminClient(base, token), [base, token]);
   const ops = useMemo(() => new OpsClient(base, () => token), [base, token]);
@@ -40,23 +40,33 @@ export function Overview(props: PageProps) {
   const [models, setModels] = useState<ModelInfo[]>([]);
 
   const loadStats = useCallback(async () => {
-    const [aRes, nRes, tRes, wRes] = await Promise.allSettled([
-      admin.listAgents().then(async (list) => ({ list, def: await admin.getDefaultAgent() })),
-      ops.listNodes(),
-      ops.listAllTasks(),
-      wx.status(),
-    ]);
-    if (aRes.status === 'fulfilled') {
-      setAgents(aRes.value.list);
-      setDefaultAgentId(aRes.value.def);
-    } else if (onAuthError(aRes.reason)) return;
-    if (nRes.status === 'fulfilled') setNodes(nRes.value);
-    else onAuthError(nRes.reason);
-    if (tRes.status === 'fulfilled') setUsers(tRes.value);
-    else onAuthError(tRes.reason);
-    if (wRes.status === 'fulfilled') setWxStatus(wRes.value);
+    const fetches: Promise<unknown>[] = [ops.listNodes(), wx.status()];
+    if (isAdmin) {
+      fetches.push(
+        admin.listAgents().then(async (list) => ({ list, def: await admin.getDefaultAgent() })),
+        ops.listAllTasks(),
+      );
+    }
+    const settled = await Promise.allSettled(fetches);
+    const nRes = settled[0];
+    const wRes = settled[1];
+    if (nRes?.status === 'fulfilled') setNodes(nRes.value as NodeInfo[]);
+    else if (nRes?.status === 'rejected' && onAuthError(nRes.reason)) return;
+    if (wRes?.status === 'fulfilled') setWxStatus(wRes.value as WeixinStatus);
+    else if (wRes?.status === 'rejected') onAuthError(wRes.reason);
+    if (isAdmin) {
+      const aRes = settled[2];
+      const tRes = settled[3];
+      if (aRes?.status === 'fulfilled') {
+        const v = aRes.value as { list: AgentDetail[]; def: string };
+        setAgents(v.list);
+        setDefaultAgentId(v.def);
+      } else if (aRes?.status === 'rejected' && onAuthError(aRes.reason)) return;
+      if (tRes?.status === 'fulfilled') setUsers(tRes.value as UserTasks[]);
+      else if (tRes?.status === 'rejected') onAuthError(tRes.reason);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [admin, ops, wx, tick]);
+  }, [admin, ops, wx, tick, isAdmin]);
 
   useEffect(() => {
     void loadStats();
@@ -83,18 +93,20 @@ export function Overview(props: PageProps) {
   return (
     <div>
       <Row gutter={[16, 16]}>
-        <Col xs={12} md={8} lg={4}>
-          <StatCard
-            icon={<AppstoreOutlined />}
-            iconBg="rgba(59,130,246,0.14)"
-            iconColor="#60a5fa"
-            label="启用 Agent"
-            value={agents ? enabledAgents : '—'}
-            unit={agents ? `/ ${agents.length}` : ''}
-            foot={defaultAgentId ? <>默认 <code className="mono">{defaultAgentId}</code></> : '加载中'}
-            loading={!agents}
-          />
-        </Col>
+        {isAdmin ? (
+          <Col xs={12} md={8} lg={4}>
+            <StatCard
+              icon={<AppstoreOutlined />}
+              iconBg="rgba(59,130,246,0.14)"
+              iconColor="#60a5fa"
+              label="启用 Agent"
+              value={agents ? enabledAgents : '—'}
+              unit={agents ? `/ ${agents.length}` : ''}
+              foot={defaultAgentId ? <>默认 <code className="mono">{defaultAgentId}</code></> : '加载中'}
+              loading={!agents}
+            />
+          </Col>
+        ) : null}
         <Col xs={12} md={8} lg={4}>
           <StatCard
             icon={<ClusterOutlined />}
@@ -103,10 +115,12 @@ export function Overview(props: PageProps) {
             label="在线节点"
             value={nodes ? onlineNodes : '—'}
             unit="个"
-            foot={pendingNodes > 0 ? <Tag color="warning" style={{ borderRadius: 999 }}>{pendingNodes} 待审批</Tag> : '本机始终可用'}
+            foot={pendingNodes > 0 ? <Tag color="warning" style={{ borderRadius: 999 }}>{pendingNodes} 待审批</Tag> : isAdmin ? '本机始终可用' : '仅显示自己的机器'}
             loading={!nodes}
           />
         </Col>
+        {isAdmin ? (
+          <>
         <Col xs={12} md={8} lg={4}>
           <StatCard
             icon={<MessageOutlined />}
@@ -131,6 +145,8 @@ export function Overview(props: PageProps) {
             loading={!users}
           />
         </Col>
+          </>
+        ) : null}
         <Col xs={12} md={8} lg={4}>
           <StatCard
             icon={<WechatOutlined />}
@@ -138,7 +154,15 @@ export function Overview(props: PageProps) {
             iconColor={wxStatus?.configured ? '#4ade80' : '#94a3b8'}
             label="微信渠道"
             value={wxStatus ? (wxStatus.configured ? '已绑定' : '未绑定') : '—'}
-            foot={wxStatus?.activeAccountId ? `账号 ${wxStatus.activeAccountId}` : '可在微信登录页绑定'}
+            foot={
+              wxStatus?.processRunning
+                ? `进程 ${wxStatus.processId ?? ''} 运行中`
+                : wxStatus?.bindAccountId
+                  ? `账号槽 ${wxStatus.bindAccountId}`
+                  : wxStatus?.activeAccountId
+                    ? `账号 ${wxStatus.activeAccountId}`
+                    : '可在微信登录页绑定'
+            }
             loading={!wxStatus}
           />
         </Col>
@@ -156,7 +180,9 @@ export function Overview(props: PageProps) {
         </Col>
       </Row>
       <p className="page-desc" style={{ marginTop: 18 }}>
-        流式对话已独立到侧栏「对话」。任务级持久会话请从「任务管理」点「对话」进入。
+        {isAdmin
+          ? '流式对话已独立到侧栏「对话」。任务级持久会话请从「任务管理」点「对话」进入。'
+          : '流式对话在侧栏「对话」。远程机器与 agent 见「远程」分组。'}
       </p>
     </div>
   );

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { canSeeNode } from '../../src/gateway/nodes/visibility.js';
 
-test('管理员可见全部节点；其他人只看本机和自己的机器', () => {
+test('管理员可见全部节点；其他人只看自己的远程机器，不含本机', () => {
   const local = { nodeId: 'local' };
   const mine = { nodeId: 'n_1', ownerUsername: 'alice' };
   const theirs = { nodeId: 'n_2', ownerUsername: 'bob' };
@@ -15,7 +15,7 @@ test('管理员可见全部节点；其他人只看本机和自己的机器', ()
   assert.equal(canSeeNode(orphan, admin), true);
 
   const alice = { admin: false, username: 'alice' };
-  assert.equal(canSeeNode(local, alice), true);
+  assert.equal(canSeeNode(local, alice), false);
   assert.equal(canSeeNode(mine, alice), true);
   assert.equal(canSeeNode(theirs, alice), false);
   assert.equal(canSeeNode(orphan, alice), false);

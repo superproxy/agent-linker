@@ -11,6 +11,7 @@
 ## 多任务与按机器（节点）路由
 
 - **任务（Task）模型**：可为每个渠道用户创建多个任务，各自绑定「机器（节点）+ agent + 工作目录」，任务 key（`k_`）直连锁定路由。
+- **每人独立任务空间**：任务按登录用户隔离（文件 `owner.channel.userId.json`）。微信连接器（`weixin:<用户名>`）按联系人维护激活任务，微信里 `/task` 或后台「激活」写入同一状态。管理员可看全部空间，普通用户只看自己的。未归属的旧文件仅管理员可见。
 - **Agent 是「按机器开通」的，不是全局配置**：
   - **本机节点 `local`**：agent 来自 `config.yaml` 的 `gateway.agents`，由网关进程在本机拉起；后台可启停、切模型、设为新任务默认（`GET /api/agents/by-node` 返回完整可编辑运行态）。
   - **Agent 工具权限策略（`permissionPolicy`）**：agent 定义可配 `permissionPolicy`（`autoApprove`/`autoDeny`/`escalate`/`defaultAction`，按工具名匹配，优先于 `permissionMode`）。策略挂在本机 agent 定义层，**微信/企微 bot、openclaw 插件任务与 `/v1` 共用同一策略**——渠道消息按路由「代入」agentId（微信侧判断激活任务/默认 agent），最终都汇聚到网关定义层执行，不会因渠道不同而绕过。
@@ -27,16 +28,18 @@
 
 - **个人微信 / 企业微信**：两种实现形态——插件运行时（openclaw 插件）或网关内嵌/独立进程的 botAgent（`channels/weixin-bot.ts`、`wecom-bot.ts`）。
 - `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起）。
-- **多账号**：`external` 模式下配置 `weixin.accounts`（账号 id 白名单），进程管理器为每个账号拉起独立 bot 进程（实例 `weixin:<accountId>`，pid/日志/登录态相互隔离）；后台「本机 · 进程」页可单独启停/重启/看日志，CLI 用 `pm start/stop/restart weixin:<accountId>`。未配置 `accounts` 保持单实例（跑 `accountId` 或第一个账号）。
-- 支持扫码登录、登录态热重启（内嵌模式）；渠道用户自动签发作用域凭据（`ct_`）。
+- **多账号**：每个**登录用户**绑定自己的微信（账号槽 = 用户名，进程 `weixin:<username>`）。扫码成功后写入 `weixin.accounts` 并将 `weixin.mode` 设为 `external`，由进程管理器为该用户单独拉起 bot（pid/日志/登录态隔离）。管理员在「本机 · 进程」可见全部实例；普通用户只在「微信登录」页看自己的绑定与进程状态。yaml 里仍可用 `weixin.accounts` 预置账号；未配置且无人绑定时保持单实例 `weixin`。
+- 支持扫码登录；绑定成功后自动拉起/重启对应用户的微信进程。渠道用户自动签发作用域凭据（`ct_`）。
+- **任务切换**：每个微信联系人一份任务列表。微信里 `/task list|use|new|default` 由该用户的微信连接器解析；后台「激活」写同一 `activeTaskId`，连接器短缓存后按新任务路由。
 
 ## 管理后台（web /ui）
 
 - React + antd 单页，分组导航：
-  - **本机**：网关、进程、节点、agent、概览、对话。
-  - **远程**：网关、节点（审批/接入）、agent（只读，连接器自报）。
-  - **通用**：key、任务管理（可点「对话」跳入该任务的持久会话页）。
-  - **系统**：我的 Token、渠道凭据、微信登录、真实用户（管理员项按角色过滤）。
+  - **本机**（仅管理员）：网关、进程、节点、agent。网关模式下普通用户看不到本组。
+  - **远程**：网关（管理员）、节点（审批/接入；普通用户只看自己的机器）、agent（只读，连接器自报）。
+  - **通用**：概览、对话、key、任务管理（每人只看自己微信连接器下的联系人任务；当前任务由微信 `/task` 或后台「激活」切换）。
+  - **系统**：我的 Token、微信登录（每用户独立绑定与进程）；渠道凭据、真实用户仅管理员。
+  - 侧栏可折叠（状态保存在浏览器 localStorage）。
 - **对话页**：React/antd 实现（不嵌入 `chat.html`）。未绑定时 oneshot 测试；从任务进入时带 `taskKey` 或 `channel/userId/task/agent` 走 `/v1` 任务路由，与微信渠道同一套会话隔离。
 - 后台支持运行时热更新（启停/切模型立即生效，重启还原 yaml）与持久化配置（默认 agent 写回 config.yaml）。
 

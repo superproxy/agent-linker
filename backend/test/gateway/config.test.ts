@@ -13,6 +13,8 @@ import {
   loopbackHost,
   ensureGatewayTokenFile,
   readGatewayTokenFile,
+  persistEnsureWeixinAccount,
+  persistRemoveWeixinAccount,
 } from '../../src/gateway/config.js';
 
 function tmpRoot(): string {
@@ -283,4 +285,19 @@ node:
   assert.equal(cfg.node.enabled, true);
   assert.equal(cfg.node.name, 'edge-1');
   assert.equal(cfg.gateway.auth.mode, 'local');
+});
+
+test('persistEnsureWeixinAccount：写入 accounts 并切 external；remove 去掉该 id', () => {
+  const dir = tmpRoot();
+  const file = join(dir, 'config.yaml');
+  writeFileSync(file, 'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n');
+  const ids = persistEnsureWeixinAccount(file, 'alice');
+  assert.deepEqual(ids, ['alice']);
+  const cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
+  assert.equal(cfg.weixin.mode, 'external');
+  assert.deepEqual(cfg.weixin.accounts, ['alice']);
+  persistEnsureWeixinAccount(file, 'alice');
+  persistEnsureWeixinAccount(file, 'bob');
+  assert.deepEqual(migrateConfig(parse(readFileSync(file, 'utf8'))).weixin.accounts, ['alice', 'bob']);
+  assert.deepEqual(persistRemoveWeixinAccount(file, 'alice'), ['bob']);
 });

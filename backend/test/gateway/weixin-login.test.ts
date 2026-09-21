@@ -100,3 +100,61 @@ test('GET /api/weixin/qr/status 不带 accountId → waitQr 收到 undefined', a
     await app.close();
   }
 });
+
+test('非管理员无登录会话 → 微信接口 403', async () => {
+  const { service } = buildStub();
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, { isAdmin: () => false });
+  try {
+    assert.equal((await app.inject({ method: 'GET', url: '/api/weixin/status' })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: '/api/weixin/qr', payload: {} })).statusCode, 403);
+  } finally {
+    await app.close();
+  }
+});
+
+test('普通用户扫码强制本人账号槽，看不到其他人账号', async () => {
+  const { service, calls } = buildStub();
+  (service as { status: () => unknown }).status = () => ({
+    configured: true,
+    accounts: [
+      { id: 'alice', userId: 'wx_a' },
+      { id: 'admin', userId: 'wx_admin' },
+    ],
+    activeAccountId: 'admin',
+  });
+  const bound: string[] = [];
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, {
+    isAdmin: () => false,
+    sessionUser: () => ({ username: 'alice' }),
+    onBound: (id) => {
+      bound.push(id);
+    },
+  });
+  try {
+    const st = await app.inject({ method: 'GET', url: '/api/weixin/status' });
+    assert.equal(st.statusCode, 200);
+    const body = st.json() as { bindAccountId: string; accounts: { id: string }[]; configured: boolean };
+    assert.equal(body.bindAccountId, 'alice');
+    assert.deepEqual(body.accounts.map((a) => a.id), ['alice']);
+
+    const qr = await app.inject({
+      method: 'POST',
+      url: '/api/weixin/qr',
+      payload: { accountId: 'admin' },
+    });
+    assert.equal(qr.statusCode, 200);
+    assert.equal(calls.start[0]?.accountId, 'alice');
+
+    const wait = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=admin',
+    });
+    assert.equal(wait.statusCode, 200);
+    assert.equal(calls.wait[0]?.accountId, 'alice');
+    assert.deepEqual(bound, ['alice']);
+  } finally {
+    await app.close();
+  }
+});

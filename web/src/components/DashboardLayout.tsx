@@ -5,32 +5,40 @@ import type { MenuProps } from 'antd';
 import {
   BellOutlined,
   LogoutOutlined,
+  MenuFoldOutlined,
   MenuOutlined,
+  MenuUnfoldOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { ALL_TABS, NAV_GROUPS, navGroupTitle, type TabId } from '../lib/constants';
+import { ALL_TABS, LS_SIDER_COLLAPSED_KEY, NAV_GROUPS, navGroupTitle, type TabId } from '../lib/constants';
 import { GatewayClient, OpsClient, type UserPublic } from '../api';
 
 const { Sider, Header, Content } = Layout;
 
-function SiderMenu(props: { active: TabId; canAdmin: boolean; showMyToken: boolean; onSelect: (t: TabId) => void }) {
-  const items: MenuProps['items'] = useMemo(
-    () =>
-      NAV_GROUPS.map((g) => ({
-        key: g.title,
-        type: 'group' as const,
-        label: g.title,
-        children: g.items
-          .filter((it) => {
-            if (it.id === 'my-token') return props.showMyToken;
-            return !it.adminOnly || props.canAdmin;
-          })
-          .map((it) => ({ key: it.id, icon: it.icon, label: it.label })),
-      })).filter((g) => (g.children?.length ?? 0) > 0),
-    [props.canAdmin, props.showMyToken],
-  );
+function SiderMenu(props: {
+  active: TabId;
+  canAdmin: boolean;
+  showMyToken: boolean;
+  collapsed: boolean;
+  onSelect: (t: TabId) => void;
+}) {
+  const items: MenuProps['items'] = useMemo(() => {
+    const groups = NAV_GROUPS.map((g) => ({
+      key: g.title,
+      type: 'group' as const,
+      label: g.title,
+      children: g.items
+        .filter((it) => {
+          if (it.id === 'my-token') return props.showMyToken;
+          return !it.adminOnly || props.canAdmin;
+        })
+        .map((it) => ({ key: it.id, icon: it.icon, label: it.label })),
+    })).filter((g) => (g.children?.length ?? 0) > 0);
+    if (!props.collapsed) return groups;
+    return groups.flatMap((g) => g.children ?? []);
+  }, [props.canAdmin, props.showMyToken, props.collapsed]);
 
   return (
     <Menu
@@ -38,6 +46,7 @@ function SiderMenu(props: { active: TabId; canAdmin: boolean; showMyToken: boole
       mode="inline"
       theme="dark"
       selectedKeys={[props.active]}
+      inlineCollapsed={props.collapsed}
       items={items}
       onClick={(info) => {
         if (ALL_TABS.some((t) => t.id === info.key)) props.onSelect(info.key as TabId);
@@ -60,6 +69,22 @@ export function DashboardLayout(props: {
   children: ReactNode;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(LS_SIDER_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setSiderCollapsed = (next: boolean) => {
+    setCollapsed(next);
+    try {
+      localStorage.setItem(LS_SIDER_COLLAPSED_KEY, next ? '1' : '0');
+    } catch {
+      /* ignore quota / private mode */
+    }
+  };
+  const siderWidth = collapsed ? 64 : 224;
   const isAdmin = props.currentUser?.role === 'admin';
   const canAdmin = props.authMode !== 'ready' || isAdmin;
   const showMyToken = props.authMode === 'ready' && props.currentUser?.username !== 'local';
@@ -143,7 +168,13 @@ export function DashboardLayout(props: {
     <Layout className="app-layout">
       {/* 桌面侧栏（lg 以上常驻，CSS 控制显隐）；移动端用 Drawer */}
       <Sider
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setSiderCollapsed}
+        trigger={null}
         width={224}
+        collapsedWidth={64}
+        theme="dark"
         className="app-sider desktop-sider"
         style={{
           position: 'fixed',
@@ -155,12 +186,18 @@ export function DashboardLayout(props: {
       >
         <div className="brand">
           <div className="brand-logo">◆</div>
-          <div>
+          <div className="brand-text">
             <div className="brand-name">linkagent</div>
             <div className="brand-sub">Agent 网关控制台</div>
           </div>
         </div>
-        <SiderMenu active={props.active} canAdmin={canAdmin} showMyToken={showMyToken} onSelect={selectTab} />
+        <SiderMenu
+          active={props.active}
+          canAdmin={canAdmin}
+          showMyToken={showMyToken}
+          collapsed={collapsed}
+          onSelect={selectTab}
+        />
         <div className="sider-foot">
           多渠道 Agent 网关
           <br />
@@ -179,11 +216,24 @@ export function DashboardLayout(props: {
           <div className="brand-logo">◆</div>
           <div className="brand-name">linkagent</div>
         </div>
-        <SiderMenu active={props.active} canAdmin={canAdmin} showMyToken={showMyToken} onSelect={selectTab} />
+        <SiderMenu
+          active={props.active}
+          canAdmin={canAdmin}
+          showMyToken={showMyToken}
+          collapsed={false}
+          onSelect={selectTab}
+        />
       </Drawer>
 
-      <Layout style={{ marginLeft: 224, minHeight: '100vh' }} className="app-main">
+      <Layout style={{ marginLeft: siderWidth, minHeight: '100vh' }} className="app-main">
         <Header className="app-header">
+          <Button
+            type="text"
+            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            onClick={() => setSiderCollapsed(!collapsed)}
+            style={{ color: '#e5e9f0' }}
+            className="sider-collapse-trigger"
+          />
           <Button
             type="text"
             icon={<MenuOutlined />}

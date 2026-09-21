@@ -256,6 +256,67 @@ export function persistDefaultTaskAgentId(path: string, agentId: string): string
   return p;
 }
 
+const WEIXIN_ACCOUNT_ID_RE = /^[A-Za-z0-9._-]+$/;
+
+function weixinMapOf(doc: ReturnType<typeof parseDocument>): YAMLMap {
+  let sec = doc.get('weixin');
+  if (!isMap(sec)) {
+    doc.set('weixin', new YAMLMap());
+    sec = doc.get('weixin');
+  }
+  return sec as YAMLMap;
+}
+
+function weixinAccountIdsFromMap(map: YAMLMap): string[] {
+  const raw = map.get('accounts') as { toJSON?: () => unknown } | unknown;
+  const json =
+    raw && typeof raw === 'object' && typeof (raw as { toJSON?: () => unknown }).toJSON === 'function'
+      ? (raw as { toJSON: () => unknown }).toJSON()
+      : raw;
+  if (!Array.isArray(json)) return [];
+  return json.map((x) => String(x).trim()).filter(Boolean);
+}
+
+/**
+ * 把登录用户对应的微信账号 id 写入 weixin.accounts，并把 mode 设为 external（每用户独立 bot 进程）。
+ * 已存在则只保证 mode=external。返回落盘后的 accounts 列表。
+ */
+export function persistEnsureWeixinAccount(path: string, accountId: string): string[] {
+  const id = accountId.trim();
+  if (!WEIXIN_ACCOUNT_ID_RE.test(id)) throw new Error(`非法微信账号 id: ${accountId}`);
+  const p = resolve(path);
+  const doc = parseDocument(existsSync(p) ? readFileSync(p, 'utf8') : '');
+  if (!existsSync(p)) mkdirSync(dirname(p), { recursive: true });
+  const map = weixinMapOf(doc);
+  const ids = weixinAccountIdsFromMap(map);
+  if (!ids.includes(id)) ids.push(id);
+  map.set('accounts', ids);
+  map.set('mode', 'external');
+  writeFileSync(p, doc.toString(), 'utf8');
+  const reparsed = migrateConfig(parse(readFileSync(p, 'utf8')));
+  if (!reparsed.weixin.accounts.includes(id)) {
+    throw new Error(`持久化校验失败：weixin.accounts 未包含 ${id}`);
+  }
+  if (reparsed.weixin.mode !== 'external') {
+    throw new Error('持久化校验失败：weixin.mode 未更新为 external');
+  }
+  return [...reparsed.weixin.accounts];
+}
+
+/** 从 weixin.accounts 去掉已删除登录用户对应的账号 id（不改变 mode） */
+export function persistRemoveWeixinAccount(path: string, accountId: string): string[] {
+  const id = accountId.trim();
+  if (!WEIXIN_ACCOUNT_ID_RE.test(id) || !existsSync(resolve(path))) return [];
+  const p = resolve(path);
+  const doc = parseDocument(readFileSync(p, 'utf8'));
+  if (!isMap(doc.get('weixin'))) return [];
+  const map = weixinMapOf(doc);
+  const ids = weixinAccountIdsFromMap(map).filter((x) => x !== id);
+  map.set('accounts', ids);
+  writeFileSync(p, doc.toString(), 'utf8');
+  return [...migrateConfig(parse(readFileSync(p, 'utf8'))).weixin.accounts];
+}
+
 /** 可改挂载网关的子进程段（weixin / node 进程，配置里均为顶层同名段） */
 export type ChildSectionId = 'weixin' | 'node';
 

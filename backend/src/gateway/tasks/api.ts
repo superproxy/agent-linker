@@ -4,12 +4,11 @@ import { DEFAULT_TASK_ID, type TaskItem } from './types.js';
 
 /**
  * 支持任务机制的渠道白名单。
- * 活动任务只存在于微信渠道（weixin-bot 多轮会话）与 dev 控制台对话框
- * （console 以微信用户身份 channel=weixin 发起请求，天然覆盖）；
+ * 活动任务只存在于微信渠道（weixin-bot 多轮会话）与登录用户 web 任务空间；
  * 企业微信 wecom 等其它渠道无任务：消息按原 model+sessionKey 路由，
  * 任务 API 对其返回 400，从源头保证不会产生任务状态。
  */
-const TASK_ROUTING_CHANNELS = new Set(['weixin']);
+const TASK_ROUTING_CHANNELS = new Set(['weixin', 'web']);
 
 /** 渠道是否允许任务机制；不允许时写 400 并返回 false */
 function ensureTaskChannel(channel: string, reply: { code(code: number): unknown }): boolean {
@@ -32,6 +31,14 @@ export interface TaskApiDeps {
   hasRoutingAgent?: (nodeId: string, agentId: string) => boolean;
   /** 把默认 agent 持久化到 config.yaml；缺省仅内存生效（重启还原配置文件值） */
   persistDefaultAgent?: (agentId: string) => void | Promise<void>;
+  /** 管理接口（全量列表 / 改他人任务）；缺省等同 checkAuth（单测不鉴权时仍放行） */
+  isAdmin?: AuthCheck;
+  sessionUser?: (request: { headers: Record<string, string | string[] | undefined> }) => { username: string } | null;
+}
+
+function sessionKeyOf(channel: string, userId: string, taskId: string, ownerUsername?: string): string {
+  const base = `${channel}:${userId}:task:${taskId}`;
+  return ownerUsername ? `${ownerUsername}:${base}` : base;
 }
 
 /** 挂载 /api/tasks（鉴权与现有 /api/* 一致：checkAuth 闭包传入） */
@@ -42,6 +49,7 @@ export function registerTaskApi(
   deps: TaskApiDeps = {},
   resolveChannelScope?: ChannelScopeResolver,
 ): void {
+  const isAdmin = deps.isAdmin ?? checkAuth;
   const requireAuth = (
     request: { headers: Record<string, string | string[] | undefined> },
     reply: { code(code: number): unknown },
@@ -50,30 +58,67 @@ export function registerTaskApi(
     reply.code(401);
     return false;
   };
+  const requireAdmin = (
+    request: { headers: Record<string, string | string[] | undefined> },
+    reply: { code(code: number): unknown },
+  ): boolean => {
+    if (!checkAuth(request)) {
+      reply.code(401);
+      return false;
+    }
+    if (!isAdmin(request)) {
+      reply.code(403);
+      return false;
+    }
+    return true;
+  };
+  const spaceOf = (
+    request: { headers: Record<string, string | string[] | undefined> },
+    requestedOwner?: string,
+  ): { ok: true; owner?: string } | { ok: false; status: 401 | 403 } => {
+    if (!checkAuth(request)) return { ok: false, status: 401 };
+    const admin = isAdmin(request);
+    const username = deps.sessionUser?.(request)?.username;
+    if (username && !admin) return { ok: true, owner: username };
+    if (admin) return { ok: true, owner: requestedOwner?.trim() || undefined };
+    return { ok: false, status: 403 };
+  };
 
-  // GET /api/tasks?channel=&userId=
+  // GET /api/tasks?channel=&userId=&owner=
   // 渠道用户级凭据（ct_ token）可读，但只能读自己（channel/userId 必须与凭据作用域一致）
   app.get('/api/tasks', async (request, reply) => {
-    const channel = (request.query as { channel?: string }).channel ?? '';
-    const userId = (request.query as { userId?: string }).userId ?? '';
+    const channel = (request.query as { channel?: string; userId?: string; owner?: string }).channel ?? '';
+    const userId = (request.query as { channel?: string; userId?: string; owner?: string }).userId ?? '';
+    const ownerQ = (request.query as { owner?: string }).owner;
     if (!channel || !userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
+    let owner: string | undefined;
     if (!checkAuth(request)) {
       const scope = resolveChannelScope?.(request);
       if (!scope || scope.channel !== channel || scope.userId !== userId) {
         return reply.code(401).send({ error: 'unauthorized' });
       }
+      owner = ownerQ?.trim() || undefined;
+    } else {
+      const space = spaceOf(request, ownerQ);
+      if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
+      owner = space.owner;
     }
-    if (!ensureTaskChannel(channel, reply)) return { error: `渠道 ${channel} 不支持任务机制（活动任务仅微信渠道）` };
-    return service.load(channel, userId);
+    if (!ensureTaskChannel(channel, reply)) return { error: `渠道 ${channel} 不支持任务机制（活动任务仅微信 / web）` };
+    return service.load(channel, userId, owner);
   });
 
   // GET /api/tasks/by-key/:key —— 任务 key 反查（管理后台/外部分享直连用，返回任务与归属用户）
   app.get('/api/tasks/by-key/:key', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
     const { key } = request.params as { key: string };
     const ref = service.findByKey(key);
     if (!ref) return reply.code(404).send({ error: `任务不存在: ${key}` });
-    return { channel: ref.channel, userId: ref.userId, task: ref.task };
+    return {
+      channel: ref.channel,
+      userId: ref.userId,
+      ...(ref.ownerUsername ? { ownerUsername: ref.ownerUsername } : {}),
+      task: ref.task,
+    };
   });
 
   // GET /api/tasks/all —— 全部渠道终端的任务明细（管理后台「任务」页）
@@ -81,13 +126,20 @@ export function registerTaskApi(
   // 不再凭空造 weixin/default 虚拟终端（渠道终端不是系统用户）。
   app.get('/api/tasks/all', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
-    return { users: service.listAllTasks() };
+    const admin = isAdmin(request);
+    const username = deps.sessionUser?.(request)?.username;
+    if (!admin && !username) return reply.code(403).send({ error: 'forbidden' });
+    return { users: admin ? service.listAllTasks() : service.listAllTasks(username) };
   });
 
-  // GET /api/users —— 全部渠道终端摘要（含任务数），渠道终端列表页
+  // GET /api/users —— 全部渠道终端摘要（含任务数）
   app.get('/api/users', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
-    return { users: service.listUsers() };
+    const admin = isAdmin(request);
+    const username = deps.sessionUser?.(request)?.username;
+    if (!admin && !username) return reply.code(403).send({ error: 'forbidden' });
+    const all = service.listUsers();
+    return { users: admin ? all : all.filter((u) => u.ownerUsername === username) };
   });
 
   // GET /api/tasks/default-agent —— 全局默认任务绑定的 agentId（新建用户默认任务的初始绑定）
@@ -98,7 +150,7 @@ export function registerTaskApi(
 
   // PUT /api/tasks/default-agent { agentId } —— 修改全局默认 agent，持久化到 config.yaml（重启保留）
   app.put('/api/tasks/default-agent', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
+    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
     const body = request.body as { agentId?: string } | null | undefined;
     const agentId = body?.agentId?.trim().toLowerCase();
     if (!agentId) return reply.code(400).send({ error: 'agentId 必填' });
@@ -126,11 +178,21 @@ export function registerTaskApi(
 
   // POST /api/tasks { channel, userId, name, agentId?, nodeId?, key? } —— key 可选自定义（缺省自动生成）
   app.post('/api/tasks', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
-    const body = request.body as { channel?: string; userId?: string; name?: string; agentId?: string; nodeId?: string; key?: string; cwd?: string };
+    const body = request.body as {
+      channel?: string;
+      userId?: string;
+      name?: string;
+      agentId?: string;
+      nodeId?: string;
+      key?: string;
+      cwd?: string;
+      ownerUsername?: string;
+    };
+    const space = spaceOf(request, body.ownerUsername);
+    if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信渠道）` };
-    const state = service.load(body.channel, body.userId);
+    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信 / web）` };
+    const state = service.load(body.channel, body.userId, space.owner);
     // 显式指定 agent 时校验 (节点, agent) 组合当前可路由；agent 留空则继承激活任务（无需校验）
     const agentId = body.agentId?.trim().toLowerCase();
     const nodeId = body.nodeId?.trim();
@@ -147,15 +209,23 @@ export function registerTaskApi(
 
   // PATCH /api/tasks/:taskId { channel, userId, name?, keyEnabled?, cwd? } —— 重命名 / 停用启用任务 key / 设置工作目录
   app.patch('/api/tasks/:taskId', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const params = request.params as { taskId: string };
-    const body = request.body as { channel?: string; userId?: string; name?: string; keyEnabled?: boolean; cwd?: string };
+    const body = request.body as {
+      channel?: string;
+      userId?: string;
+      name?: string;
+      keyEnabled?: boolean;
+      cwd?: string;
+      ownerUsername?: string;
+    };
+    const space = spaceOf(request, body.ownerUsername);
+    if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信渠道）` };
+    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信 / web）` };
     if (!body.name?.trim() && typeof body.keyEnabled !== 'boolean' && !('cwd' in (body ?? {}))) {
       return reply.code(400).send({ error: 'name / keyEnabled / cwd 至少提供一个' });
     }
-    const state = service.load(body.channel, body.userId);
+    const state = service.load(body.channel, body.userId, space.owner);
     try {
       let task: TaskItem | undefined;
       if (typeof body.keyEnabled === 'boolean') {
@@ -175,14 +245,15 @@ export function registerTaskApi(
 
   // PATCH /api/tasks/:taskId/agent { channel, userId, agentId, nodeId? } —— 修改任务绑定节点+agent
   app.patch('/api/tasks/:taskId/agent', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const params = request.params as { taskId: string };
-    const body = request.body as { channel?: string; userId?: string; agentId?: string; nodeId?: string };
+    const body = request.body as { channel?: string; userId?: string; agentId?: string; nodeId?: string; ownerUsername?: string };
+    const space = spaceOf(request, body.ownerUsername);
+    if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信渠道）` };
+    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信 / web）` };
     if (!body?.agentId?.trim()) return reply.code(400).send({ error: 'agentId 必填' });
     const agentId = body.agentId.trim().toLowerCase();
-    const state = service.load(body.channel, body.userId);
+    const state = service.load(body.channel, body.userId, space.owner);
     const nodeId = body.nodeId?.trim() || service.resolveRoute(state, params.taskId).nodeId;
     if (nodeId === 'local' && deps.listAvailableAgents) {
       const available = deps.listAvailableAgents();
@@ -203,12 +274,13 @@ export function registerTaskApi(
 
   // PATCH /api/tasks/:taskId/activate { channel, userId }
   app.patch('/api/tasks/:taskId/activate', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const params = request.params as { taskId: string };
-    const body = request.body as { channel?: string; userId?: string };
+    const body = request.body as { channel?: string; userId?: string; ownerUsername?: string };
+    const space = spaceOf(request, body.ownerUsername);
+    if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信渠道）` };
-    const state = service.load(body.channel, body.userId);
+    if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信 / web）` };
+    const state = service.load(body.channel, body.userId, space.owner);
     try {
       const task = service.activateTask(state, params.taskId);
       return { task };
@@ -221,17 +293,23 @@ export function registerTaskApi(
   // 管理凭据可删任意任务；渠道用户级凭据（ct_ token）只能删自己的（scope 校验）
   app.delete('/api/tasks/:taskId', async (request, reply) => {
     const params = request.params as { taskId: string };
-    const query = request.query as { channel?: string; userId?: string };
+    const query = request.query as { channel?: string; userId?: string; owner?: string };
     if (!query.channel || !query.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
+    let owner: string | undefined;
     if (!checkAuth(request)) {
       const scope = resolveChannelScope?.(request);
       if (!scope || scope.channel !== query.channel || scope.userId !== query.userId) {
         return reply.code(401).send({ error: 'unauthorized' });
       }
+      owner = query.owner?.trim() || undefined;
+    } else {
+      const space = spaceOf(request, query.owner);
+      if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
+      owner = space.owner;
     }
-    if (!ensureTaskChannel(query.channel, reply)) return { error: `渠道 ${query.channel} 不支持任务机制（活动任务仅微信渠道）` };
+    if (!ensureTaskChannel(query.channel, reply)) return { error: `渠道 ${query.channel} 不支持任务机制（活动任务仅微信 / web）` };
     if (params.taskId === DEFAULT_TASK_ID) return reply.code(400).send({ error: '默认任务不可删除' });
-    const state = service.load(query.channel, query.userId);
+    const state = service.load(query.channel, query.userId, owner);
     try {
       const tasks = service.deleteTask(state, params.taskId);
       return { tasks, activeTaskId: state.activeTaskId };
@@ -245,6 +323,8 @@ export function registerTaskApi(
 export interface TaskRoutingInput {
   channel?: string;
   userId?: string;
+  /** 登录用户任务空间（微信 bot 账号槽） */
+  ownerUsername?: string;
   agent?: string;
   task?: string;
   /** 任务全局 key：单独用它即可直连路由到目标任务（无需 channel/userId/task 三元素） */
@@ -254,7 +334,7 @@ export interface TaskRoutingInput {
    * 一旦提供，路由强制指向该 {channel,userId,taskId}，忽略 body 里的 channel/userId/agent/task，
    * 从机制上杜绝持单任务 key 越权访问他人任务/切换 agent。
    */
-  lockedTask?: { channel: string; userId: string; taskId: string };
+  lockedTask?: { channel: string; userId: string; taskId: string; ownerUsername?: string };
   /**
    * OpenAI 标准 model 参数（agent:<id> 形式）：
    * - taskKey 直连分支可用于覆盖任务绑定 agent（保留通用客户端显式指定能力）；
@@ -299,7 +379,7 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
   // 鉴权层已锁定任务（任务 key 直连凭据）：强制路由，忽略 body 一切路由字段，防越权
   if (input.lockedTask) {
     const lt = input.lockedTask;
-    const state = service.load(lt.channel, lt.userId);
+    const state = service.load(lt.channel, lt.userId, lt.ownerUsername);
     if (isTaskCommand(input.text)) {
       const result = service.handleCommand(state, input.text);
       if (!result) return { kind: 'legacy' };
@@ -317,7 +397,7 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
       nodeId: route.nodeId,
       agentId: route.agentId,
       taskId: route.taskId,
-      sessionKey: `${lt.channel}:${lt.userId}:task:${route.taskId}`,
+      sessionKey: sessionKeyOf(lt.channel, lt.userId, route.taskId, state.ownerUsername),
       cwd: route.cwd,
     };
   }
@@ -327,7 +407,7 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
     const ref = service.findByKey(taskKey);
     if (!ref) return { kind: 'notfound' };
     if (ref.task.keyEnabled === false) return { kind: 'disabled' };
-    const state = service.load(ref.channel, ref.userId);
+    const state = service.load(ref.channel, ref.userId, ref.ownerUsername);
     if (isTaskCommand(input.text)) {
       const result = service.handleCommand(state, input.text);
       if (!result) return { kind: 'legacy' }; // 防御：理论不可达
@@ -345,14 +425,14 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
       nodeId: route.nodeId,
       agentId,
       taskId: route.taskId,
-      sessionKey: `${ref.channel}:${ref.userId}:task:${route.taskId}`,
+      sessionKey: sessionKeyOf(ref.channel, ref.userId, route.taskId, state.ownerUsername),
       cwd: route.cwd,
     };
   }
 
   // 无 taskKey、无 channel，或渠道不在任务白名单（wecom 等无任务机制）→ 原 model+sessionKey 路径
   if (!channel || !TASK_ROUTING_CHANNELS.has(channel)) return { kind: 'legacy' };
-  const state = service.load(channel, userId);
+  const state = service.load(channel, userId, input.ownerUsername);
   if (isTaskCommand(input.text)) {
     const result = service.handleCommand(state, input.text);
     if (!result) return { kind: 'legacy' }; // 防御：理论不可达
@@ -373,7 +453,7 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
     nodeId: route.nodeId,
     agentId,
     taskId: route.taskId,
-    sessionKey: `${channel}:${userId}:task:${route.taskId}`,
+    sessionKey: sessionKeyOf(channel, userId, route.taskId, state.ownerUsername),
     cwd: route.cwd,
   };
 }

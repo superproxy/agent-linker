@@ -36,28 +36,29 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
   }, [refresh]);
 
   const startScan = async (accountId?: string) => {
+    const slot = accountId ?? status?.bindAccountId;
     setMsg(null);
     setScanning(true);
     setQr(null);
     try {
-      const r = await wx.startQr(accountId);
+      const r = await wx.startQr(slot);
       if (!r.qrDataUrl) {
         setMsg({ type: 'error', text: '二维码图片生成失败，请稍后重试' });
         setScanning(false);
         return;
       }
       setQr(r.qrDataUrl);
-      setMsg({ type: 'info', text: accountId ? `请扫码重新绑定账号 ${accountId}` : '请用手机微信扫一扫完成绑定' });
+      setMsg({ type: 'info', text: slot ? `请扫码绑定账号槽 ${slot}（将启动进程 weixin:${slot}）` : '请用手机微信扫一扫完成绑定' });
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
         try {
-          const st = await wx.qrStatus(r.sessionKey, 8_000, accountId);
+          const st = await wx.qrStatus(r.sessionKey, 8_000, slot);
           if (st.connected) {
             if (pollRef.current) clearInterval(pollRef.current);
             setScanning(false);
             setMsg({
               type: 'success',
-              text: `绑定成功：账号 ${st.accountId ?? accountId ?? ''}。可点「重启渠道」立即生效。`,
+              text: `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试拉起进程 weixin:${st.accountId ?? slot ?? ''}。`,
             });
             await refresh();
           }
@@ -84,7 +85,7 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
   const reloadChannel = async () => {
     setMsg({ type: 'info', text: '正在重启微信渠道…' });
     try {
-      await wx.reload();
+      await wx.reload(status?.bindAccountId);
       setMsg({ type: 'success', text: '微信渠道已重启' });
       notify.success('微信渠道已重启');
       await refresh();
@@ -124,9 +125,20 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
                 ),
               },
               {
-                key: 'active',
-                label: '当前账号',
-                children: <code className="code-cell">{status?.activeAccountId || '—'}</code>,
+                key: 'slot',
+                label: '账号槽',
+                children: <code className="code-cell">{status?.bindAccountId || status?.activeAccountId || '—'}</code>,
+              },
+              {
+                key: 'proc',
+                label: '微信进程',
+                children: status ? (
+                  <Tag color={status.processRunning ? 'success' : 'default'} style={{ borderRadius: 999 }}>
+                    {status.processId ?? 'weixin'} · {status.processRunning ? '运行中' : '未运行'}
+                  </Tag>
+                ) : (
+                  <Spin size="small" />
+                ),
               },
             ]}
           />
@@ -152,7 +164,7 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
           ) : null}
 
           <Space style={{ marginTop: 18 }} wrap>
-            <Button type="primary" loading={scanning} onClick={() => void startScan()}>
+            <Button type="primary" loading={scanning} onClick={() => void startScan(status?.bindAccountId)}>
               {scanning ? '等待扫码…' : status?.configured ? '重新绑定' : '绑定微信机器人'}
             </Button>
             {scanning ? <Button onClick={cancelScan}>取消</Button> : null}

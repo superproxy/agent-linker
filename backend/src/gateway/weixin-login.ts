@@ -42,7 +42,13 @@ export interface WeixinStatus {
   configured: boolean;
   accounts: WeixinAccountInfo[];
   activeAccountId?: string;
+  /** 当前登录用户对应的微信账号槽（与进程 weixin:<id> 一致） */
+  bindAccountId?: string;
+  processId?: string;
+  processRunning?: boolean;
 }
+
+export type AuthCheck = (request: { headers: Record<string, string | string[] | undefined> }) => boolean;
 
 /** 扫码状态（前端轮询） */
 export interface QrWaitResult {
@@ -57,6 +63,13 @@ export interface WeixinLoginDeps {
   /** 无内嵌 adapter（external/插件模式）时 reload 接口返回的提示文案 */
   reloadUnavailableMessage?: string;
   log?: (...args: unknown[]) => void;
+  isAdmin?: AuthCheck;
+  sessionUser?: (request: FastifyRequest) => { username: string } | null;
+  /** 扫码成功后登记账号并拉起 weixin:<accountId> 进程 */
+  onBound?: (accountId: string) => void | Promise<void>;
+  /** 重启该用户的微信进程（优先于内嵌 reloadBot） */
+  restartAccount?: (accountId: string) => void | Promise<void>;
+  isProcessRunning?: (accountId: string) => boolean;
 }
 
 export class WeixinLoginService {
@@ -78,7 +91,7 @@ export class WeixinLoginService {
     const dir = this.accountsDir();
     if (!existsSync(dir)) return { configured: false, accounts: [] };
     const accounts: WeixinAccountInfo[] = [];
-    for (const f of readdirSync(dir).filter((x) => x.endsWith('.json') && x !== 'accounts.json')) {
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.json') && x !== 'accounts.json' && !x.includes('context-tokens'))) {
       try {
         const raw = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { token?: string; userId?: string; savedAt?: string };
         if (typeof raw.token !== 'string' || !raw.token) continue;
@@ -161,14 +174,12 @@ export async function qrDataUrlOf(content: string): Promise<string> {
   return QRCode.toDataURL(content, { margin: 1, width: 256 });
 }
 
-export type AuthCheck = (request: { headers: Record<string, string | string[] | undefined> }) => boolean;
-
 /**
  * 微信登录管理 API（web 后台集成）：
- *  - GET  /api/weixin/status          当前登录态（账号列表）
+ *  - GET  /api/weixin/status          当前登录态（普通用户只看自己的账号槽）
  *  - POST /api/weixin/qr              发起扫码登录 → { sessionKey, qrContent, qrDataUrl(PNG) }
  *  - GET  /api/weixin/qr/status      轮询扫码结果（loginWithQrWait，阻塞至确认/超时）
- *  - POST /api/weixin/reload          扫码登录后热重启 weixin-bot adapter（weixin-bot 模式）
+ *  - POST /api/weixin/reload          重启该用户的 weixin:<id> 进程或内嵌 adapter
  */
 export function registerWeixinApi(
   app: FastifyInstance,
@@ -176,47 +187,124 @@ export function registerWeixinApi(
   checkAuth: AuthCheck,
   deps: WeixinLoginDeps = {},
 ): void {
+  const isAdmin = deps.isAdmin ?? checkAuth;
+  const requireAuth = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    if (!checkAuth(request)) {
+      void reply.code(401).send({ error: 'unauthorized' });
+      return false;
+    }
+    return true;
+  };
+
+  /** 普通用户强制本人用户名；管理员可用 body/query 指定；无会话且非管理员 → null */
+  const resolveAccountId = (request: FastifyRequest, requested?: string): string | null | undefined => {
+    const user = deps.sessionUser?.(request);
+    const admin = isAdmin(request);
+    const want = requested?.trim() || undefined;
+    if (user) return admin ? want ?? user.username : user.username;
+    if (admin) return want;
+    return null;
+  };
+
+  const scopedStatus = (request: FastifyRequest) => {
+    const full = service.status();
+    const user = deps.sessionUser?.(request);
+    const admin = isAdmin(request);
+    if (!user && !admin) return null;
+    if (admin) {
+      const own = user?.username;
+      return {
+        ...full,
+        ...(own
+          ? {
+              bindAccountId: own,
+              processId: `weixin:${own}`,
+              processRunning: deps.isProcessRunning?.(own) === true,
+            }
+          : {}),
+      };
+    }
+    const bindId = user!.username;
+    const accounts = full.accounts.filter((a) => a.id === bindId);
+    return {
+      configured: accounts.length > 0,
+      accounts,
+      activeAccountId: accounts[0]?.id,
+      bindAccountId: bindId,
+      processId: `weixin:${bindId}`,
+      processRunning: deps.isProcessRunning?.(bindId) === true,
+    };
+  };
+
   app.get('/api/weixin/status', async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    return service.status();
+    if (!requireAuth(request, reply)) return;
+    const body = scopedStatus(request);
+    if (!body) return reply.code(403).send({ error: 'forbidden' });
+    return body;
   });
 
   app.post('/api/weixin/qr', async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
+    if (!requireAuth(request, reply)) return;
     const body = (request.body ?? {}) as { force?: boolean; accountId?: string };
+    const accountId = resolveAccountId(request, body.accountId);
+    if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
     try {
-      const { sessionKey, qrContent } = await service.startQr(body.force !== false, body.accountId);
+      const { sessionKey, qrContent } = await service.startQr(body.force !== false, accountId);
       let qrDataUrl: string | undefined;
       try {
         qrDataUrl = await qrDataUrlOf(qrContent);
       } catch {
         /* qrcode 未安装：仅回链接内容，前端可提示 */
       }
-      return { sessionKey, qrContent, qrDataUrl };
+      return { sessionKey, qrContent, qrDataUrl, accountId };
     } catch (err) {
       return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
   app.get('/api/weixin/qr/status', async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
+    if (!requireAuth(request, reply)) return;
     const q = request.query as { sessionKey?: string; timeoutMs?: string; accountId?: string };
+    const accountId = resolveAccountId(request, q.accountId);
+    if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
     try {
       const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 30_000);
-      return await service.waitQr(q.sessionKey, timeoutMs, q.accountId);
+      const wait = await service.waitQr(q.sessionKey, timeoutMs, accountId);
+      if (wait.connected) {
+        const boundId = wait.accountId || accountId;
+        if (boundId) {
+          try {
+            await deps.onBound?.(boundId);
+          } catch (err) {
+            return reply.code(500).send({
+              error: `绑定成功但拉起微信进程失败：${err instanceof Error ? err.message : String(err)}`,
+              connected: true,
+              accountId: boundId,
+            });
+          }
+        }
+      }
+      return wait;
     } catch (err) {
       return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
   app.post('/api/weixin/reload', async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    if (!deps.reloadBot) {
-      return reply
-        .code(400)
-        .send({ error: deps.reloadUnavailableMessage ?? '当前模式无 weixin-bot adapter，不支持热重启' });
-    }
+    if (!requireAuth(request, reply)) return;
+    const body = (request.body ?? {}) as { accountId?: string };
+    const accountId = resolveAccountId(request, body.accountId);
+    if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
     try {
+      if (accountId && deps.restartAccount) {
+        await deps.restartAccount(accountId);
+        return { ok: true, processId: `weixin:${accountId}` };
+      }
+      if (!deps.reloadBot) {
+        return reply
+          .code(400)
+          .send({ error: deps.reloadUnavailableMessage ?? '当前模式无 weixin-bot adapter，不支持热重启' });
+      }
       await deps.reloadBot();
       return { ok: true };
     } catch (err) {

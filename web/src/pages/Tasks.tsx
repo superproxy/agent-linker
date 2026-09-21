@@ -11,6 +11,7 @@ import type { ChatSession } from './types';
 interface EditState {
   channel: string;
   userId: string;
+  ownerUsername?: string;
   task?: TaskItem;
 }
 
@@ -18,6 +19,7 @@ interface EditState {
 interface FlatTask extends TaskItem {
   channel: string;
   userId: string;
+  ownerUsername?: string;
   active: boolean;
 }
 
@@ -26,6 +28,7 @@ export function TasksPage(props: {
   token: string;
   onAuthError: AuthErrorHandler;
   onOpenChat: (session: ChatSession) => void;
+  username?: string;
 }) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
@@ -57,7 +60,7 @@ export function TasksPage(props: {
       const [u, na] = await Promise.all([ops.listAllTasks(), ops.nodeAgents()]);
       setUsers(u);
       setNodes(na.nodes);
-      setLocalAgents(na.local.agents);
+      setLocalAgents(na.local?.agents ?? []);
       setErr(null);
     } catch (e) {
       if (props.onAuthError(e)) return;
@@ -84,14 +87,24 @@ export function TasksPage(props: {
     }
   };
 
-  /** 最近活跃的渠道终端 = 当前用户归属（users 按活跃倒序，当前部署即自身的微信终端） */
-  const currentOwner = users && users.length > 0 ? users[0] : undefined;
+  /** 新建任务挂到微信连接器已建档的联系人上（与 /task 命令同一份状态） */
+  const weixinTerminals = useMemo(() => (users ?? []).filter((u) => u.channel === 'weixin'), [users]);
 
   const openCreate = () => {
-    const owner = currentOwner;
-    if (!owner) return;
-    setEditing({ channel: owner.channel, userId: owner.userId });
-    form.setFieldsValue({ name: '', agentId: localAgents[0]?.id ?? '', nodeId: '', key: '', cwd: '' });
+    const owner = weixinTerminals[0];
+    if (!owner) {
+      notify.info('微信连接器尚未为任何联系人建档。请先在微信里发一条消息，或发送 /task new。');
+      return;
+    }
+    setEditing({ channel: owner.channel, userId: owner.userId, ownerUsername: owner.ownerUsername ?? props.username });
+    form.setFieldsValue({
+      name: '',
+      agentId: localAgents[0]?.id ?? '',
+      nodeId: '',
+      key: '',
+      cwd: '',
+      terminal: `${owner.channel}::${owner.userId}::${owner.ownerUsername ?? ''}`,
+    });
     setOpen(true);
     void ops
       .getDefaultAgent()
@@ -100,7 +113,7 @@ export function TasksPage(props: {
   };
 
   const openEdit = (t: FlatTask) => {
-    setEditing({ channel: t.channel, userId: t.userId, task: t });
+    setEditing({ channel: t.channel, userId: t.userId, ownerUsername: t.ownerUsername, task: t });
     form.setFieldsValue({
       name: t.name,
       agentId: t.agentId,
@@ -117,23 +130,30 @@ export function TasksPage(props: {
     if (editing.task) {
       const t = editing.task;
       await withBusy(async () => {
-        if (v.name.trim() && v.name.trim() !== t.name) await ops.patchTask(editing.channel, editing.userId, t.id, { name: v.name.trim() });
+        if (v.name.trim() && v.name.trim() !== t.name)
+          await ops.patchTask(editing.channel, editing.userId, t.id, { name: v.name.trim() }, editing.ownerUsername);
         if ((v.cwd ?? '').trim() !== (t.cwd ?? ''))
-          await ops.patchTask(editing.channel, editing.userId, t.id, { cwd: v.cwd?.trim() || null });
+          await ops.patchTask(editing.channel, editing.userId, t.id, { cwd: v.cwd?.trim() || null }, editing.ownerUsername);
         if (v.agentId !== t.agentId || (v.nodeId ?? '') !== (t.nodeId ?? ''))
-          await ops.setTaskAgent(editing.channel, editing.userId, t.id, v.agentId, v.nodeId || undefined);
+          await ops.setTaskAgent(editing.channel, editing.userId, t.id, v.agentId, v.nodeId || undefined, editing.ownerUsername);
       }, '任务已保存');
     } else {
+      const raw = typeof v.terminal === 'string' ? v.terminal : '';
+      const [ch, uid, own] = raw.split('::');
+      const channel = ch || editing.channel;
+      const userId = uid || editing.userId;
+      const ownerUsername = own || editing.ownerUsername;
       await withBusy(
         () =>
           ops.createTask({
-            channel: editing.channel,
-            userId: editing.userId,
+            channel,
+            userId,
             name: v.name.trim(),
             ...(v.agentId ? { agentId: v.agentId } : {}),
             ...(v.nodeId ? { nodeId: v.nodeId } : {}),
             ...(v.key?.trim() ? { key: v.key.trim() } : {}),
             ...(v.cwd?.trim() ? { cwd: v.cwd.trim() } : {}),
+            ...(ownerUsername ? { ownerUsername } : {}),
           }),
         '任务已创建',
       );
@@ -149,6 +169,7 @@ export function TasksPage(props: {
           ...t,
           channel: u.channel,
           userId: u.userId,
+          ownerUsername: u.ownerUsername,
           active: u.activeTaskId === t.id,
         })),
       ),
@@ -164,6 +185,18 @@ export function TasksPage(props: {
         <Space size={8}>
           {t.active ? <Tag color="success" style={{ borderRadius: 999 }}>当前</Tag> : null}
           <span style={{ fontWeight: t.active ? 600 : 400 }}>{name}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '微信终端',
+      key: 'peer',
+      render: (_, t) => (
+        <Space size={6}>
+          <Tag color={t.channel === 'weixin' ? 'green' : 'default'} style={{ borderRadius: 999, marginInlineEnd: 0 }}>
+            {t.channel === 'weixin' ? '微信' : t.channel}
+          </Tag>
+          <code className="code-cell">{t.userId}</code>
         </Space>
       ),
     },
@@ -209,6 +242,7 @@ export function TasksPage(props: {
               props.onOpenChat({
                 channel: t.channel,
                 userId: t.userId,
+                ownerUsername: t.ownerUsername,
                 taskId: t.id,
                 taskName: t.name,
                 agentId: t.agentId,
@@ -221,7 +255,11 @@ export function TasksPage(props: {
             对话
           </Button>
           {!t.active ? (
-            <Button size="small" disabled={busy} onClick={() => void withBusy(() => ops.activateTask(t.channel, t.userId, t.id), '已激活任务')}>
+            <Button
+              size="small"
+              disabled={busy}
+              onClick={() => void withBusy(() => ops.activateTask(t.channel, t.userId, t.id, t.ownerUsername), '已设为该微信终端的当前任务')}
+            >
               激活
             </Button>
           ) : null}
@@ -239,7 +277,7 @@ export function TasksPage(props: {
                 okText: '删除',
                 okButtonProps: { danger: true },
               });
-              if (ok) await withBusy(() => ops.deleteTask(t.channel, t.userId, t.id), '任务已删除');
+              if (ok) await withBusy(() => ops.deleteTask(t.channel, t.userId, t.id, t.ownerUsername), '任务已删除');
             }}
           >
             删除
@@ -253,13 +291,14 @@ export function TasksPage(props: {
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
       <p className="page-desc" style={{ marginBottom: 12 }}>
-        这里列出当前用户（admin）的全部多轮会话任务，用于会话隔离与路由。终端在首次发起渠道消息时自动建档；
-        点「对话」进入该任务的持久会话页。Chatbox 等 OpenAI 客户端用任务 Key / Token 直连，不在这里产生终端。
+        每个微信联系人有自己的任务列表；<strong>当前任务由微信连接器切换</strong>
+        （微信里发送 <code>/task</code>，或本页「激活」）。连接器最多约 2 秒内按新激活任务路由。
+        点「对话」进入该任务的持久会话。Chatbox 等客户端用任务 Key 直连，不在这里产生终端。
       </p>
       {users === null ? (
         <Table loading showHeader={false} pagination={false} rowKey="x" columns={[{ title: '', dataIndex: 'x' }]} dataSource={[]} />
       ) : users.length === 0 ? (
-        <EmptyHint text="暂无任务（微信终端首次发消息后自动创建）" />
+        <EmptyHint text="暂无微信终端任务。请先绑定微信，在对话里发一条消息或发送 /task new，连接器会自动建档。" />
       ) : (
         <>
           <Space style={{ marginBottom: 12 }} wrap>
@@ -271,7 +310,7 @@ export function TasksPage(props: {
             </Button>
           </Space>
           <Table
-            rowKey={(t) => `${t.channel}:${t.userId}:${t.id}`}
+            rowKey={(t) => `${t.ownerUsername ?? ''}:${t.channel}:${t.userId}:${t.id}`}
             size="small"
             columns={columns}
             dataSource={flatTasks}
@@ -291,6 +330,16 @@ export function TasksPage(props: {
         destroyOnClose
       >
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
+          {!editing?.task && weixinTerminals.length > 0 ? (
+            <Form.Item name="terminal" label="微信终端" rules={[{ required: true, message: '请选择联系人' }]}>
+              <Select
+                options={weixinTerminals.map((u) => ({
+                  value: `${u.channel}::${u.userId}::${u.ownerUsername ?? ''}`,
+                  label: `微信 · ${u.userId}`,
+                }))}
+              />
+            </Form.Item>
+          ) : null}
           <Form.Item name="name" label="任务名" rules={[{ required: true, message: '请输入任务名' }]}>
             <Input placeholder="例如：默认任务" />
           </Form.Item>

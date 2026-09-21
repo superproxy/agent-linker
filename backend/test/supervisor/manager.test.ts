@@ -233,6 +233,13 @@ weixin:
   assert.equal(defEnv.LINKAGENT_GATEWAY_TOKEN, '');
 });
 
+test('ProcessManager：extraWeixinAccounts 与 yaml 合并为多实例', () => {
+  const root = tmpRoot();
+  const pm = new ProcessManager(root, { extraWeixinAccounts: () => ['alice', 'bob'] });
+  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'weixin:alice', 'weixin:bob', 'node']);
+  assert.deepEqual(pm.expand(['weixin']), ['weixin:alice', 'weixin:bob']);
+});
+
 test('ProcessManager：未配置 weixin.accounts 保持单实例（默认 weixin，兼容旧行为）', () => {
   const root = tmpRoot();
   const pm = new ProcessManager(root);

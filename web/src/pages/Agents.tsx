@@ -46,7 +46,7 @@ export function AgentsPage(props: {
   const load = useCallback(async () => {
     try {
       const [v, cat] = await Promise.all([admin.agentsByNode(), admin.catalog()]);
-      setData({ defaultAgentId: v.defaultAgentId, local: v.local.agents, nodes: v.nodes });
+      setData({ defaultAgentId: v.defaultAgentId ?? '', local: v.local?.agents ?? [], nodes: v.nodes });
       setCatalog(cat);
       setErr(null);
     } catch (e) {

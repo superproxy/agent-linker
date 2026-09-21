@@ -45,7 +45,7 @@ export function KeysPage(props: { base: string; token: string; onAuthError: Auth
   const toggle = (r: Row) => {
     setBusyKey(r.t.id);
     ops
-      .patchTask(r.u.channel, r.u.userId, r.t.id, { keyEnabled: r.t.keyEnabled === false })
+      .patchTask(r.u.channel, r.u.userId, r.t.id, { keyEnabled: r.t.keyEnabled === false }, r.u.ownerUsername)
       .then(() => {
         notify.success(r.t.keyEnabled === false ? 'Key 已启用' : 'Key 已停用');
         return load();

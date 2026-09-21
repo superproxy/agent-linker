@@ -19,6 +19,8 @@ export interface TaskRouterOptions {
   gatewayToken?: string;
   /** 用户级 token 解析器（提供后按每个渠道用户携带其专属 token，而非全局静态 token） */
   resolveToken?: TokenResolver;
+  /** 登录用户任务空间（微信 bot 账号槽）；查询 /api/tasks 时带 owner= */
+  ownerUsername?: string;
 }
 
 export interface ActiveRoute {
@@ -35,6 +37,7 @@ export class TaskRouter {
   private readonly channel: string;
   private readonly gatewayToken?: string;
   private readonly resolveToken?: TokenResolver;
+  private readonly ownerUsername?: string;
   private readonly cache = new Map<string, { route: ActiveRoute; at: number }>();
 
   constructor(options: TaskRouterOptions) {
@@ -42,6 +45,7 @@ export class TaskRouter {
     this.channel = options.channel;
     this.gatewayToken = options.gatewayToken;
     this.resolveToken = options.resolveToken;
+    this.ownerUsername = options.ownerUsername;
   }
 
   /** 取该用户的鉴权 token：优先用户级 token，回退全局静态 token */
@@ -61,7 +65,9 @@ export class TaskRouter {
 
   /** 单次查询 /api/tasks；401 抛错交由调用方刷新 token 后重试 */
   private async fetchActive(userId: string, forceToken: boolean): Promise<ActiveRoute | null> {
-    const url = `${this.gatewayUrl}/api/tasks?channel=${encodeURIComponent(this.channel)}&userId=${encodeURIComponent(userId)}`;
+    const q = new URLSearchParams({ channel: this.channel, userId });
+    if (this.ownerUsername) q.set('owner', this.ownerUsername);
+    const url = `${this.gatewayUrl}/api/tasks?${q.toString()}`;
     const token = await this.tokenFor(userId, forceToken);
     const res = await fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
     if (res.status === 401) throw new Error('TASK_ROUTER_UNAUTHORIZED');

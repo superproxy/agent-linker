@@ -45,6 +45,8 @@
 
 新增凭据类型时，需同时更新：`auth.ts`（解析 + 三个守卫）、`/api/auth/me`、对应 store/api、shared 类型与测试。
 
+后台按角色隔离：**管理员**可见本机菜单、全部任务/key、本机 agent；**普通登录用户**只能看自己的远程节点、自己的任务空间（任务管理 / key / 概览统计）、通用对话，以及自己的微信绑定（账号槽=用户名，进程 `weixin:<username>`）。本机 agent 相关管理 API 返回 403。`canSeeNode` 对非管理员不包含内建 `local` 节点。渠道 bot 仍可用 `ct_` 读自己的 `/api/tasks`（需带 `owner=` 指向 bot 账号）。
+
 ## 其他设计文档
 
 - `docs/design.md` —— 设计记录。

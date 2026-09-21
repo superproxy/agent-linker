@@ -173,6 +173,7 @@ export function registerUserApi(
   guard: AuthGuard,
   personalTokens?: PersonalTokenStore,
   nodeTokens?: NodeTokenStore,
+  onUserDeleted?: (username: string) => void | Promise<void>,
 ): void {
   const requireAdmin = (request: FastifyRequest, reply: FastifyReply): boolean => {
     if (!guard.isAdmin(request as HeaderCarrier)) {
@@ -235,6 +236,7 @@ export function registerUserApi(
     store.delete(username);
     personalTokens?.revokeForUser(username);
     nodeTokens?.revokeForUser(username);
+    await onUserDeleted?.(username);
     request.log.info({ user: username, by: current?.username ?? 'token' }, '删除用户');
     return reply.send({ ok: true });
   });

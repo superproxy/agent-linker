@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadSharedConfig, persistDefaultTaskAgentId, resolveGatewayAuth } from './config.js';
+import { loadSharedConfig, persistDefaultTaskAgentId, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
@@ -20,7 +20,7 @@ import { createNodeRegistry } from './nodes/store.js';
 import { createPreferenceStore } from './prefs/store.js';
 import { registerNodeApi } from './nodes/api.js';
 import { canSeeNode } from './nodes/visibility.js';
-import { ProcessManager } from '../supervisor/manager.js';
+import { ProcessManager, type ProcessInstanceId } from '../supervisor/manager.js';
 import { registerPmApi } from './pm/api.js';
 import { UserStore } from './users/store.js';
 import { AuthGuard } from './users/auth.js';
@@ -57,6 +57,8 @@ type TaskAwareChatBody = ChatCompletionRequest & {
   userId?: string;
   agent?: string;
   task?: string;
+  /** 登录用户任务空间（微信 bot 账号槽 = 用户名） */
+  ownerUsername?: string;
   /** 任务全局 key：单 key 直连路由（无需 channel/userId/task 三元素） */
   taskKey?: string;
   sessionKey?: string;
@@ -231,7 +233,19 @@ export async function buildServer(options?: {
     personalTokens: personalTokenStore,
   });
   registerAuthApi(app, userStore, authGuard);
-  registerUserApi(app, userStore, authGuard, personalTokenStore, nodeTokenStore);
+  const pm = new ProcessManager(layout.root, {
+    extraWeixinAccounts: () => config.weixin.accounts ?? [],
+  });
+  registerUserApi(app, userStore, authGuard, personalTokenStore, nodeTokenStore, async (username) => {
+    taskService.deleteOwnedBy(username);
+    try {
+      const next = persistRemoveWeixinAccount(configPath, username);
+      config.weixin = { ...config.weixin, accounts: next };
+      await pm.stop([`weixin:${username}` as ProcessInstanceId]);
+    } catch {
+      /* 删用户时停微信进程失败不阻断 */
+    }
+  });
   registerChannelTokenApi(app, channelTokenStore, authGuard, taskService, {
     listAvailableAgents: () => manager.listAgentDetails().map((a) => a.id),
   });
@@ -255,6 +269,11 @@ export async function buildServer(options?: {
         // zod default 产出只读代理：整体替换 gateway 段
         config.gateway = { ...config.gateway, tasks: { ...config.gateway.tasks, defaultAgentId: agentId } };
       },
+      isAdmin: (req) => authGuard.isAdmin(req as FastifyRequest),
+      sessionUser: (req) => {
+        const u = authGuard.sessionUser(req as FastifyRequest);
+        return u ? { username: u.username } : null;
+      },
     },
     // 渠道用户级凭据：ct_ token 只读自己的 GET /api/tasks（微信 bot 查激活任务用）
     (req) => {
@@ -266,9 +285,11 @@ export async function buildServer(options?: {
   // 删除渠道用户时级联吊销其用户级 token（覆盖 tasks api 内同名路由，先注册者优先）
   app.delete('/api/users/:channel/:userId', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
+    if (!authGuard.isAdmin(request)) return reply.code(403).send({ error: 'forbidden' });
     const params = request.params as { channel: string; userId: string };
+    const owner = (request.query as { owner?: string }).owner?.trim() || undefined;
     if (!params.channel || !params.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
-    taskService.deleteUser(params.channel, params.userId);
+    taskService.deleteUser(params.channel, params.userId, owner);
     channelTokenStore.revokeForUser(params.channel, params.userId);
     return { ok: true };
   });
@@ -303,7 +324,6 @@ export async function buildServer(options?: {
   });
 
   // ── 进程管理（管理员；web 与网关同端口，打开哪台就管哪台）：/api/system/info + /api/pm/* ──
-  const pm = new ProcessManager(layout.root);
   registerPmApi(app, {
     pm,
     authGuard,
@@ -386,15 +406,27 @@ export async function buildServer(options?: {
     // 用户级凭据：强制以凭据归属身份路由（即便 body 没写 channel/userId 也补齐为本人）
     const scopeChannel = authState.status === 'channelUser' ? authState.channel : body.channel;
     const scopeUserId = authState.status === 'channelUser' ? authState.userId : body.userId;
+    const loginOwner =
+      authState.status === 'session' || authState.status === 'personal' || authState.status === 'local'
+        ? authState.user.username
+        : undefined;
     const routing = decideTaskRouting(taskService, {
       channel: scopeChannel,
       userId: scopeUserId,
+      ownerUsername: body.ownerUsername ?? loginOwner,
       agent: body.agent,
       task: body.task,
       // 任务级凭据：body.taskKey 仅在常规凭据下作为路由字段；Bearer 命中任务时以锁定为准
       taskKey: authState.status === 'task' ? undefined : body.taskKey,
       ...(authState.status === 'task'
-        ? { lockedTask: { channel: authState.channel, userId: authState.userId, taskId: authState.taskId } }
+        ? {
+            lockedTask: {
+              channel: authState.channel,
+              userId: authState.userId,
+              taskId: authState.taskId,
+              ...(authState.ownerUsername ? { ownerUsername: authState.ownerUsername } : {}),
+            },
+          }
         : {}),
       model: body.model,
       text: lastUserText || prompt,
@@ -561,6 +593,9 @@ export async function buildServer(options?: {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send(openaiError('需要管理员权限', 'invalid_request_error', 'forbidden'));
+    }
     return { agents: manager.listAgentDetails() };
   });
 
@@ -575,10 +610,19 @@ export async function buildServer(options?: {
       username: authGuard.sessionUser(request)?.username,
     };
     return {
-      // local 仅暴露已启用 agent（停用的 agent 不能被任务绑定，与 hasRoutingAgent 校验一致）
-      local: { nodeId: 'local', name: '本机（网关）', online: true, agents: manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })) },
+      ...(viewer.admin
+        ? {
+            // local 仅暴露已启用 agent（停用的 agent 不能被任务绑定，与 hasRoutingAgent 校验一致）
+            local: {
+              nodeId: 'local',
+              name: '本机（网关）',
+              online: true,
+              agents: manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })),
+            },
+          }
+        : {}),
       nodes: nodes.filter((n) => canSeeNode(n, viewer)).map((n) => ({ nodeId: n.nodeId, name: n.name, online: n.online, agents: n.agents })),
-      agents: manager.listRoutingAgents(),
+      agents: viewer.admin ? manager.listRoutingAgents() : [],
     };
   });
 
@@ -596,14 +640,18 @@ export async function buildServer(options?: {
       username: authGuard.sessionUser(request)?.username,
     };
     return {
-      defaultAgentId: taskService.getDefaultAgentId(),
-      local: {
-        nodeId: LOCAL_NODE_ID,
-        name: LOCAL_NODE_NAME,
-        online: true,
-        status: 'approved' as const,
-        agents: manager.listAgentDetails(),
-      },
+      defaultAgentId: viewer.admin ? taskService.getDefaultAgentId() : undefined,
+      ...(viewer.admin
+        ? {
+            local: {
+              nodeId: LOCAL_NODE_ID,
+              name: LOCAL_NODE_NAME,
+              online: true,
+              status: 'approved' as const,
+              agents: manager.listAgentDetails(),
+            },
+          }
+        : {}),
       nodes: nodeManager.list().filter((n) => canSeeNode(n, viewer)).map((n) => ({
         nodeId: n.nodeId,
         name: n.name,
@@ -623,6 +671,9 @@ export async function buildServer(options?: {
   app.get('/api/agents/catalog', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send(openaiError('需要管理员权限', 'invalid_request_error', 'forbidden'));
     }
     return { agents: manager.listAgentCatalog() };
   });
@@ -661,6 +712,9 @@ export async function buildServer(options?: {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send(openaiError('需要管理员权限才能添加本机 agent', 'invalid_request_error', 'forbidden'));
+    }
     const body = request.body as Record<string, unknown> | null | undefined;
     if (!body || typeof body !== 'object') {
       return reply.code(400).send(openaiError('请求体需为 JSON 对象', 'invalid_request_error', 'invalid_request'));
@@ -697,6 +751,9 @@ export async function buildServer(options?: {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
     }
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send(openaiError('需要管理员权限', 'invalid_request_error', 'forbidden'));
+    }
     const candidates: Record<string, string[]> = {};
     for (const d of manager.listAgentDetails()) candidates[d.id] = collectModelCandidates(d.type);
     return { candidates };
@@ -705,6 +762,9 @@ export async function buildServer(options?: {
   app.patch('/api/agents/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
+    }
+    if (!authGuard.isAdmin(request)) {
+      return reply.code(403).send(openaiError('需要管理员权限才能改本机 agent', 'invalid_request_error', 'forbidden'));
     }
     const body = request.body as Record<string, unknown> | null | undefined;
     if (!body || typeof body !== 'object') {
@@ -818,6 +878,24 @@ export async function buildServer(options?: {
     weixinLoginService,
     (req) => checkAuth(req as FastifyRequest),
     {
+      isAdmin: (req) => authGuard.isAdmin(req as FastifyRequest),
+      sessionUser: (req) => {
+        const u = authGuard.sessionUser(req as FastifyRequest);
+        return u ? { username: u.username } : null;
+      },
+      isProcessRunning: (accountId) => pm.isRunning(`weixin:${accountId}` as ProcessInstanceId),
+      async onBound(accountId) {
+        const accounts = persistEnsureWeixinAccount(configPath, accountId);
+        config.weixin = { ...config.weixin, accounts, mode: 'external' };
+        if (weixinBot) await weixinBot.stop().catch(() => {});
+        await pm.start([`weixin:${accountId}` as ProcessInstanceId]);
+      },
+      async restartAccount(accountId) {
+        const accounts = persistEnsureWeixinAccount(configPath, accountId);
+        config.weixin = { ...config.weixin, accounts, mode: 'external' };
+        if (weixinBot) await weixinBot.stop().catch(() => {});
+        await pm.restart([`weixin:${accountId}` as ProcessInstanceId]);
+      },
       reloadBot: weixinBot ? () => weixinBot.reload() : undefined,
       ...(weixinMode === 'external'
         ? {

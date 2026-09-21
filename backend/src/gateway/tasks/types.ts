@@ -29,6 +29,8 @@ export function normalizeNodeId(nodeId?: string): string {
 export interface UserTasks {
   channel: string;
   userId: string;
+  /** 登录账号任务空间（微信 bot 账号槽 / web 后台用户名）；缺省为旧数据，仅管理员可见 */
+  ownerUsername?: string;
   /** 当前激活任务 id（web 点击 / 微信命令都写这里） */
   activeTaskId: string;
   tasks: TaskItem[];

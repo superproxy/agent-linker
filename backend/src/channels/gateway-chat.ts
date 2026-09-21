@@ -39,6 +39,7 @@ export interface StreamChatParams {
   userId?: string;
   agent?: string;
   task?: string;
+  ownerUsername?: string;
   message: string;
   /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
   gatewayToken?: string;
@@ -64,6 +65,7 @@ export async function streamChat(params: StreamChatParams): Promise<StreamOutput
       ...(params.userId ? { userId: params.userId } : {}),
       ...(params.agent ? { agent: params.agent } : {}),
       ...(params.task ? { task: params.task } : {}),
+      ...(params.ownerUsername ? { ownerUsername: params.ownerUsername } : {}),
     }),
     signal: params.signal,
   });
@@ -145,6 +147,7 @@ export interface RunChatSessionOptions {
   userId?: string;
   agent?: string;
   task?: string;
+  ownerUsername?: string;
   message: string;
   /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
   gatewayToken?: string;
@@ -223,6 +226,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       ...(opts.userId ? { userId: opts.userId } : {}),
       ...(opts.agent ? { agent: opts.agent } : {}),
       ...(opts.task ? { task: opts.task } : {}),
+      ...(opts.ownerUsername ? { ownerUsername: opts.ownerUsername } : {}),
       signal: controller.signal,
       onReasoning: (d) => {
         reasoning += d;

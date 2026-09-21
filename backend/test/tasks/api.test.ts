@@ -39,6 +39,34 @@ test('普通消息 → chat，解析激活任务 agent+task，sessionKey 编码�
   assert.equal(d.sessionKey, 'weixin:wx_1:task:default');
 });
 
+test('带 ownerUsername 的会话 key 前缀隔离；同 peer 不同 owner 不串文件', () => {
+  const svc = freshService();
+  const alice = svc.load('weixin', 'wx_same', 'alice');
+  svc.createTask(alice, 'alice任务', 'pi');
+  const bob = svc.load('weixin', 'wx_same', 'bob');
+  assert.equal(bob.tasks.length, 1);
+  assert.equal(alice.tasks.length, 2);
+  const d = decideTaskRouting(svc, {
+    text: '你好',
+    channel: 'weixin',
+    userId: 'wx_same',
+    ownerUsername: 'alice',
+  });
+  assert.equal(d.kind, 'chat');
+  if (d.kind === 'chat') {
+    assert.ok(d.sessionKey.startsWith('alice:weixin:wx_same:task:'));
+    assert.notEqual(d.sessionKey, 'weixin:wx_same:task:default');
+  }
+  const db = decideTaskRouting(svc, {
+    text: '你好',
+    channel: 'weixin',
+    userId: 'wx_same',
+    ownerUsername: 'bob',
+  });
+  assert.equal(db.kind, 'chat');
+  if (db.kind === 'chat') assert.equal(db.sessionKey, 'bob:weixin:wx_same:task:default');
+});
+
 test('普通消息带 agent/task 参数 → 覆盖路由', () => {
   const svc = freshService();
   svc.load('weixin', 'wx_1');
@@ -339,6 +367,73 @@ test('/api/tasks/all: 开箱状态（无任何渠道消息落盘）返回空列�
     // 幂等：再次请求仍为空，确认读取接口不落盘
     const again = await app.inject({ method: 'GET', url: '/api/tasks/all' });
     assert.deepEqual(again.json().users, []);
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
+test('非管理员：任务汇总/渠道用户/改任务 403；ct_ 作用域读取仍走 checkAuth=false 路径', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  registerTaskApi(app, svc, () => true, { isAdmin: () => false });
+  await app.ready();
+  try {
+    assert.equal((await app.inject({ method: 'GET', url: '/api/tasks/all' })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/users' })).statusCode, 403);
+    assert.equal(
+      (await app.inject({ method: 'GET', url: '/api/tasks?channel=weixin&userId=wx_1' })).statusCode,
+      403,
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/tasks',
+          payload: { channel: 'weixin', userId: 'wx_1', name: '越权' },
+        })
+      ).statusCode,
+      403,
+    );
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
+test('登录用户只能看到自己的任务空间；管理员可见全部', async () => {
+  const svc = freshService();
+  svc.createTask(svc.load('weixin', 'wx_same', 'alice'), 'alice任务', 'opencode');
+  svc.createTask(svc.load('weixin', 'wx_same', 'bob'), 'bob任务', 'pi');
+  const app = Fastify();
+  registerTaskApi(app, svc, () => true, {
+    isAdmin: (req) => req.headers['x-user'] === 'admin',
+    sessionUser: (req) => {
+      const u = req.headers['x-user'];
+      return typeof u === 'string' ? { username: u } : null;
+    },
+  });
+  await app.ready();
+  try {
+    const alice = await app.inject({ method: 'GET', url: '/api/tasks/all', headers: { 'x-user': 'alice' } });
+    assert.equal(alice.statusCode, 200);
+    const aliceUsers = (
+      alice.json() as {
+        users: Array<{ ownerUsername?: string; channel: string; userId: string; tasks: { name: string }[] }>;
+      }
+    ).users;
+    assert.ok(aliceUsers.every((u) => u.ownerUsername === 'alice'));
+    assert.ok(aliceUsers.some((u) => u.channel === 'weixin' && u.tasks.some((t) => t.name === 'alice任务')));
+    assert.ok(!aliceUsers.some((u) => u.tasks.some((t) => t.name === 'bob任务')));
+
+    const bob = await app.inject({ method: 'GET', url: '/api/tasks/all', headers: { 'x-user': 'bob' } });
+    const bobUsers = (bob.json() as { users: Array<{ ownerUsername?: string; tasks: { name: string }[] }> }).users;
+    assert.ok(bobUsers.every((u) => u.ownerUsername === 'bob'));
+    assert.ok(bobUsers.some((u) => u.tasks.some((t) => t.name === 'bob任务')));
+    assert.ok(!bobUsers.some((u) => u.tasks.some((t) => t.name === 'alice任务')));
+
+    const admin = await app.inject({ method: 'GET', url: '/api/tasks/all', headers: { 'x-user': 'admin' } });
+    const adminUsers = (admin.json() as { users: Array<{ tasks: { name: string }[] }> }).users;
+    assert.ok(adminUsers.some((u) => u.tasks.some((t) => t.name === 'alice任务')));
+    assert.ok(adminUsers.some((u) => u.tasks.some((t) => t.name === 'bob任务')));
   } finally {
     await app.close().catch(() => {});
   }

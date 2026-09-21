@@ -21,7 +21,7 @@ export type AuthState =
   | { status: 'token' }
   | { status: 'session'; user: UserRecord }
   | { status: 'personal'; user: UserRecord }
-  | { status: 'task'; channel: string; userId: string; taskId: string; taskKey: string }
+  | { status: 'task'; channel: string; userId: string; taskId: string; taskKey: string; ownerUsername?: string }
   | { status: 'channelUser'; channel: string; userId: string }
   | { status: 'none' };
 
@@ -33,7 +33,12 @@ type HeaderCarrier = {
 
 /** 任务 key 反查依赖（避免 users 层反向依赖 tasks 层，由网关入口注入） */
 export interface TaskKeyResolver {
-  findByKey(key: string): { channel: string; userId: string; task: { id: string; key?: string; keyEnabled?: boolean } } | undefined;
+  findByKey(key: string): {
+    channel: string;
+    userId: string;
+    ownerUsername?: string;
+    task: { id: string; key?: string; keyEnabled?: boolean };
+  } | undefined;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -172,6 +177,7 @@ export class AuthGuard {
           userId: ref.userId,
           taskId: ref.task.id,
           taskKey: ref.task.key ?? bearer,
+          ...(ref.ownerUsername ? { ownerUsername: ref.ownerUsername } : {}),
         };
       }
     }
@@ -192,6 +198,7 @@ export class AuthGuard {
           userId: ref.userId,
           taskId: ref.task.id,
           taskKey: ref.task.key ?? bodyKey,
+          ...(ref.ownerUsername ? { ownerUsername: ref.ownerUsername } : {}),
         };
       }
     }

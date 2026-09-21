@@ -104,6 +104,20 @@ code,
   line-height: 1.5;
 }
 
+.app-sider.ant-layout-sider-collapsed .brand {
+  padding: 0;
+  justify-content: center;
+}
+
+.app-sider.ant-layout-sider-collapsed .brand-text,
+.app-sider.ant-layout-sider-collapsed .sider-foot {
+  display: none;
+}
+
+.sider-collapse-trigger {
+  display: inline-flex;
+}
+
 .app-header {
   position: sticky;
   top: 0;
@@ -509,6 +523,9 @@ th .ant-btn-sm {
   }
   .app-main {
     margin-left: 0 !important;
+  }
+  .sider-collapse-trigger {
+    display: none !important;
   }
   .menu-trigger {
     display: inline-flex !important;

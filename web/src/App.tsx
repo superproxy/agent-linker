@@ -211,10 +211,11 @@ function PageRouter(props: {
 }) {
   const { tab, base, token, onAuthError } = props;
   const isAdmin = props.auth.status === 'ready' ? props.auth.user.role === 'admin' : true;
+  const username = props.auth.status === 'ready' ? props.auth.user.username : undefined;
 
   switch (tab) {
     case 'overview':
-      return <Overview base={base} token={token} onAuthError={onAuthError} />;
+      return <Overview base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'chat':
       return (
         <ChatPage
@@ -238,7 +239,7 @@ function PageRouter(props: {
         />
       );
     case 'tasks':
-      return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} />;
+      return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} username={username} />;
     case 'keys':
       return <KeysPage base={base} token={token} onAuthError={onAuthError} />;
     case 'my-token':

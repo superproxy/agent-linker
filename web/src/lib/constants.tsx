@@ -19,6 +19,7 @@ export const LS_KEY = 'linkagent.gw.base';
 export const LS_TAB_KEY = 'linkagent.gw.tab';
 export const LS_TOKEN_KEY = 'linkagent.gw.token';
 export const LS_PROFILES_KEY = 'linkagent.gw.profiles';
+export const LS_SIDER_COLLAPSED_KEY = 'linkagent.gw.siderCollapsed';
 
 /** 远程网关连接配置（仅保存在当前浏览器 localStorage） */
 export interface GatewayProfile {
@@ -64,10 +65,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'local-gateway', label: '网关', icon: <DesktopOutlined />, adminOnly: true },
       { id: 'processes', label: '进程', icon: <ControlOutlined />, adminOnly: true },
-      { id: 'local-nodes', label: '节点', icon: <ClusterOutlined /> },
-      { id: 'local-agents', label: 'agent', icon: <AppstoreOutlined /> },
-      { id: 'overview', label: '概览', icon: <DashboardOutlined /> },
-      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
+      { id: 'local-nodes', label: '节点', icon: <ClusterOutlined />, adminOnly: true },
+      { id: 'local-agents', label: 'agent', icon: <AppstoreOutlined />, adminOnly: true },
     ],
   },
   {
@@ -81,6 +80,8 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: '通用',
     items: [
+      { id: 'overview', label: '概览', icon: <DashboardOutlined /> },
+      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
       { id: 'keys', label: 'key', icon: <KeyOutlined /> },
       { id: 'tasks', label: '任务管理', icon: <MessageOutlined /> },
     ],

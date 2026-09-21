@@ -146,8 +146,9 @@ export class ProcessManager {
   readonly paths: ManagerPaths;
   private readonly layout: InstallLayout;
   private readonly gw: GatewayRuntimeConfig;
+  private readonly extraWeixinAccounts?: () => string[];
 
-  constructor(root?: string) {
+  constructor(root?: string, opts: { extraWeixinAccounts?: () => string[] } = {}) {
     this.layout = createInstallLayout(root);
     this.paths = {
       root: this.layout.root,
@@ -155,6 +156,7 @@ export class ProcessManager {
       logDir: this.layout.pmLogs,
     };
     this.gw = loadGatewayRuntimeConfig(this.layout);
+    this.extraWeixinAccounts = opts.extraWeixinAccounts;
   }
 
   get baseUrl(): string {
@@ -188,9 +190,14 @@ export class ProcessManager {
     return true;
   }
 
-  /** weixin 实例 id 列表：配置了 accounts → 每账号一个；否则默认单实例 */
+  /** weixin 实例 id 列表：yaml accounts ∪ 运行时额外账号；都空则默认单实例 */
   weixinInstanceIds(): ProcessInstanceId[] {
-    const accounts = this.gw.shared.weixin.accounts ?? [];
+    const yaml = this.gw.shared.weixin.accounts ?? [];
+    const extra = this.extraWeixinAccounts?.() ?? [];
+    const accounts: string[] = [];
+    for (const a of [...yaml, ...extra]) {
+      if (a && !accounts.includes(a)) accounts.push(a);
+    }
     return accounts.length > 0 ? accounts.map((a) => `weixin:${a}` as ProcessInstanceId) : ['weixin'];
   }
 

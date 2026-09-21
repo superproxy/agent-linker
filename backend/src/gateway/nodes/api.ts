@@ -11,7 +11,7 @@ type HeaderReq = { headers: Record<string, string | string[] | undefined> };
 
 /**
  * 节点管理与用户偏好 REST：
- *   GET    /api/nodes                                  可见节点（管理员全部；其他人本机+自己的机器）
+ *   GET    /api/nodes                                  可见节点（管理员含本机+全部；其他人只看自己的远程机器）
  *   POST   /api/nodes/:nodeId/approve                  批准待审批节点（仅管理员）
  *   POST   /api/nodes/:nodeId/reject                   拒绝待审批节点（仅管理员）
  *   POST   /api/nodes/:nodeId/disable                  临时停用节点：在线则关闭连接，重连被拒（仅管理员）
@@ -66,7 +66,7 @@ export function registerNodeApi(
       lastSeenAt: Date.now(),
     };
     const remote = nodeManager.list().filter((n) => canSeeNode(n, viewer));
-    return { nodes: [local, ...remote] };
+    return { nodes: viewer.admin ? [local, ...remote] : remote };
   });
 
   app.post('/api/nodes/:nodeId/approve', async (request, reply) => {

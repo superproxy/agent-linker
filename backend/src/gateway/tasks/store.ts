@@ -6,32 +6,39 @@ import type { UserTasks } from './types.js';
 export interface UserSummary {
   channel: string;
   userId: string;
+  ownerUsername?: string;
   activeTaskId: string;
   taskCount: number;
   /** 文件 mtime（最近一次状态变更） */
   updatedAt: number;
 }
 
-/** 用户状态文件名：<channel>.<userId>.json，特殊字符转义防路径注入 */
-export function tasksFileFor(stateDir: string, channel: string, userId: string): string {
-  const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, '_');
-  return join(stateDir, `${safe(channel)}.${safe(userId)}.json`);
+function safeSeg(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+/** 用户状态文件名：有 owner 时 <owner>.<channel>.<userId>.json，否则旧格式 <channel>.<userId>.json */
+export function tasksFileFor(stateDir: string, channel: string, userId: string, ownerUsername?: string): string {
+  if (ownerUsername) return join(stateDir, `${safeSeg(ownerUsername)}.${safeSeg(channel)}.${safeSeg(userId)}.json`);
+  return join(stateDir, `${safeSeg(channel)}.${safeSeg(userId)}.json`);
 }
 
 export interface TaskStore {
-  read(channel: string, userId: string): UserTasks | null;
+  read(channel: string, userId: string, ownerUsername?: string): UserTasks | null;
   write(data: UserTasks): void;
   /** 列出全部用户（含任务数，按最近活跃倒序） */
   list(): UserSummary[];
   /** 删除一个用户的全部状态 */
-  remove(channel: string, userId: string): void;
+  remove(channel: string, userId: string, ownerUsername?: string): void;
 }
 
 export function createJsonStore(stateDir: string): TaskStore {
   return {
-    read(channel, userId) {
-      const file = tasksFileFor(stateDir, channel, userId);
-      if (!existsSync(file)) return null;
+    read(channel, userId, ownerUsername) {
+      const owned = ownerUsername ? tasksFileFor(stateDir, channel, userId, ownerUsername) : null;
+      const legacy = tasksFileFor(stateDir, channel, userId);
+      const file = owned && existsSync(owned) ? owned : existsSync(legacy) ? legacy : owned;
+      if (!file || !existsSync(file)) return null;
       try {
         const data = JSON.parse(readFileSync(file, 'utf8')) as UserTasks;
         if (!data || typeof data !== 'object' || !Array.isArray(data.tasks)) return null;
@@ -42,13 +49,15 @@ export function createJsonStore(stateDir: string): TaskStore {
     },
     write(data) {
       mkdirSync(stateDir, { recursive: true });
-      const file = tasksFileFor(stateDir, data.channel, data.userId);
+      const file = tasksFileFor(stateDir, data.channel, data.userId, data.ownerUsername);
       const tmp = `${file}.tmp`;
       writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-      // 原子替换：读者永远看不到「文件缺失/半写」窗口。
-      // 之前先 rmSync(file) 再 writeFileSync 会造成窗口期 read() 返回 null，
-      // 调用方会重建仅含 default 的空白状态 → 切换任何真实任务都报「任务不存在」。
       renameSync(tmp, file);
+      // 迁入带 owner 的新文件后删掉旧路径，避免 list() 双份
+      if (data.ownerUsername) {
+        const legacy = tasksFileFor(stateDir, data.channel, data.userId);
+        if (legacy !== file) rmSync(legacy, { force: true });
+      }
     },
     list() {
       if (!existsSync(stateDir)) return [];
@@ -62,6 +71,7 @@ export function createJsonStore(stateDir: string): TaskStore {
           out.push({
             channel: data.channel,
             userId: data.userId,
+            ...(data.ownerUsername ? { ownerUsername: data.ownerUsername } : {}),
             activeTaskId: data.activeTaskId,
             taskCount: data.tasks.length,
             updatedAt: statSync(file).mtimeMs,
@@ -72,8 +82,9 @@ export function createJsonStore(stateDir: string): TaskStore {
       }
       return out.sort((a, b) => b.updatedAt - a.updatedAt);
     },
-    remove(channel, userId) {
-      rmSync(tasksFileFor(stateDir, channel, userId), { force: true });
+    remove(channel, userId, ownerUsername) {
+      rmSync(tasksFileFor(stateDir, channel, userId, ownerUsername), { force: true });
+      if (ownerUsername) rmSync(tasksFileFor(stateDir, channel, userId), { force: true });
     },
   };
 }

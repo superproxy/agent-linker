@@ -183,6 +183,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const router = new TaskRouter({
     gatewayUrl,
     channel: 'weixin',
+    ownerUsername: account.id,
     ...(gatewayToken ? { gatewayToken } : {}),
     ...(tokenProvider
       ? { resolveToken: (userId: string, force?: boolean) => tokenProvider.resolve('weixin', userId, force) }
@@ -271,6 +272,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
         model,
         channel: 'weixin',
         userId: from,
+        ownerUsername: account.id,
         message: text,
         ...(bearer ? { gatewayToken: bearer } : {}),
         // 命令：网关本地解析回文本；普通消息：按激活任务路由（agent/task 透传）
