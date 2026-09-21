@@ -704,7 +704,7 @@ export interface TaskItem {
   createdAt: number;
 }
 
-/** 单个渠道终端的全部会话任务（/api/tasks/all 的 users[]） */
+/** 单个登录用户的全部会话任务（/api/tasks/all 的 users[]） */
 export interface UserTasks {
   channel: string;
   userId: string;

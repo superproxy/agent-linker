@@ -225,6 +225,8 @@ LINKAGENT_NODE_AGENTS=opencode,pi
 
 随后 `pnpm node:start builder-01` 即可。
 
+后台「远程 · 节点 · 接入」也可生成 **Bash**（`export KEY='…'`）或 **PowerShell**（`$env:KEY='…'`）片段，适合当前会话临时导出；长期运行仍建议写入 env 文件。
+
 ### 5.4 单机多实例
 
 同一台机器可跑多个命名节点（例如模拟双节点、隔离不同 agent 环境）：

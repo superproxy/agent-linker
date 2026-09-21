@@ -19,6 +19,9 @@ export interface TaskItem {
   createdAt: number;
 }
 
+/** 登录账号的任务空间渠道：任务管理按用户，不按微信联系人 */
+export const LOGIN_TASK_CHANNEL = 'web';
+
 /** 节点 id 归一化：空值/旧数据 → 内建本机节点 local */
 export function normalizeNodeId(nodeId?: string): string {
   const id = nodeId?.trim();

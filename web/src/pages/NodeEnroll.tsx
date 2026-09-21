@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Col, Input, Popconfirm, Row, Space, Steps, Table, Tag } from 'antd';
+import { Alert, Button, Checkbox, Col, Input, Popconfirm, Row, Segmented, Space, Steps, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ApiError, OpsClient, type NodeEnrollInfo, type NodeTokenInfo } from '../api';
 import { notify } from '../lib/notify';
 import type { AuthErrorHandler } from '../lib/hooks';
+import { formatNodeEnv, NODE_ENV_FLAVOR_OPTIONS, type NodeEnvFlavor } from '../lib/node-env';
 
 function guessGatewayUrl(port: number): string {
   if (typeof window === 'undefined') return `ws://GATEWAY_HOST:${port}`;
@@ -12,10 +13,11 @@ function guessGatewayUrl(port: number): string {
   return `${proto}://${host}:${port}`;
 }
 
-function envBlock(url: string, token: string | undefined, agentsLine: string): string {
-  return [`LINKAGENT_GATEWAY_URL=${url}`, ...(token ? [`LINKAGENT_GATEWAY_TOKEN=${token}`] : []), `LINKAGENT_NODE_AGENTS=${agentsLine}`].join(
-    '\n',
-  );
+function copyEnvLabel(flavor: NodeEnvFlavor, copied: boolean): string {
+  if (copied) return '已复制';
+  if (flavor === 'bash') return '复制 Bash';
+  if (flavor === 'powershell') return '复制 PowerShell';
+  return '复制 env 文件';
 }
 
 export function NodeEnrollPanel(props: { base: string; token: string; onAuthError: AuthErrorHandler }) {
@@ -27,6 +29,7 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
   const [url, setUrl] = useState('');
   const [agents, setAgents] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [envFlavor, setEnvFlavor] = useState<NodeEnvFlavor>('dotenv');
   const [mine, setMine] = useState<NodeTokenInfo[]>([]);
   const [revealed, setRevealed] = useState<{ id: string; token: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -95,9 +98,16 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
   const agentsLine = chosen.length > 0 ? chosen.join(',') : info.defaultAgents.map((a) => a.id).join(',');
   const envPath = `.runtime-state/node-${instName}.env`;
   const startCmd = `pnpm node:start ${instName}`;
-  const envDirect = envBlock(url, info.token || undefined, agentsLine);
-  const envApproval = envBlock(url, undefined, agentsLine);
-  const envMine = revealed ? envBlock(url, revealed.token, agentsLine) : '';
+  const envFields = { gatewayUrl: url, agents: agentsLine };
+  const envDirect = formatNodeEnv({ ...envFields, token: info.token || undefined }, envFlavor);
+  const envApproval = formatNodeEnv(envFields, envFlavor);
+  const envMine = revealed ? formatNodeEnv({ ...envFields, token: revealed.token }, envFlavor) : '';
+  const envHint =
+    envFlavor === 'dotenv'
+      ? `写入项目根目录 ${envPath}（启动脚本会自动加载）。`
+      : envFlavor === 'bash'
+        ? '粘贴到 Bash / zsh 当前会话后立刻生效，不落盘。随后执行下方启动命令。'
+        : '粘贴到 PowerShell 当前会话后立刻生效，不落盘。随后执行下方启动命令。';
 
   const isLoopback = (() => {
     try {
@@ -214,10 +224,28 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
         direction="vertical"
         items={[
           { title: '准备运行环境', description: '执行机安装 Node ≥ 22.13、pnpm，以及代码/发布包和所需 agent CLI。' },
-          { title: '颁发机器凭证并写入 env', description: <>在项目根目录创建 <code>{envPath}</code>。</> },
+          {
+            title: '颁发机器凭证并配置环境变量',
+            description:
+              envFlavor === 'dotenv' ? (
+                <>在项目根目录创建 <code>{envPath}</code>。</>
+              ) : (
+                <>在节点机终端粘贴下方 {envFlavor === 'bash' ? 'Bash' : 'PowerShell'} 片段。</>
+              ),
+          },
           { title: '启动节点', description: <><code>{startCmd}</code>（前台调试可用 <code>pnpm node:dev {instName}</code>）。</> },
         ]}
       />
+
+      <div>
+        <div className="sub-muted" style={{ marginBottom: 8 }}>环境变量格式</div>
+        <Segmented
+          value={envFlavor}
+          options={NODE_ENV_FLAVOR_OPTIONS}
+          onChange={(v) => setEnvFlavor(v as NodeEnvFlavor)}
+        />
+        <div className="sub-muted" style={{ marginTop: 8 }}>{envHint}</div>
+      </div>
 
       <div className="enroll-block">
         <div>
@@ -234,7 +262,7 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
           <>
             <pre className="enroll-pre">{envMine}</pre>
             <Button size="small" onClick={() => copy('mine', envMine)}>
-              {copied === 'mine' ? '已复制' : '复制 env'}
+              {copyEnvLabel(envFlavor, copied === 'mine')}
             </Button>
           </>
         ) : null}
@@ -252,7 +280,7 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
               {!info.authEnabled ? <span className="sub-muted">网关当前未开启鉴权，无需令牌。</span> : null}
               <pre className="enroll-pre">{envDirect}</pre>
               <Button size="small" onClick={() => copy('direct', envDirect)}>
-                {copied === 'direct' ? '已复制' : '复制 env'}
+                {copyEnvLabel(envFlavor, copied === 'direct')}
               </Button>
             </div>
           </Col>
@@ -261,11 +289,11 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
           <div className="enroll-block">
             <div>
               <strong>申请审批</strong>
-              <div className="sub-muted" style={{ marginTop: 2 }}>env 不含令牌；启动后由管理员批准</div>
+              <div className="sub-muted" style={{ marginTop: 2 }}>不含令牌；启动后由管理员批准</div>
             </div>
             <pre className="enroll-pre">{envApproval}</pre>
             <Button size="small" onClick={() => copy('approval', envApproval)}>
-              {copied === 'approval' ? '已复制' : '复制 env'}
+              {copyEnvLabel(envFlavor, copied === 'approval')}
             </Button>
           </div>
         </Col>

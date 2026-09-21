@@ -65,6 +65,32 @@ test('带 ownerUsername 的会话 key 前缀隔离；同 peer 不同 owner 不�
   });
   assert.equal(db.kind, 'chat');
   if (db.kind === 'chat') assert.equal(db.sessionKey, 'bob:weixin:wx_same:task:default');
+  assert.equal(svc.load('web', 'alice', 'alice').tasks.some((t) => t.name === 'alice任务'), true);
+  assert.equal(svc.load('web', 'bob', 'bob').tasks.length, 1);
+});
+
+test('weixin + owner 共用登录任务空间；sessionKey 仍按联系人隔离', () => {
+  const svc = freshService();
+  const created = decideTaskRouting(svc, {
+    text: '/task new 共享任务 pi',
+    channel: 'weixin',
+    userId: 'wx_a',
+    ownerUsername: 'alice',
+  });
+  assert.equal(created.kind, 'command');
+  const space = svc.load('web', 'alice', 'alice');
+  assert.ok(space.tasks.some((t) => t.name === '共享任务'));
+  const peerB = decideTaskRouting(svc, {
+    text: '你好',
+    channel: 'weixin',
+    userId: 'wx_b',
+    ownerUsername: 'alice',
+  });
+  assert.equal(peerB.kind, 'chat');
+  if (peerB.kind === 'chat') {
+    assert.equal(peerB.taskId, space.activeTaskId);
+    assert.ok(peerB.sessionKey.startsWith('alice:weixin:wx_b:task:'));
+  }
 });
 
 test('普通消息带 agent/task 参数 → 覆盖路由', () => {
@@ -318,33 +344,32 @@ test('/api/tasks DELETE: 渠道用户凭据可删自己的任务；越权/无凭
   }
 });
 
-test('/api/tasks/all: 返回全部用户任务明细（管理后台任务页）', async () => {
+test('/api/tasks/all: 返回全部登录用户任务空间（管理后台任务页）', async () => {
   const app = await freshApp();
   try {
-    // 两个用户各建任务
     await app.inject({
       method: 'POST',
       url: '/api/tasks',
-      payload: { channel: 'weixin', userId: 'wx_1', name: '方案A', agentId: 'pi' },
+      payload: { channel: 'web', userId: 'alice', name: '方案A', agentId: 'pi', ownerUsername: 'alice' },
     });
     await app.inject({
       method: 'POST',
       url: '/api/tasks',
-      payload: { channel: 'weixin', userId: 'wx_2', name: '周报' },
+      payload: { channel: 'web', userId: 'bob', name: '周报', ownerUsername: 'bob' },
     });
     const res = await app.inject({ method: 'GET', url: '/api/tasks/all' });
     assert.equal(res.statusCode, 200);
     const users = res.json().users;
     assert.ok(users.length >= 2);
+    assert.ok(users.every((u: { channel: string }) => u.channel === 'web'));
 
-    const u1 = users.find((u: { userId: string }) => u.userId === 'wx_1');
+    const u1 = users.find((u: { userId: string }) => u.userId === 'alice');
     assert.ok(u1);
     assert.equal(u1.tasks.length, 2); // default + 方案A
     assert.equal(u1.tasks.find((t: { name: string }) => t.name === '方案A').agentId, 'pi');
 
-    const u2 = users.find((u: { userId: string }) => u.userId === 'wx_2');
+    const u2 = users.find((u: { userId: string }) => u.userId === 'bob');
     assert.ok(u2);
-    // 新建即激活
     const created = u2.tasks.find((t: { name: string }) => t.name === '周报');
     assert.ok(created);
     assert.equal(u2.activeTaskId, created.id);
@@ -353,7 +378,7 @@ test('/api/tasks/all: 返回全部用户任务明细（管理后台任务页）'
   }
 });
 
-test('/api/tasks/all: 开箱状态（无任何渠道消息落盘）返回空列表，不凭空造 weixin/default 虚拟终端', async () => {
+test('/api/tasks/all: 开箱状态返回空列表，不凭空造登录空间', async () => {
   const app = await freshApp();
   try {
     const res = await app.inject({ method: 'GET', url: '/api/tasks/all' });
@@ -420,8 +445,8 @@ test('登录用户只能看到自己的任务空间；管理员可见全部', as
         users: Array<{ ownerUsername?: string; channel: string; userId: string; tasks: { name: string }[] }>;
       }
     ).users;
-    assert.ok(aliceUsers.every((u) => u.ownerUsername === 'alice'));
-    assert.ok(aliceUsers.some((u) => u.channel === 'weixin' && u.tasks.some((t) => t.name === 'alice任务')));
+    assert.ok(aliceUsers.every((u) => u.ownerUsername === 'alice' && u.channel === 'web' && u.userId === 'alice'));
+    assert.ok(aliceUsers.some((u) => u.tasks.some((t) => t.name === 'alice任务')));
     assert.ok(!aliceUsers.some((u) => u.tasks.some((t) => t.name === 'bob任务')));
 
     const bob = await app.inject({ method: 'GET', url: '/api/tasks/all', headers: { 'x-user': 'bob' } });

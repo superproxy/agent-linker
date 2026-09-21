@@ -120,6 +120,36 @@ test('resolveToken：按用户携带用户级 token；401 时强制刷新后重�
   );
 });
 
+test('带 owner 时查询 web/<owner> 并用网关 token；各联系人共用缓存', async () => {
+  const seen: string[] = [];
+  await withTaskApi(
+    (req, res) => {
+      seen.push(req.url ?? '');
+      const auth = (req as unknown as { headers: Record<string, string | undefined> }).headers.authorization ?? '';
+      seen.push(auth);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ channel: 'web', userId: 'alice', activeTaskId: 't_shared', tasks: [{ id: 't_shared', agentId: 'pi' }] }));
+    },
+    async (base) => {
+      const router = new TaskRouter({
+        gatewayUrl: base,
+        channel: 'weixin',
+        ownerUsername: 'alice',
+        gatewayToken: 'gw_static',
+        resolveToken: async () => 'ct_peer',
+      });
+      const r1 = await router.active('wx_1');
+      const r2 = await router.active('wx_2');
+      assert.equal(r1.task, 't_shared');
+      assert.deepEqual(r2, r1);
+      assert.equal(seen.filter((s) => s.startsWith('/api/tasks')).length, 1);
+      assert.ok(seen[0]?.includes('channel=web'));
+      assert.ok(seen[0]?.includes('userId=alice'));
+      assert.equal(seen[1], 'Bearer gw_static');
+    },
+  );
+});
+
 test('active 对 HTTP 500 回落 default，不指定 agent（由网关权威兜底）', async () => {
   await withTaskApi(
     (_req, res) => {

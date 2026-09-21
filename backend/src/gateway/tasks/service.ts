@@ -10,6 +10,7 @@ import {
   KNOWN_AGENT_IDS,
   TASK_COMMAND_PREFIX,
   TASK_KEY_PREFIX,
+  LOGIN_TASK_CHANNEL,
   normalizeNodeId,
   type CommandResult,
   type TaskItem,
@@ -113,6 +114,46 @@ export class TaskService {
     };
     this.store.write(fresh);
     return fresh;
+  }
+
+  /** 登录用户任务空间（web/<username>）。若尚无文件，则从该用户最近的微信终端任务迁入一次。 */
+  ensureLoginSpace(username: string): UserTasks {
+    const existing = this.store.read(LOGIN_TASK_CHANNEL, username, username);
+    if (existing) {
+      if (existing.channel !== LOGIN_TASK_CHANNEL || existing.userId !== username || existing.ownerUsername !== username) {
+        existing.channel = LOGIN_TASK_CHANNEL;
+        existing.userId = username;
+        existing.ownerUsername = username;
+        this.store.write(existing);
+      }
+      return this.ensureKeys(existing);
+    }
+    const peers = this.store.list().filter((u) => u.ownerUsername === username && u.channel === 'weixin');
+    for (const peer of peers) {
+      const old = this.store.read(peer.channel, peer.userId, username);
+      if (!old?.tasks.length) continue;
+      const migrated: UserTasks = {
+        ...old,
+        channel: LOGIN_TASK_CHANNEL,
+        userId: username,
+        ownerUsername: username,
+      };
+      this.store.write(migrated);
+      for (const p of peers) this.store.remove(p.channel, p.userId, username);
+      return this.ensureKeys(migrated);
+    }
+    return this.load(LOGIN_TASK_CHANNEL, username, username);
+  }
+
+  /** 后台任务管理只展示登录用户空间（web/<username>） */
+  listLoginSpaces(ownerUsername?: string): Array<{
+    channel: string;
+    userId: string;
+    ownerUsername?: string;
+    activeTaskId: string;
+    tasks: TaskItem[];
+  }> {
+    return this.listAllTasks(ownerUsername).filter((u) => u.channel === LOGIN_TASK_CHANNEL);
   }
 
   /** 旧数据（无 key / keyEnabled / cwd 字段）惰性补齐；有变更才落盘（幂等） */
