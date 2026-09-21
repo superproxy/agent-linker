@@ -127,13 +127,19 @@ export class WeixinLoginService {
   }
 
   /**
-   * 重新绑定时只清 bot 侧 ct_ 缓存，保留登录态 json。
-   * 否则独立 bot 进程会从 user-tokens.json 把已吊销的 ct_ 再读回来。
+   * 重新绑定时清 bot 侧 ct_ 缓存，保留登录态 json。
+   * 插件常把账号写成 *-im-bot.json，缓存文件名与登录用户名不一致，故扫掉目录内全部 *-tokens。
    */
   clearChannelTokenCache(accountId: string): { accountId: string; removed: string[] } {
     const id = this.assertAccountId(accountId);
-    const removed = this.removeAccountFiles(id, [`${id}.context-tokens.json`, `${id}.user-tokens.json`]);
-    return { accountId: id, removed };
+    const dir = this.accountsDir();
+    const names = new Set<string>([`${id}.context-tokens.json`, `${id}.user-tokens.json`]);
+    if (existsSync(dir)) {
+      for (const f of readdirSync(dir)) {
+        if (f.endsWith('.user-tokens.json') || f.endsWith('.context-tokens.json')) names.add(f);
+      }
+    }
+    return { accountId: id, removed: this.removeAccountFiles(id, [...names]) };
   }
 
   private assertAccountId(accountId: string): string {
@@ -317,7 +323,8 @@ export function registerWeixinApi(
       const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 30_000);
       const wait = await service.waitQr(q.sessionKey, timeoutMs, accountId);
       if (wait.connected) {
-        const boundId = wait.accountId || accountId;
+        // 插件可能回自己的 *-im-bot id；进程/缓存/任务 key 必须以登录账号槽为准
+        const boundId = accountId || wait.accountId;
         if (boundId) {
           try {
             await deps.onBound?.(boundId);
@@ -329,6 +336,7 @@ export function registerWeixinApi(
             });
           }
         }
+        return { ...wait, accountId: boundId };
       }
       return wait;
     } catch (err) {

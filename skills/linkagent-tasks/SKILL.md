@@ -18,10 +18,10 @@ metadata:
 - 目标端口 / 用户身份若不明确，先查 `lsof -iTCP:<port> -sTCP:LISTEN` 与 `ls .runtime-state/tasks/` 确认，或向用户确认。
 
 ## 关键约束（必须遵守）
-1. **默认任务 `default` 不可删除**（删除会返回 400）。
+1. **默认任务 `default` 可以删除**；全部删光后任务列表为空，微信消息回落到全局默认 agent。
 2. **新建即激活**：`POST /api/tasks` 成功后，新任务自动成为激活任务。
 3. **切换激活**：用 `PATCH /api/tasks/:taskId/activate`。
-4. 未知 `taskId` 操作返回 404，删除 default 返回 400——把错误信息原样回给用户。
+4. 未知 `taskId` 操作返回 404——把错误信息原样回给用户。
 5. `channel` 与 `userId` 为必填，缺失返回 400。
 
 ## API 命令表

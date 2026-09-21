@@ -284,6 +284,28 @@ export class TaskService {
     }
   }
 
+  /**
+   * 换绑微信时重签任务 key（k_）。
+   * 后台「任务 / Key」页展示的是任务 key，不是渠道 ct_；不换发用户会一直看到原来的 k_。
+   */
+  rotateKeysOnWeixinBind(username: string): UserTasks {
+    const space = this.ensureLoginSpace(username);
+    this.reissueKeys(space);
+    for (const u of this.store.list()) {
+      if (u.channel === LOGIN_TASK_CHANNEL && u.userId === username) continue;
+      const mine = u.ownerUsername === username || (u.channel === 'weixin' && !u.ownerUsername);
+      if (!mine) continue;
+      const extra = this.store.read(u.channel, u.userId, u.ownerUsername);
+      if (extra) this.reissueKeys(extra);
+    }
+    return this.ensureLoginSpace(username);
+  }
+
+  private reissueKeys(state: UserTasks): void {
+    for (const t of state.tasks) t.key = newTaskKey();
+    this.store.write(state);
+  }
+
   activateTask(state: UserTasks, id: string): TaskItem {
     const task = state.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`任务不存在: ${id}`);
@@ -293,23 +315,11 @@ export class TaskService {
   }
 
   deleteTask(state: UserTasks, id: string): TaskItem[] {
-    if (id === DEFAULT_TASK_ID) throw new Error('默认任务不可删除');
     const idx = state.tasks.findIndex((t) => t.id === id);
     if (idx < 0) throw new Error(`任务不存在: ${id}`);
     state.tasks.splice(idx, 1);
     if (state.activeTaskId === id) {
-      state.activeTaskId = state.tasks[0]?.id ?? DEFAULT_TASK_ID;
-      if (state.activeTaskId === DEFAULT_TASK_ID && !state.tasks.some((t) => t.id === DEFAULT_TASK_ID)) {
-        state.tasks.unshift({
-          id: DEFAULT_TASK_ID,
-          key: newTaskKey(),
-          keyEnabled: true,
-          name: DEFAULT_TASK_NAME,
-          agentId: this.defaultAgentId,
-          nodeId: LOCAL_NODE_ID,
-          createdAt: Date.now(),
-        });
-      }
+      state.activeTaskId = state.tasks[0]?.id ?? '';
     }
     this.store.write(state);
     return state.tasks;
@@ -474,8 +484,9 @@ export class TaskService {
         };
       }
       case 'default': {
-        // 快捷切回默认任务（default 任务 id 即 'default'，不可删除）
-        const task = this.activateTask(state, DEFAULT_TASK_ID);
+        const task = state.tasks.find((t) => t.id === DEFAULT_TASK_ID);
+        if (!task) return { text: '❌ 默认任务不存在（已删除）。用 /task new 新建，或 /task use 切换。' };
+        this.activateTask(state, task.id);
         return {
           text: `🔀 已切换到默认任务 [${task.name}] → ${task.agentId}`,
           activeTaskId: task.id,
@@ -487,7 +498,6 @@ export class TaskService {
         if (!ref) return { text: '用法：/task del <id|名称|序号>' };
         const task = this.findTask(state, ref);
         if (!task) return { text: `❌ 任务不存在: ${ref}` };
-        if (task.id === DEFAULT_TASK_ID) return { text: '❌ 默认任务不可删除' };
         this.deleteTask(state, task.id);
         const active = state.tasks.find((t) => t.id === state.activeTaskId);
         return {
@@ -537,7 +547,7 @@ export class TaskService {
             '/task list                 查看全部任务（带 id/key/序号）',
             '/task use <id|key|名称|序号> 切换到指定任务（支持唯一前缀）',
             '/task default              切回默认任务',
-            '/task del <id|key|名称|序号> 删除任务（默认任务不可删）',
+            '/task del <id|key|名称|序号> 删除任务（含默认任务）',
             '/task rename <id|key|名称|序号> <新名称>  重命名',
             '/task cwd <id|key|名称|序号> [路径]     查看/设置工作目录（不填路径=查看）',
             '/task agent <id|key|名称|序号> <agentId>  切换任务绑定 agent（id/key/会话不变）',

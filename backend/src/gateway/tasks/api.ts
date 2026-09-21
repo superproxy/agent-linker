@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { isTaskCommand, type TaskService } from './service.js';
-import { DEFAULT_TASK_ID, LOGIN_TASK_CHANNEL, type TaskItem, type UserTasks } from './types.js';
+import { LOGIN_TASK_CHANNEL, type TaskItem, type UserTasks } from './types.js';
 
 /** 有登录归属时读写该用户唯一任务空间；无归属时沿用渠道终端文件（旧数据 / 单测） */
 function loadTaskSpace(service: TaskService, channel: string, userId: string, owner?: string): UserTasks {
@@ -317,7 +317,6 @@ export function registerTaskApi(
       owner = space.owner;
     }
     if (!ensureTaskChannel(query.channel, reply)) return { error: `渠道 ${query.channel} 不支持任务机制（活动任务仅微信 / web）` };
-    if (params.taskId === DEFAULT_TASK_ID) return reply.code(400).send({ error: '默认任务不可删除' });
     // 渠道凭据不得凭 query.owner 切入他人登录空间
     const state = checkAuth(request)
       ? loadTaskSpace(service, query.channel, query.userId, owner)

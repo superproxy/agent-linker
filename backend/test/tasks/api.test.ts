@@ -69,6 +69,18 @@ test('带 ownerUsername 的会话 key 前缀隔离；同 peer 不同 owner 不�
   assert.equal(svc.load('web', 'bob', 'bob').tasks.length, 1);
 });
 
+test('换绑微信时重签登录空间任务 key，并覆盖无归属旧 weixin 文件', () => {
+  const svc = freshService();
+  const space = svc.ensureLoginSpace('alice');
+  const old = space.tasks[0]?.key;
+  assert.ok(old);
+  const leftover = svc.load('weixin', 'wx_old');
+  const leftoverKey = leftover.tasks[0]?.key;
+  const after = svc.rotateKeysOnWeixinBind('alice');
+  assert.notEqual(after.tasks[0]?.key, old);
+  assert.notEqual(svc.load('weixin', 'wx_old').tasks[0]?.key, leftoverKey);
+});
+
 test('weixin + owner 共用登录任务空间；sessionKey 仍按联系人隔离', () => {
   const svc = freshService();
   const created = decideTaskRouting(svc, {
@@ -263,14 +275,17 @@ test('/api/tasks: PATCH /agent 修改任务绑定 agent', async () => {
   }
 });
 
-test('/api/tasks: 删除 default 拒绝（400）', async () => {
+test('/api/tasks: 删除 default 允许，列表可空', async () => {
   const app = await freshApp();
   try {
     const res = await app.inject({
       method: 'DELETE',
       url: '/api/tasks/default?channel=weixin&userId=wx_9',
     });
-    assert.equal(res.statusCode, 400);
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { tasks: unknown[]; activeTaskId: string };
+    assert.equal(body.tasks.length, 0);
+    assert.equal(body.activeTaskId, '');
   } finally {
     await app.close().catch(() => {});
   }

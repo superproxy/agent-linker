@@ -33,7 +33,8 @@ function buildStub() {
     },
     async waitQr(sessionKey?: string, timeoutMs = 8_000, accountId?: string) {
       calls.wait.push({ sessionKey, timeoutMs, accountId });
-      return { connected: true, accountId };
+      // 模拟插件回写 *-im-bot，与登录账号槽不一致
+      return { connected: true, accountId: '51d9f31fb43e-im-bot' };
     },
   } as unknown as WeixinLoginService;
   return { service, calls };
@@ -87,6 +88,7 @@ test('GET /api/weixin/qr/status 带 accountId → waitQr 收到同一账号', as
     assert.equal(calls.wait[0]?.sessionKey, 'sk-1');
     assert.equal(calls.wait[0]?.timeoutMs, 5_000);
     assert.equal(calls.wait[0]?.accountId, 'acc-1');
+    assert.equal((res.json() as { accountId: string }).accountId, 'acc-1');
   } finally {
     await app.close();
   }
@@ -157,6 +159,7 @@ test('普通用户扫码强制本人账号槽，看不到其他人账号', async
     });
     assert.equal(wait.statusCode, 200);
     assert.equal(calls.wait[0]?.accountId, 'alice');
+    assert.equal((wait.json() as { accountId: string }).accountId, 'alice');
     assert.deepEqual(bound, ['alice']);
   } finally {
     await app.close();
@@ -202,11 +205,16 @@ test('WeixinLoginService.unbind：删除账号槽登录态且不影响其它账�
   writeFileSync(join(dir, 'alice.sync.json'), '{}');
   writeFileSync(join(dir, 'alice.context-tokens.json'), '{}');
   writeFileSync(join(dir, 'alice.user-tokens.json'), '{}');
+  writeFileSync(join(dir, '51d9f31fb43e-im-bot.user-tokens.json'), '{}');
   writeFileSync(join(dir, 'bob.json'), acc('bob'));
   const svc = new WeixinLoginService({ stateDir });
   assert.equal(svc.status().configured, true);
   const cache = svc.clearChannelTokenCache('alice');
-  assert.deepEqual(cache.removed.sort(), ['alice.context-tokens.json', 'alice.user-tokens.json']);
+  assert.deepEqual(cache.removed.sort(), [
+    '51d9f31fb43e-im-bot.user-tokens.json',
+    'alice.context-tokens.json',
+    'alice.user-tokens.json',
+  ]);
   assert.equal(existsSync(join(dir, 'alice.json')), true);
   const r = svc.unbind('alice');
   assert.deepEqual(r.removed.sort(), ['alice.json', 'alice.sync.json']);

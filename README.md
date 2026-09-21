@@ -336,7 +336,7 @@ pnpm bot:wecom
 | `/task new <名称> [agent]` | 新建任务并激活（agent: opencode / pi / workbuddy / trace-cli / cursor） |
 | `/task list` | 查看全部任务（`← 激活` 标记当前） |
 | `/task use <id>` | 切换到指定任务 |
-| `/task del <id>` | 删除任务（默认任务不可删） |
+| `/task del <id>` | 删除任务（含默认任务；删光后列表可空） |
 | `/task rename <id> <新名>` | 重命名 |
 | `/task help` | 用法说明 |
 

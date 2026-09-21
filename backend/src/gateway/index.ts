@@ -887,6 +887,7 @@ export async function buildServer(options?: {
       async onBound(accountId) {
         channelTokenStore.revokeForOwner('weixin', accountId);
         weixinLoginService.clearChannelTokenCache(accountId);
+        taskService.rotateKeysOnWeixinBind(accountId);
         const accounts = persistEnsureWeixinAccount(configPath, accountId);
         config.weixin = { ...config.weixin, accounts, mode: 'external' };
         if (weixinBot) await weixinBot.stop().catch(() => {});

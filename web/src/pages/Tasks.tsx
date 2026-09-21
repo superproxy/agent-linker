@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type Key } from 'react';
 import { Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CommentOutlined, PlusOutlined } from '@ant-design/icons';
+import { CommentOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { OpsClient, type NodeInfo, type TaskItem, type UserTasks } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
@@ -39,6 +39,7 @@ export function TasksPage(props: {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
   const [open, setOpen] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
   const [form] = Form.useForm();
 
   const nodeId = Form.useWatch('nodeId', form) as string | undefined;
@@ -176,6 +177,30 @@ export function TasksPage(props: {
     [users],
   );
 
+  const taskRowKey = (t: FlatTask) => `${t.ownerUsername ?? ''}:${t.channel}:${t.userId}:${t.id}`;
+
+  const selectedTasks = useMemo(
+    () => flatTasks.filter((t) => selectedKeys.includes(taskRowKey(t))),
+    [flatTasks, selectedKeys],
+  );
+
+  const batchDelete = async () => {
+    if (selectedTasks.length === 0) return;
+    const ok = await confirmAsync({
+      title: `删除选中的 ${selectedTasks.length} 个任务？`,
+      content: '包含默认任务在内均会删除，对应 Key 同时失效，此操作不可恢复。',
+      okText: '批量删除',
+      okButtonProps: { danger: true },
+    });
+    if (!ok) return;
+    await withBusy(async () => {
+      for (const t of selectedTasks) {
+        await ops.deleteTask(t.channel, t.userId, t.id, t.ownerUsername);
+      }
+      setSelectedKeys([]);
+    }, `已删除 ${selectedTasks.length} 个任务`);
+  };
+
   const columns: ColumnsType<FlatTask> = [
     {
       title: '任务名',
@@ -288,8 +313,7 @@ export function TasksPage(props: {
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
       <p className="page-desc" style={{ marginBottom: 12 }}>
-        任务列表按<strong>登录用户</strong>隔离，不按微信联系人拆分。微信里发送 <code>/task</code> 或本页「激活」会切换你的当前任务；
-        同一账号下所有联系人共用这份列表，会话记忆仍按联系人分开。Chatbox 等客户端用任务 Key 直连。
+        任务列表按<strong>登录用户</strong>隔离，不按微信联系人拆分。重新绑定微信会重签本页 Key（<code>k_</code>）。微信里发送 <code>/task</code> 或本页「激活」会切换你的当前任务。
       </p>
       {users === null ? (
         <Table loading showHeader={false} pagination={false} rowKey="x" columns={[{ title: '', dataIndex: 'x' }]} dataSource={[]} />
@@ -302,17 +326,29 @@ export function TasksPage(props: {
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建任务
             </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={busy || selectedTasks.length === 0}
+              onClick={() => void batchDelete()}
+            >
+              批量删除{selectedTasks.length > 0 ? `（${selectedTasks.length}）` : ''}
+            </Button>
           </Space>
           {flatTasks.length === 0 ? (
             <EmptyHint text="还没有任务。点「新建任务」即可创建，微信连接器会使用同一份列表。" />
           ) : (
             <Table
-              rowKey={(t) => `${t.ownerUsername ?? ''}:${t.channel}:${t.userId}:${t.id}`}
+              rowKey={taskRowKey}
               size="small"
               columns={columns}
               dataSource={flatTasks}
               pagination={false}
               rowClassName={(t) => (t.active ? 'task-active-row' : '')}
+              rowSelection={{
+                selectedRowKeys: selectedKeys,
+                onChange: (keys) => setSelectedKeys(keys),
+              }}
             />
           )}
         </>

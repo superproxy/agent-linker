@@ -41,11 +41,13 @@ test('activate / delete / rename', () => {
   assert.equal(state.activeTaskId, DEFAULT_TASK_ID);
   assert.equal(back.id, DEFAULT_TASK_ID);
   assert.throws(() => svc.activateTask(state, 'nope'), /任务不存在/);
-  assert.throws(() => svc.deleteTask(state, DEFAULT_TASK_ID), /默认任务不可删除/);
   svc.deleteTask(state, t.id);
   assert.ok(!state.tasks.some((x) => x.id === t.id));
   const renamed = svc.renameTask(state, DEFAULT_TASK_ID, '主任务');
   assert.equal(renamed.name, '主任务');
+  svc.deleteTask(state, DEFAULT_TASK_ID);
+  assert.ok(!state.tasks.some((x) => x.id === DEFAULT_TASK_ID));
+  assert.ok(state.tasks.some((x) => x.id === state.activeTaskId) || state.tasks.length === 0);
 });
 
 test('删除激活任务后回落到剩余第一个', () => {
@@ -117,7 +119,8 @@ test('handleCommand: use / del / rename / help / 错误分支', () => {
   const rBad = svc.handleCommand(state, '/task del nope')!;
   assert.ok(rBad.text.includes('任务不存在'));
   const rDelDefault = svc.handleCommand(state, '/task del default')!;
-  assert.ok(rDelDefault.text.includes('默认任务不可删除'));
+  assert.ok(rDelDefault.text.includes('已删除'));
+  assert.ok(!state.tasks.some((x) => x.id === DEFAULT_TASK_ID));
 });
 
 test('handleCommand: 非命令返回 null', () => {
@@ -158,6 +161,9 @@ test('handleCommand: default 快捷切回默认任务', () => {
   // 幂等：重复切不回报错
   const r2 = svc.handleCommand(state, '/task default')!;
   assert.equal(r2.activeTaskId, DEFAULT_TASK_ID);
+  svc.handleCommand(state, '/task del default');
+  const rGone = svc.handleCommand(state, '/task default')!;
+  assert.ok(rGone.text.includes('默认任务不存在'));
 });
 
 test('handleCommand: list 展示任务 id，new 回复携带新 id', () => {
@@ -176,8 +182,9 @@ test('handleCommand: use/del/rename 不存在的引用报任务不存在', () =>
   assert.ok(svc.handleCommand(state, '/task use 不存在的任务')!.text.includes('任务不存在'));
   assert.ok(svc.handleCommand(state, '/task del 不存在的任务')!.text.includes('任务不存在'));
   assert.ok(svc.handleCommand(state, '/task rename 不存在的任务 新名')!.text.includes('任务不存在'));
-  // 默认任务不可删（按名称也不行）
-  assert.ok(svc.handleCommand(state, '/task del 默认')!.text.includes('默认任务不可删除'));
+  const rDelDefault = svc.handleCommand(state, '/task del 默认')!;
+  assert.ok(rDelDefault.text.includes('已删除'));
+  assert.equal(state.tasks.length, 0);
 });
 
 test('任务 key：default 与新建任务均带全局唯一 key（k_ 前缀）', () => {
