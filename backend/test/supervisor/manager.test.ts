@@ -233,6 +233,26 @@ weixin:
   assert.equal(defEnv.LINKAGENT_GATEWAY_TOKEN, '');
 });
 
+test('ProcessManager：操作 weixin:<账号> 时停掉遗留的默认 weixin 进程', async () => {
+  const root = tmpRoot();
+  writeFileSync(join(root, '.linkagent-root'), 'marker\n');
+  mkdirSync(join(root, 'server'), { recursive: true });
+  mkdirSync(join(root, '.runtime-state', 'pm'), { recursive: true });
+  const child = spawnDetached({
+    command: process.execPath,
+    args: ['-e', 'setInterval(()=>{},1000)'],
+    cwd: root,
+    logFile: join(root, '.runtime-state', 'pm', 'logs', 'weixin.log'),
+  });
+  assert.ok(child.pid);
+  writePid(join(root, '.runtime-state', 'pm', 'weixin.pid'), child.pid);
+  const pm = new ProcessManager(root, { extraWeixinAccounts: () => ['alice'] });
+  assert.equal(pm.isRunning('weixin'), true);
+  await pm.stop(['weixin:alice']);
+  assert.equal(isAlive(child.pid), false);
+  assert.equal(pm.isRunning('weixin'), false);
+});
+
 test('ProcessManager：extraWeixinAccounts 与 yaml 合并为多实例', () => {
   const root = tmpRoot();
   const pm = new ProcessManager(root, { extraWeixinAccounts: () => ['alice', 'bob'] });

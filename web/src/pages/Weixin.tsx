@@ -14,7 +14,7 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
   const [scanning, setScanning] = useState(false);
   const [unbinding, setUnbinding] = useState(false);
   const [msg, setMsg] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -32,7 +32,7 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
   useEffect(() => {
     void refresh();
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      abortRef.current?.abort();
     };
   }, [refresh]);
 
@@ -50,25 +50,29 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
       }
       setQr(r.qrDataUrl);
       setMsg({ type: 'info', text: slot ? `请扫码绑定账号槽 ${slot}（将启动进程 weixin:${slot}）` : '请用手机微信扫一扫完成绑定' });
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(async () => {
-        try {
-          const st = await wx.qrStatus(r.sessionKey, 8_000, slot);
-          if (st.connected) {
-            if (pollRef.current) clearInterval(pollRef.current);
-            setScanning(false);
-            setMsg({
-              type: 'success',
-              text: `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试拉起进程 weixin:${st.accountId ?? slot ?? ''}。`,
-            });
-            await refresh();
-          }
-        } catch (e) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setScanning(false);
-          setMsg({ type: 'error', text: `扫码状态查询失败：${e instanceof Error ? e.message : String(e)}` });
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      try {
+        const st = await wx.qrStatus(r.sessionKey, 120_000, slot, ac.signal);
+        if (ac.signal.aborted) return;
+        setScanning(false);
+        if (st.connected) {
+          setMsg({
+            type: st.boundWarning ? 'info' : 'success',
+            text: st.boundWarning
+              ? `已扫码（账号 ${st.accountId ?? slot ?? ''}）。${st.boundWarning}`
+              : `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试拉起进程 weixin:${st.accountId ?? slot ?? ''}。`,
+          });
+          await refresh();
+        } else {
+          setMsg({ type: 'error', text: st.message || '扫码超时或未确认，请重新发起二维码' });
         }
-      }, 8_000);
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        setScanning(false);
+        setMsg({ type: 'error', text: `扫码状态查询失败：${e instanceof Error ? e.message : String(e)}` });
+      }
     } catch (e) {
       setScanning(false);
       setMsg({ type: 'error', text: `发起扫码失败：${e instanceof Error ? e.message : String(e)}` });
@@ -76,8 +80,8 @@ export function WeixinPage(props: { base: string; token: string; onAuthError: Au
   };
 
   const cancelScan = () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = null;
+    abortRef.current?.abort();
+    abortRef.current = null;
     setScanning(false);
     setQr(null);
     setMsg(null);

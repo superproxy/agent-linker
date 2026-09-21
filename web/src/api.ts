@@ -203,6 +203,7 @@ export interface WeixinQrStatus {
   connected: boolean;
   accountId?: string;
   message?: string;
+  boundWarning?: string;
 }
 
 export class WeixinClient {
@@ -239,14 +240,20 @@ export class WeixinClient {
     return (await res.json()) as WeixinQrResult;
   }
 
-  async qrStatus(sessionKey: string | undefined, timeoutMs = 8_000, accountId?: string): Promise<WeixinQrStatus> {
+  async qrStatus(
+    sessionKey: string | undefined,
+    timeoutMs = 8_000,
+    accountId?: string,
+    signal?: AbortSignal,
+  ): Promise<WeixinQrStatus> {
     const q = new URLSearchParams();
     if (sessionKey) q.set('sessionKey', sessionKey);
     q.set('timeoutMs', String(timeoutMs));
     if (accountId) q.set('accountId', accountId);
-    const res = await fetch(this.url(`/api/weixin/qr/status?${q}`), { headers: this.authHeaders() });
-    if (!res.ok) throw new Error(`weixin qr status ${res.status}`);
-    return (await res.json()) as WeixinQrStatus;
+    const res = await fetch(this.url(`/api/weixin/qr/status?${q}`), { headers: this.authHeaders(), signal });
+    const data = (await res.json().catch(() => ({}))) as WeixinQrStatus & { error?: string };
+    if (!res.ok) throw new Error(data.error || data.message || `weixin qr status ${res.status}`);
+    return data;
   }
 
   async reload(accountId?: string): Promise<void> {

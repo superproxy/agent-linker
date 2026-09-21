@@ -36,6 +36,7 @@ function buildStub() {
       // 模拟插件回写 *-im-bot，与登录账号槽不一致
       return { connected: true, accountId: '51d9f31fb43e-im-bot' };
     },
+    adoptPluginAccount() {},
   } as unknown as WeixinLoginService;
   return { service, calls };
 }
@@ -166,6 +167,29 @@ test('普通用户扫码强制本人账号槽，看不到其他人账号', async
   }
 });
 
+test('扫码已确认但 onBound 失败仍 200，带 boundWarning', async () => {
+  const { service } = buildStub();
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, {
+    onBound: async () => {
+      throw new Error('pm restart boom');
+    },
+  });
+  try {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=acc-1',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { connected: boolean; accountId?: string; boundWarning?: string };
+    assert.equal(body.connected, true);
+    assert.equal(body.accountId, 'acc-1');
+    assert.match(body.boundWarning ?? '', /pm restart boom/);
+  } finally {
+    await app.close();
+  }
+});
+
 test('POST /api/weixin/unbind：普通用户只能解绑自己，并回调 onUnbound', async () => {
   const { service } = buildStub();
   const seen: string[] = [];
@@ -209,6 +233,9 @@ test('WeixinLoginService.unbind：删除账号槽登录态且不影响其它账�
   writeFileSync(join(dir, 'bob.json'), acc('bob'));
   const svc = new WeixinLoginService({ stateDir });
   assert.equal(svc.status().configured, true);
+  writeFileSync(join(dir, '51d9f31fb43e-im-bot.json'), acc('plugin'));
+  svc.adoptPluginAccount('carol', '51d9f31fb43e-im-bot');
+  assert.equal(existsSync(join(dir, 'carol.json')), true);
   const cache = svc.clearChannelTokenCache('alice');
   assert.deepEqual(cache.removed.sort(), [
     '51d9f31fb43e-im-bot.user-tokens.json',
@@ -220,7 +247,7 @@ test('WeixinLoginService.unbind：删除账号槽登录态且不影响其它账�
   assert.deepEqual(r.removed.sort(), ['alice.json', 'alice.sync.json']);
   assert.equal(existsSync(join(dir, 'alice.json')), false);
   assert.equal(existsSync(join(dir, 'bob.json')), true);
-  const left = svc.status().accounts.map((a) => a.id);
-  assert.deepEqual(left, ['bob']);
+  const left = svc.status().accounts.map((a) => a.id).sort();
+  assert.deepEqual(left, ['51d9f31fb43e-im-bot', 'bob', 'carol']);
   assert.throws(() => svc.unbind('../evil'), /非法微信账号槽/);
 });

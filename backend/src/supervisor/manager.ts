@@ -258,7 +258,21 @@ export class ProcessManager {
     return readPid(this.pidFile(id)) !== null;
   }
 
+  /**
+   * 配了 weixin.accounts 之后，实例 id 是 weixin:<账号>，pid/日志是 weixin-<账号>.*。
+   * 扫码前用 `pm start weixin` 留下的 weixin.pid / weixin.log 会变成孤儿：
+   * 页面「重启渠道」只操作 weixin:<账号>，旧进程继续用过期 token 打 getUpdates。
+   */
+  private async reapOrphanDefaultWeixin(ids: ProcessInstanceId[]): Promise<void> {
+    const touchingAccount = this.expand(ids).some((id) => instOf(id).base === 'weixin' && id !== 'weixin');
+    if (!touchingAccount) return;
+    if (!readPid(this.pidFile('weixin'))) return;
+    console.log('→ 停止遗留的默认微信进程 weixin（已切换为 weixin:<账号> 实例）');
+    await this.stopOne('weixin');
+  }
+
   async start(ids: ProcessInstanceId[] = this.allInstanceIds()): Promise<void> {
+    await this.reapOrphanDefaultWeixin(ids);
     for (const id of this.expand(ids)) {
       await this.startOne(id);
     }
@@ -307,6 +321,7 @@ export class ProcessManager {
   }
 
   async stop(ids: ProcessInstanceId[] = this.orderByBase(this.allInstanceIds(), STOP_ORDER)): Promise<void> {
+    await this.reapOrphanDefaultWeixin(ids);
     for (const id of this.expand(ids)) {
       await this.stopOne(id);
     }
@@ -331,6 +346,7 @@ export class ProcessManager {
     // 重启：先按反序停掉指定目标，再按启动顺序拉起
     const stopIds = this.orderByBase(ids, STOP_ORDER);
     const startIds = this.orderByBase(ids, START_ORDER);
+    await this.reapOrphanDefaultWeixin(ids);
     await this.stop(stopIds);
     await this.start(startIds);
   }

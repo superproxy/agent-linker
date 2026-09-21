@@ -41,41 +41,87 @@ export interface WeixinAccount {
   savedAt: string;
 }
 
+function parseAccountFile(dir: string, file: string): WeixinAccount | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, file), 'utf8')) as {
+      token?: string;
+      baseUrl?: string;
+      userId?: string;
+      savedAt?: string;
+    };
+    if (typeof raw.token !== 'string' || !raw.token) return null;
+    return {
+      id: file.replace(/\.json$/, ''),
+      token: raw.token,
+      baseUrl: raw.baseUrl ?? ILINK_DEFAULT_BASE_URL,
+      userId: raw.userId ?? '',
+      savedAt: raw.savedAt ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function accountsDirOf(accountsRootDir: string): string {
+  return join(accountsRootDir, 'openclaw-weixin', 'accounts');
+}
+
+/** 目录内全部带 token 的登录态（跳过 accounts.json / sync / *-tokens） */
+export function listWeixinAccounts(accountsRootDir: string): WeixinAccount[] {
+  const dir = accountsDirOf(accountsRootDir);
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'accounts.json');
+  const out: WeixinAccount[] = [];
+  for (const file of files) {
+    const acc = parseAccountFile(dir, file);
+    if (acc) out.push(acc);
+  }
+  return out;
+}
+
+function savedAtMs(acc: WeixinAccount): number {
+  const t = Date.parse(acc.savedAt);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * 扫码后热更新用：优先 preferredId 对应文件，否则取 savedAt 最新的一份。
+ * 无 LINKAGENT_ACCOUNT_ID 的遗留 `weixin` 进程也能捡到刚扫上的 token。
+ */
+export function loadLatestWeixinAccount(accountsRootDir: string, preferredId?: string): WeixinAccount {
+  const all = listWeixinAccounts(accountsRootDir);
+  if (all.length === 0) {
+    const dir = accountsDirOf(accountsRootDir);
+    throw new Error(`未找到微信登录态目录 ${dir} 或其中没有可用账号；${getLayout().loginHint}`);
+  }
+  const want = preferredId?.trim();
+  if (want) {
+    const hit = all.find((a) => a.id === want);
+    if (hit) return hit;
+  }
+  return all.reduce((best, a) => (savedAtMs(a) >= savedAtMs(best) ? a : best));
+}
+
 /**
  * 从 <dir>/openclaw-weixin/accounts/ 加载登录态账号。
  * 显式 accountId 时加载指定文件；缺省扫描目录，选择含 token 字段的账号文件
  * （跳过 accounts.json / *.sync.json / *.context-tokens.json 等非账号产物）。
  */
 export function loadWeixinAccount(accountsRootDir: string, accountId?: string): WeixinAccount {
-  const dir = join(accountsRootDir, 'openclaw-weixin', 'accounts');
+  const dir = accountsDirOf(accountsRootDir);
   if (!existsSync(dir)) {
     throw new Error(`未找到微信登录态目录 ${dir}；${getLayout().loginHint}`);
   }
-  const files = readdirSync(dir).filter((f) => f.endsWith('.json') && f !== 'accounts.json');
-  const candidates = accountId ? files.filter((f) => f === `${accountId}.json`) : files;
-  for (const file of candidates) {
-    try {
-      const raw = JSON.parse(readFileSync(join(dir, file), 'utf8')) as {
-        token?: string;
-        baseUrl?: string;
-        userId?: string;
-        savedAt?: string;
-      };
-      if (typeof raw.token !== 'string' || !raw.token) continue; // 非账号文件（sync/context-tokens）
-      return {
-        id: file.replace(/\.json$/, ''),
-        token: raw.token,
-        baseUrl: raw.baseUrl ?? ILINK_DEFAULT_BASE_URL,
-        userId: raw.userId ?? '',
-        savedAt: raw.savedAt ?? '',
-      };
-    } catch {
-      continue; // 单个文件损坏不影响扫描
-    }
+  if (accountId) {
+    const acc = parseAccountFile(dir, `${accountId}.json`);
+    if (acc) return acc;
+    throw new Error(`登录态目录 ${dir} 中没有可用账号（找不到 ${accountId}.json）；${getLayout().loginHint}`);
   }
-  throw new Error(
-    `登录态目录 ${dir} 中没有可用账号${accountId ? `（找不到 ${accountId}.json）` : ''}；${getLayout().loginHint}`,
-  );
+  const all = listWeixinAccounts(accountsRootDir);
+  if (all.length === 0) {
+    throw new Error(`登录态目录 ${dir} 中没有可用账号；${getLayout().loginHint}`);
+  }
+  return all[0]!;
 }
 
 /** X-WECHAT-UIN：随机 uint32 → 十进制字符串 → base64（每请求随机） */
@@ -124,6 +170,13 @@ async function postJson(baseUrl: string, endpoint: string, token: string, body: 
   const rawText = await res.text();
   if (!res.ok) throw new Error(`${endpoint} HTTP ${res.status}: ${rawText.slice(0, 300)}`);
   return JSON.parse(rawText) as PostResult;
+}
+
+/** ilink 登录态失效：继续用旧 token 轮询只会打出 session timeout */
+export function isIlinkSessionExpired(resp: { errcode?: number; errmsg?: string }): boolean {
+  if (resp.errcode === -14) return true;
+  const msg = (resp.errmsg ?? '').toLowerCase();
+  return msg.includes('session timeout') || msg.includes('session expired');
 }
 
 export interface GetUpdatesParams {

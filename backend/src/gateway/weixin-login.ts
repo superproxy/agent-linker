@@ -8,7 +8,7 @@
  *   4. 前端轮询 loginWithQrWait() 直到 connected
  *   5. 插件自动把 bot_token + ilink_bot_id 写入 accounts/；可选 POST /api/weixin/reload 热重启 adapter
  */
-import { readdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, rmSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getLayout } from '../install/layout.js';
@@ -140,6 +140,21 @@ export class WeixinLoginService {
       }
     }
     return { accountId: id, removed: this.removeAccountFiles(id, [...names]) };
+  }
+
+  /**
+   * 插件把登录态写成 ilink_bot_id.json（如 *-im-bot），进程 weixin:<用户名> 读的是 <用户名>.json。
+   * 扫码成功后把插件文件复制到账号槽名，bot 才能加载登录态。
+   */
+  adoptPluginAccount(slotId: string, pluginAccountId: string): void {
+    const slot = this.assertAccountId(slotId);
+    const from = pluginAccountId.trim();
+    if (!from || from === slot) return;
+    if (!/^[A-Za-z0-9._-]+$/.test(from)) return;
+    const dir = this.accountsDir();
+    const src = join(dir, `${from}.json`);
+    if (!existsSync(src)) return;
+    copyFileSync(src, join(dir, `${slot}.json`));
   }
 
   private assertAccountId(accountId: string): string {
@@ -320,27 +335,31 @@ export function registerWeixinApi(
     const accountId = resolveAccountId(request, q.accountId);
     if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
     try {
-      const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 30_000);
+      const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 180_000);
       const wait = await service.waitQr(q.sessionKey, timeoutMs, accountId);
       if (wait.connected) {
         // 插件可能回自己的 *-im-bot id；进程/缓存/任务 key 必须以登录账号槽为准
         const boundId = accountId || wait.accountId;
+        if (boundId && wait.accountId && wait.accountId !== boundId) {
+          service.adoptPluginAccount(boundId, wait.accountId);
+        }
+        let boundWarning: string | undefined;
         if (boundId) {
           try {
             await deps.onBound?.(boundId);
           } catch (err) {
-            return reply.code(500).send({
-              error: `绑定成功但拉起微信进程失败：${err instanceof Error ? err.message : String(err)}`,
-              connected: true,
-              accountId: boundId,
-            });
+            boundWarning = `登录态已保存，但拉起微信进程失败：${err instanceof Error ? err.message : String(err)}`;
+            deps.log?.(boundWarning);
           }
         }
-        return { ...wait, accountId: boundId };
+        return { ...wait, accountId: boundId, ...(boundWarning ? { boundWarning } : {}) };
       }
       return wait;
     } catch (err) {
-      return reply.code(500).send({ error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      deps.log?.(`weixin qr status 失败：${message}`);
+      // 轮询失败不要 500：前端会当成扫码中断；未确认时继续等下一次
+      return { connected: false, message };
     }
   });
 

@@ -32,7 +32,8 @@ import { HttpUserTokenProvider, type UserTokenProvider } from './user-token.js';
 import {
   extractText,
   getUpdates,
-  loadWeixinAccount,
+  isIlinkSessionExpired,
+  loadLatestWeixinAccount,
   sendText,
   type WeixinAccount,
   type WeixinInboundMessage,
@@ -50,6 +51,8 @@ const MAX_MSG_LEN = 2000;
 /** 长轮询异常退避：单次失败 2s 重试，3 连败 30s */
 const RETRY_DELAY_MS = 2_000;
 const BACKOFF_DELAY_MS = 30_000;
+/** 登录态失效后不要 2s 连打，等用户重新扫码 */
+const SESSION_EXPIRED_DELAY_MS = 60_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
 
 // ── context_token 存储（对齐旧 openclaw 插件的 store 策略）──
@@ -168,7 +171,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const gatewayToken = options.gatewayToken ?? DEFAULT_GATEWAY_TOKEN;
   const model = options.model ?? DEFAULT_GATEWAY_MODEL;
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
-  const account = loadWeixinAccount(stateDir, options.accountId ?? DEFAULT_ACCOUNT_ID);
+  const preferredAccountId = options.accountId ?? DEFAULT_ACCOUNT_ID;
+  const account = loadLatestWeixinAccount(stateDir, preferredAccountId);
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
 
@@ -190,11 +194,11 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
       : {}),
   });
 
-  const syncBufPath = join(stateDir, 'openclaw-weixin', 'accounts', `${account.id}.sync.json`);
+  const syncBufPathOf = (id: string) => join(stateDir, 'openclaw-weixin', 'accounts', `${id}.sync.json`);
 
   const loadSyncBuf = (): string => {
     try {
-      const data = JSON.parse(readFileSync(syncBufPath, 'utf8')) as { get_updates_buf?: string };
+      const data = JSON.parse(readFileSync(syncBufPathOf(account.id), 'utf8')) as { get_updates_buf?: string };
       return typeof data.get_updates_buf === 'string' ? data.get_updates_buf : '';
     } catch {
       return '';
@@ -203,8 +207,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 
   const saveSyncBuf = (buf: string): void => {
     try {
-      mkdirSync(join(syncBufPath, '..'), { recursive: true });
-      writeFileSync(syncBufPath, JSON.stringify({ get_updates_buf: buf }), 'utf8');
+      mkdirSync(join(syncBufPathOf(account.id), '..'), { recursive: true });
+      writeFileSync(syncBufPathOf(account.id), JSON.stringify({ get_updates_buf: buf }), 'utf8');
     } catch (err) {
       errLog('[bot] 游标落盘失败（不影响运行）:', err);
     }
@@ -312,7 +316,26 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
     let nextTimeoutMs = 35_000;
     let consecutiveFailures = 0;
 
+    const applyDiskToken = (): boolean => {
+      try {
+        const fresh = loadLatestWeixinAccount(stateDir, preferredAccountId);
+        if (fresh.token === account.token && fresh.baseUrl === account.baseUrl) return false;
+        account.id = fresh.id;
+        account.token = fresh.token;
+        account.baseUrl = fresh.baseUrl;
+        account.userId = fresh.userId;
+        account.savedAt = fresh.savedAt;
+        buf = '';
+        consecutiveFailures = 0;
+        log(`[bot] 已从磁盘热更新微信 token（账号 ${fresh.id}），继续收消息`);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     while (!signal.aborted) {
+      applyDiskToken();
       let resp;
       try {
         resp = await getUpdates({
@@ -334,6 +357,15 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 
       const isApiError = (resp.ret !== undefined && resp.ret !== 0) || (resp.errcode !== undefined && resp.errcode !== 0);
       if (isApiError) {
+        if (isIlinkSessionExpired(resp)) {
+          if (applyDiskToken()) continue;
+          errLog(
+            `[bot] 微信登录态已过期（errcode=${resp.errcode} ${resp.errmsg ?? ''}）。请到管理后台「微信」重新扫码，扫码成功后无需重启即可自动恢复。`,
+          );
+          await sleep(SESSION_EXPIRED_DELAY_MS, signal);
+          consecutiveFailures = 0;
+          continue;
+        }
         consecutiveFailures += 1;
         errLog(`[bot] getUpdates API 错误 ret=${resp.ret} errcode=${resp.errcode} errmsg=${resp.errmsg ?? ''} (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`);
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {

@@ -884,6 +884,7 @@ export async function buildServer(options?: {
         return u ? { username: u.username } : null;
       },
       isProcessRunning: (accountId) => pm.isRunning(`weixin:${accountId}` as ProcessInstanceId),
+      log: (...args: unknown[]) => app.log.warn(args.map((a) => String(a)).join(' ')),
       async onBound(accountId) {
         channelTokenStore.revokeForOwner('weixin', accountId);
         weixinLoginService.clearChannelTokenCache(accountId);
