@@ -34,6 +34,9 @@ jobs:
       - name: Build standalone package
         run: pnpm build:dist
 
+      - name: Build node package
+        run: pnpm build:dist:node
+
       - name: Archive package
         id: archive
         shell: bash
@@ -46,20 +49,26 @@ jobs:
             Windows) OS="windows"; EXT="zip" ;;
           esac
           ARCH="$(echo "${{ runner.arch }}" | tr 'A-Z' 'a-z')"
-          ASSET="linkagent-${VERSION}-${OS}-${ARCH}.${EXT}"
+          GW="linkagent-${VERSION}-${OS}-${ARCH}.${EXT}"
+          NODE="linkagent-node-${VERSION}-${OS}-${ARCH}.${EXT}"
           if [ "$EXT" = "tar.gz" ]; then
-            tar -C dist -czf "$ASSET" linkagent
+            tar -C dist -czf "$GW" linkagent
+            tar -C dist -czf "$NODE" linkagent-node
           else
-            powershell -NoProfile -Command "Compress-Archive -Path dist/linkagent -DestinationPath '$ASSET' -Force"
+            powershell -NoProfile -Command "Compress-Archive -Path dist/linkagent -DestinationPath '$GW' -Force"
+            powershell -NoProfile -Command "Compress-Archive -Path dist/linkagent-node -DestinationPath '$NODE' -Force"
           fi
-          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
-          ls -lh "$ASSET"
+          echo "asset_gw=$GW" >> "$GITHUB_OUTPUT"
+          echo "asset_node=$NODE" >> "$GITHUB_OUTPUT"
+          ls -lh "$GW" "$NODE"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}
-          path: linkagent-*
+          path: |
+            linkagent-*
+            linkagent-node-*
 
   release:
     name: publish release

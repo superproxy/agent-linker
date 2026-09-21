@@ -518,10 +518,15 @@ pnpm --filter @linkagent/backend weixin-login   # 微信扫码登录
 
 | 工作流 | 触发 | 作用 |
 |---|---|---|
-| `ci.yml` | push main / PR | 质量门禁：typecheck → 单测 → `build:dist` 构建冒烟 |
-| `release.yml` | 推 `v*` tag（如 `v0.1.0`） | 在 Linux / macOS / Windows 三平台构建 `dist/linkagent` 独立部署包，压缩为 `linkagent-<版本>-<平台>-<架构>.tar.gz` / `.zip`，发布为 GitHub Releases 资产 |
+| `ci.yml` | push main / PR | 质量门禁：typecheck → 单测 → `build:dist` + `build:dist:node --skip-install` 构建冒烟 |
+| `release.yml` | 推 `v*` tag（如 `v0.1.0`） | 三平台构建两个独立包：`linkagent-<版本>-<平台>-<架构>`（网关整包）与 `linkagent-node-…`（执行机节点包），发布为 GitHub Releases 资产 |
 
-本地手动构建独立部署包：`pnpm build:dist`，产物在 `dist/linkagent/`。
+本地手动构建：
+
+```bash
+pnpm build:dist        # 网关整包 → dist/linkagent/
+pnpm build:dist:node   # 执行节点包 → dist/linkagent-node/
+```
 
 ## 目录结构
 

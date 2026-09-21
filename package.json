@@ -17,6 +17,7 @@
     "web": "pnpm --filter @linkagent/web dev",
     "build:web": "pnpm --filter @linkagent/web build",
     "build:dist": "node scripts/build-dist.mjs",
+    "build:dist:node": "node scripts/build-dist.mjs --target=node",
     "server": "bash scripts/server.sh start",
     "server:start": "bash scripts/server.sh start",
     "server:stop": "bash scripts/server.sh stop",

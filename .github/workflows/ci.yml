@@ -32,3 +32,6 @@ jobs:
 
       - name: Build standalone package (smoke)
         run: pnpm build:dist
+
+      - name: Build node package (smoke)
+        run: node scripts/build-dist.mjs --target=node --skip-install

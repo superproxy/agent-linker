@@ -66,10 +66,11 @@ pnpm install
 pnpm typecheck          # 可选：环境自检
 
 # 方式二：独立部署包（GitHub Releases，三平台产物）
-# 解压 linkagent-<版本>-<平台>-<架构>.tar.gz 后得到 dist/linkagent/
+# 网关机：解压 linkagent-<版本>-<平台>-<架构>.tar.gz 后得到 dist/linkagent/
+# 执行机：解压 linkagent-node-<版本>-<平台>-<架构>.tar.gz 后得到 dist/linkagent-node/
 ```
 
-独立包本地构建：`pnpm build:dist`，产物在 `dist/linkagent/`。
+本地构建：`pnpm build:dist`（整包 → `dist/linkagent/`）；执行机包：`pnpm build:dist:node`（→ `dist/linkagent-node/`）。
 
 ---
 
@@ -171,12 +172,12 @@ server {
 | `LINKAGENT_NODE_ID` | 一般不填，首次网关注发并持久化 | 自动 |
 | `LINKAGENT_NODE_STATE_DIR` | 状态目录（多实例隔离用） | `.runtime-state/node` |
 
-### 5.2 三种启动方式
+### 5.2 启动方式
 
 > **本机节点（supervisor 托管）不读环境变量**：经进程管理器（`pm start`）拉起的
 > 本机 node 连接器，agent 开通只认共享 config 的 `node.agents`（缺省内置默认），
 > `LINKAGENT_NODE_AGENTS` 会被管理器置空屏蔽——shell / systemd / docker 残留的
-> 环境变量不会隐式改变本机节点上线内容。以下三种独立启动方式不受此限制，
+> 环境变量不会隐式改变本机节点上线内容。以下独立启动方式不受此限制，
 > `LINKAGENT_NODE_AGENTS` 仍环境变量优先。
 >
 > **本机进程回连地址只认本地配置**：supervisor 托管的本机 weixin / node 进程同样
@@ -203,6 +204,10 @@ pnpm node:status builder-01
 pnpm node:log builder-01
 pnpm node:restart builder-01
 pnpm node:stop builder-01
+
+# 4) 执行机独立包（GitHub Releases 的 linkagent-node-*.tar.gz / .zip）
+# 解压后把 node.env.example 复制为 .runtime-state/node.env 并填网关 URL / token
+./start.sh                 # Windows：start.bat
 ```
 
 ### 5.3 用 env 文件固化配置（推荐）
@@ -337,7 +342,7 @@ WantedBy=multi-user.target
 ### 9.4 升级
 
 - 源码：`git pull && pnpm install`，然后 `pnpm server:restart`、各节点 `pnpm node:restart <name>`；
-- 独立包：替换 `dist/linkagent/` 后重启；
+- 独立包：网关机替换 `dist/linkagent/` 后重启；执行机替换 `dist/linkagent-node/` 后 `./start.sh restart`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。
 
 ---
