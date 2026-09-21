@@ -62,6 +62,9 @@ test('普通用户不能读本机 agent；任务/渠道用户仅自己的空间'
     const res = await app.inject({ method: 'GET', url, headers: auth(userToken) });
     assert.equal(res.statusCode, 403, `${url} 应对普通用户 403，实际 ${res.statusCode} ${res.body}`);
   }
+  const ownAgents = await app.inject({ method: 'GET', url: '/api/agents/by-node', headers: auth(userToken) });
+  assert.equal(ownAgents.statusCode, 200, ownAgents.body);
+  assert.equal((ownAgents.json() as { local?: unknown }).local, undefined);
   const wx = await app.inject({ method: 'GET', url: '/api/weixin/status', headers: auth(userToken) });
   assert.equal(wx.statusCode, 200, wx.body);
   const wxBody = wx.json() as { bindAccountId?: string; accounts: { id: string }[] };

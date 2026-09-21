@@ -29,4 +29,20 @@ test('build-dist --target=node --skip-install 产出仅含连接器的独立包'
   assert.ok(pkg.dependencies.acpx);
   assert.ok(pkg.dependencies.ws);
   assert.equal(pkg.dependencies.fastify, undefined);
+
+  const bundled = readFileSync(join(out, 'server', 'node.mjs'), 'utf8');
+  assert.match(bundled, /createRequire/, 'ESM bundle 需注入 createRequire，否则 yaml 的 require("node:process") 会炸');
+
+  // 未装 acpx 时会很快退出；装了则会连网关。只要不再炸 Dynamic require 即通过。
+  const boot = spawnSync(process.execPath, [join(out, 'server', 'node.mjs')], {
+    encoding: 'utf8',
+    timeout: 4_000,
+    env: { ...process.env, LINKAGENT_HOME: out },
+  });
+  const text = `${boot.stdout ?? ''}${boot.stderr ?? ''}`;
+  assert.equal(
+    text.includes('Dynamic require of'),
+    false,
+    `节点包启动不应再动态 require 失败：${text.slice(0, 800)}`,
+  );
 });

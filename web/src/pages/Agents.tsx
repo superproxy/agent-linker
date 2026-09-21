@@ -45,16 +45,23 @@ export function AgentsPage(props: {
 
   const load = useCallback(async () => {
     try {
-      const [v, cat] = await Promise.all([admin.agentsByNode(), admin.catalog()]);
-      setData({ defaultAgentId: v.defaultAgentId ?? '', local: v.local?.agents ?? [], nodes: v.nodes });
-      setCatalog(cat);
+      // 远程页只读自己机器上连接器自报的 agent；目录/添加/安装是本机网关能力，仅管理员接口。
+      if (props.scope === 'remote') {
+        const v = await admin.agentsByNode();
+        setData({ defaultAgentId: v.defaultAgentId ?? '', local: [], nodes: v.nodes });
+        setCatalog([]);
+      } else {
+        const [v, cat] = await Promise.all([admin.agentsByNode(), admin.catalog()]);
+        setData({ defaultAgentId: v.defaultAgentId ?? '', local: v.local?.agents ?? [], nodes: v.nodes });
+        setCatalog(cat);
+      }
       setErr(null);
     } catch (e) {
       if (props.onAuthError(e)) return;
       setErr(e instanceof Error ? e.message : String(e));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.base, props.token, tick]);
+  }, [props.base, props.token, tick, props.scope]);
 
   useEffect(() => {
     void load();
@@ -368,8 +375,8 @@ export function AgentsPage(props: {
         : null}
 
       {props.scope === 'remote' && data && data.nodes.length === 0 ? (
-        <PageCard title="其他远程机器" subtitle="在其他机器上运行节点连接器并注册后，会在此显示其开通的 agent。">
-          <EmptyHint text="暂无远程机器（可在「远程 · 节点」接入新机器）" />
+        <PageCard title="远程机器" subtitle="自己接入的节点连接器会在此列出开通的 agent（网关侧只读）。">
+          <EmptyHint text="暂无自己的远程机器（可在「远程 · 节点」接入）" />
         </PageCard>
       ) : null}
 

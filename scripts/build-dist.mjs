@@ -60,6 +60,31 @@ const FULL_EXTERNAL = [
 /** 节点包：acpx / ws 运行时解析；yaml / zod 打进 bundle，执行机少装依赖 */
 const NODE_EXTERNAL = ['acpx', 'ws'];
 
+/**
+ * ESM 产物没有 CJS require。yaml 等被 bundle 的 CJS 会 `require('node:process')`，
+ * 若不注入 createRequire，启动会报 Dynamic require of "node:process" is not supported。
+ */
+const ESM_REQUIRE_BANNER = {
+  js: "import { createRequire as __linkagentCreateRequire } from 'node:module';\nconst require = __linkagentCreateRequire(import.meta.url);\n",
+};
+
+function esbuildServerBundle(entryPoints, outdir, external) {
+  return esbuild({
+    entryPoints,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    external,
+    outdir,
+    entryNames: '[name]',
+    outExtension: { '.js': '.mjs' },
+    sourcemap: true,
+    logLevel: 'info',
+    banner: ESM_REQUIRE_BANNER,
+  });
+}
+
 function runtimeDependenciesFull() {
   const deps = { ...BACKEND_PKG.dependencies };
   delete deps['@linkagent/shared'];
@@ -315,24 +340,16 @@ async function buildFull(dist, skipInstall) {
 
   step('3/6 esbuild 打包（gateway / weixin / node / pm 四入口）', async () => {
     const src = join(REPO, 'backend', 'src');
-    await esbuild({
-      entryPoints: {
+    await esbuildServerBundle(
+      {
         gateway: join(src, 'gateway', 'index.ts'),
         weixin: join(src, 'channels', 'weixin-bot.ts'),
         node: join(src, 'node', 'connector.ts'),
         pm: join(src, 'supervisor', 'cli.ts'),
       },
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'node22',
-      external: FULL_EXTERNAL,
-      outdir: join(dist, 'server'),
-      entryNames: '[name]',
-      outExtension: { '.js': '.mjs' },
-      sourcemap: true,
-      logLevel: 'info',
-    });
+      join(dist, 'server'),
+      FULL_EXTERNAL,
+    );
   });
 
   step('4/6 复制运行资源', () => {
@@ -495,19 +512,7 @@ async function buildNode(dist, skipInstall) {
 
   step('2/4 esbuild 打包节点连接器', async () => {
     const src = join(REPO, 'backend', 'src');
-    await esbuild({
-      entryPoints: { node: join(src, 'node', 'connector.ts') },
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      target: 'node22',
-      external: NODE_EXTERNAL,
-      outdir: join(dist, 'server'),
-      entryNames: '[name]',
-      outExtension: { '.js': '.mjs' },
-      sourcemap: true,
-      logLevel: 'info',
-    });
+    await esbuildServerBundle({ node: join(src, 'node', 'connector.ts') }, join(dist, 'server'), NODE_EXTERNAL);
   });
 
   step('3/4 生成配置 / 启停 / README', () => {
