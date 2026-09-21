@@ -56,7 +56,7 @@ test('GET /api/agents/by-node：本机分组含完整可编辑运行态 + 默认
       local: { nodeId: string; name: string; online: boolean; status: string; agents: { id: string; enabled: boolean }[] };
       nodes: unknown[];
     };
-    assert.equal(body.defaultAgentId, 'opencode');
+    assert.equal(body.defaultAgentId, 'pi');
     assert.equal(body.local.nodeId, 'local');
     assert.equal(body.local.online, true);
     assert.equal(body.local.status, 'approved');

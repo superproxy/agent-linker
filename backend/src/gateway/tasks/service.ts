@@ -11,6 +11,7 @@ import {
   TASK_COMMAND_PREFIX,
   TASK_KEY_PREFIX,
   LOGIN_TASK_CHANNEL,
+  isDefaultTaskId,
   normalizeNodeId,
   type CommandResult,
   type TaskItem,
@@ -20,7 +21,7 @@ import {
 
 export interface TaskServiceOptions {
   store: TaskStore;
-  /** 默认任务绑定的 agent（config.yaml tasks.defaultAgentId，缺省 opencode） */
+  /** 空任务列表时的路由兜底 agent（config.yaml tasks.defaultAgentId，缺省 pi） */
   defaultAgentId?: string;
   /**
    * 任务工作空间根目录（config.yaml tasks.workspaceDir）。
@@ -45,9 +46,24 @@ export function isTaskCommand(text: string): boolean {
   return t === TASK_COMMAND_PREFIX || t.startsWith(`${TASK_COMMAND_PREFIX} `);
 }
 
+/** 内建 default 任务钉死本机 pi；有改动返回 true */
+function pinDefaultTaskBinding(task: TaskItem): boolean {
+  if (!isDefaultTaskId(task.id)) return false;
+  let changed = false;
+  if (task.agentId !== DEFAULT_AGENT_ID) {
+    task.agentId = DEFAULT_AGENT_ID;
+    changed = true;
+  }
+  if (task.nodeId !== LOCAL_NODE_ID) {
+    task.nodeId = LOCAL_NODE_ID;
+    changed = true;
+  }
+  return changed;
+}
+
 export class TaskService {
   private readonly store: TaskStore;
-  /** 默认任务绑定的 agent：构造时取 config.yaml tasks.defaultAgentId，可经管理后台运行时修改并持久化 */
+  /** 任务全空时的路由兜底；内建 default 任务始终钉死本机 pi */
   private defaultAgentId: string;
   private readonly workspaceRoot?: string;
 
@@ -72,8 +88,7 @@ export class TaskService {
   }
 
   /**
-   * 更新全局默认 agentId（仅影响之后新建用户的默认任务、删除后重建的默认任务与路由兜底）。
-   * 已存在用户的默认任务是各自的独立快照，不在此批量改写（如需改单个实例，用任务的 setTaskAgent）。
+   * 更新空列表路由兜底 agentId。内建 default 任务固定本机 pi，不受此项改写。
    * 持久化到 config.yaml 由调用方（管理接口）负责，保证内存与文件一致失败时可回滚。
    */
   setDefaultAgentId(agentId: string): string {
@@ -105,7 +120,7 @@ export class TaskService {
           key: newTaskKey(),
           keyEnabled: true,
           name: DEFAULT_TASK_NAME,
-          agentId: this.defaultAgentId,
+          agentId: DEFAULT_AGENT_ID,
           nodeId: LOCAL_NODE_ID,
           ...(workspace ? { cwd: workspace } : {}),
           createdAt: Date.now(),
@@ -168,7 +183,8 @@ export class TaskService {
         t.keyEnabled = true;
         changed = true;
       }
-      if (!t.nodeId?.trim()) {
+      if (pinDefaultTaskBinding(t)) changed = true;
+      else if (!t.nodeId?.trim()) {
         t.nodeId = LOCAL_NODE_ID;
         changed = true;
       }
@@ -329,6 +345,7 @@ export class TaskService {
   setTaskAgent(state: UserTasks, id: string, agentId: string, nodeId?: string): TaskItem {
     const agent = agentId.trim().toLowerCase();
     if (!agent) throw new Error('agentId 必填');
+    if (isDefaultTaskId(id)) throw new Error('默认任务固定使用本机 pi，不能修改');
     const task = state.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`任务不存在: ${id}`);
     task.agentId = agent;
@@ -341,6 +358,7 @@ export class TaskService {
   setTaskNode(state: UserTasks, id: string, nodeId: string): TaskItem {
     const node = nodeId.trim();
     if (!node) throw new Error('nodeId 必填');
+    if (isDefaultTaskId(id)) throw new Error('默认任务固定使用本机 pi，不能修改');
     const task = state.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`任务不存在: ${id}`);
     task.nodeId = node;
@@ -536,6 +554,7 @@ export class TaskService {
         }
         const task = this.findTask(state, ref);
         if (!task) return { text: `❌ 任务不存在: ${ref}` };
+        if (isDefaultTaskId(task.id)) return { text: '❌ 默认任务固定使用本机 pi，不能修改' };
         const set = this.setTaskAgent(state, task.id, agentId);
         return { text: `🔀 [${set.name}] agent → ${set.agentId}` };
       }
@@ -550,7 +569,7 @@ export class TaskService {
             '/task del <id|key|名称|序号> 删除任务（含默认任务）',
             '/task rename <id|key|名称|序号> <新名称>  重命名',
             '/task cwd <id|key|名称|序号> [路径]     查看/设置工作目录（不填路径=查看）',
-            '/task agent <id|key|名称|序号> <agentId>  切换任务绑定 agent（id/key/会话不变）',
+            '/task agent <id|key|名称|序号> <agentId>  切换任务绑定 agent（默认任务固定本机 pi，不可改）',
             '普通消息自动进入「激活任务」对应的 agent。',
           ].join('\n'),
         };

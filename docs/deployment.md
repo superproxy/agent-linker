@@ -52,7 +52,7 @@ flowchart TB
 | Node.js | `>= 22.13` |
 | 包管理 | pnpm `8.6.5`（corepack 自带） |
 | 网关机 | 可被客户端与节点访问的 TCP 端口（默认 8787） |
-| 执行机 | 已安装需要的 agent CLI（opencode / pi / workbuddy / trace-cli / cursor） |
+| 执行机 | 已安装需要的 agent CLI（opencode / pi / workbuddy / trace-cli / cursor）。pi 模型文件与可选沙箱见 [`docs/pi.md`](pi.md) |
 | 操作系统 | macOS / Linux（启停脚本为 bash；Windows 用 `pnpm` 原生命令） |
 
 ---

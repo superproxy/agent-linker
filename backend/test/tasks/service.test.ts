@@ -17,7 +17,7 @@ test('首次 load 预置 default 任务', () => {
   const state = svc.load('weixin', 'wx_1');
   assert.equal(state.tasks.length, 1);
   assert.equal(state.tasks[0].id, DEFAULT_TASK_ID);
-  assert.equal(state.tasks[0].agentId, 'opencode');
+  assert.equal(state.tasks[0].agentId, 'pi');
   assert.equal(state.activeTaskId, DEFAULT_TASK_ID);
 });
 
@@ -70,7 +70,7 @@ test('resolveRoute 缺省用激活任务，可覆盖', () => {
   assert.equal(r1.agentId, 'pi');
   const r2 = svc.resolveRoute(state, DEFAULT_TASK_ID);
   assert.equal(r2.taskId, DEFAULT_TASK_ID);
-  assert.equal(r2.agentId, 'opencode');
+  assert.equal(r2.agentId, 'pi');
 });
 
 test('handleCommand: new 解析名称与可选 agent', () => {
@@ -88,8 +88,8 @@ test('handleCommand: new 无 agent 继承当前', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_1');
   const r = svc.handleCommand(state, '/task new 另一个')!;
-  assert.equal(r.activeAgentId, 'opencode');
-  assert.equal(state.tasks.find((x) => x.id === state.activeTaskId)!.agentId, 'opencode');
+  assert.equal(r.activeAgentId, 'pi');
+  assert.equal(state.tasks.find((x) => x.id === state.activeTaskId)!.agentId, 'pi');
 });
 
 test('handleCommand: list 带激活标记', () => {
@@ -141,7 +141,7 @@ test('handleCommand: use 支持名称/序号/唯一前缀定位', () => {
   // 序号（list 展示的 [1] 即默认任务）
   const r2 = svc.handleCommand(state, '/task use 1')!;
   assert.equal(r2.activeTaskId, DEFAULT_TASK_ID);
-  assert.equal(r2.activeAgentId, 'opencode');
+  assert.equal(r2.activeAgentId, 'pi');
   // 唯一前缀（名称前缀）
   const r3 = svc.handleCommand(state, '/task use 股票')!;
   assert.equal(r3.activeTaskId, t.id);
@@ -157,7 +157,7 @@ test('handleCommand: default 快捷切回默认任务', () => {
   svc.createTask(state, '股票分析', 'pi');
   const r = svc.handleCommand(state, '/task default')!;
   assert.equal(r.activeTaskId, DEFAULT_TASK_ID);
-  assert.equal(r.activeAgentId, 'opencode');
+  assert.equal(r.activeAgentId, 'pi');
   // 幂等：重复切不回报错
   const r2 = svc.handleCommand(state, '/task default')!;
   assert.equal(r2.activeTaskId, DEFAULT_TASK_ID);
@@ -238,6 +238,8 @@ test('旧数据（无 key）load 时惰性补齐并落盘，幂等', () => {
   const svc = new TaskService({ store });
   const state = svc.load('weixin', 'wx_old');
   assert.ok(state.tasks[0].key.startsWith('k_'));
+  assert.equal(state.tasks[0].agentId, 'pi');
+  assert.equal(state.tasks[0].nodeId, 'local');
   // 已补齐并落盘
   const reread = store.read('weixin', 'wx_old');
   assert.ok(reread?.tasks[0].key.startsWith('k_'));
@@ -343,5 +345,18 @@ test('工作空间隔离：清除 cwd 回落自动隔离目录；旧数据无 cw
   assert.ok(loaded.tasks[0].cwd);
   assert.ok(loaded.tasks[0].cwd!.includes(join('wx_old3', 'default')));
   assert.ok(existsSync(loaded.tasks[0].cwd!));
+  assert.equal(loaded.tasks[0].agentId, 'pi');
   assert.ok(legacy);
+});
+
+test('默认任务不能改 agent；/task agent default 被拒绝', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  assert.throws(() => svc.setTaskAgent(state, DEFAULT_TASK_ID, 'opencode'), /本机 pi/);
+  const r = svc.handleCommand(state, '/task agent default opencode')!;
+  assert.ok(r.text.includes('本机 pi'));
+  assert.equal(state.tasks.find((t) => t.id === DEFAULT_TASK_ID)?.agentId, 'pi');
+  const extra = svc.createTask(state, '其它', 'opencode');
+  const ok = svc.handleCommand(state, `/task agent ${extra.id} pi`)!;
+  assert.ok(ok.text.includes('pi'));
 });

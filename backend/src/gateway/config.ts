@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
-import { isMap, parse, parseDocument, YAMLMap } from 'yaml';
+import { isMap, isSeq, parse, parseDocument, YAMLMap, YAMLSeq } from 'yaml';
 import {
   migrateConfig,
   defaultSharedConfig,
@@ -11,6 +11,7 @@ import {
   gatewayConfigSchema,
   defaultConfig,
   type GatewayConfig,
+  type AgentDefinition,
 } from '@linkagent/shared';
 import { findInstallRoot, findRepoRoot, getLayout } from '../install/layout.js';
 
@@ -254,6 +255,90 @@ export function persistDefaultTaskAgentId(path: string, agentId: string): string
     throw new Error(`持久化校验失败：tasks.defaultAgentId 未更新为 ${id}`);
   }
   return p;
+}
+
+function agentsSeqOf(doc: ReturnType<typeof parseDocument>): YAMLSeq {
+  const isNewShape = doc.has('gateway');
+  if (isNewShape) {
+    let gateway = doc.get('gateway');
+    if (!isMap(gateway)) {
+      doc.set('gateway', new YAMLMap());
+      gateway = doc.get('gateway');
+    }
+    const g = gateway as YAMLMap;
+    let agents = g.get('agents');
+    if (!isSeq(agents)) {
+      agents = new YAMLSeq();
+      g.set('agents', agents);
+    }
+    return agents as YAMLSeq;
+  }
+  let agents = doc.get('agents');
+  if (!isSeq(agents)) {
+    agents = new YAMLSeq();
+    doc.set('agents', agents);
+  }
+  return agents as YAMLSeq;
+}
+
+function seedAgentsSeq(seq: YAMLSeq, defs: AgentDefinition[]): void {
+  if (seq.items.length > 0) return;
+  for (const d of defs) {
+    const m = new YAMLMap();
+    m.set('id', d.id);
+    m.set('type', d.type);
+    if (d.displayName) m.set('displayName', d.displayName);
+    m.set('enabled', d.enabled !== false);
+    seq.add(m);
+  }
+}
+
+/**
+ * 把某个本机 agent 的启用状态写入 config.yaml（gateway.agents 或旧顶层 agents）。
+ * yaml 里还没有 agents 列表时，用当前运行定义整表落下再改目标项，避免重启丢回默认全开。
+ */
+export function persistAgentEnabled(
+  path: string,
+  agentId: string,
+  enabled: boolean,
+  defs: AgentDefinition[],
+): AgentDefinition[] {
+  const id = agentId.trim();
+  if (!id) throw new Error('agentId 不能为空');
+  const p = resolve(path);
+  const doc = parseDocument(existsSync(p) ? readFileSync(p, 'utf8') : '');
+  if (!existsSync(p)) mkdirSync(dirname(p), { recursive: true });
+  const seq = agentsSeqOf(doc);
+  seedAgentsSeq(seq, defs);
+
+  let found = false;
+  for (const item of seq.items) {
+    if (!isMap(item)) continue;
+    if (String(item.get('id') ?? '') !== id) continue;
+    item.set('enabled', enabled);
+    found = true;
+    break;
+  }
+  if (!found) {
+    const src = defs.find((d) => d.id === id);
+    if (!src) throw new Error(`未知 agent: ${id}`);
+    const m = new YAMLMap();
+    m.set('id', src.id);
+    m.set('type', src.type);
+    if (src.displayName) m.set('displayName', src.displayName);
+    m.set('enabled', enabled);
+    seq.add(m);
+  }
+
+  writeFileSync(p, doc.toString(), 'utf8');
+  const reparsed = migrateConfig(parse(readFileSync(p, 'utf8')));
+  const hit = reparsed.gateway.agents.find((a) => a.id === id);
+  if (!hit) throw new Error(`持久化校验失败：gateway.agents 未包含 ${id}`);
+  const nowOn = hit.enabled !== false;
+  if (nowOn !== enabled) {
+    throw new Error(`持久化校验失败：${id}.enabled 未更新为 ${enabled}`);
+  }
+  return [...reparsed.gateway.agents];
 }
 
 const WEIXIN_ACCOUNT_ID_RE = /^[A-Za-z0-9._-]+$/;

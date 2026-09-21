@@ -110,6 +110,10 @@ function copyConfigYaml(destFile) {
   const src = existsSync(live) ? live : template;
   if (!existsSync(src)) throw new Error('缺少 backend/config/config.yaml 或 config.yaml.template');
   cpSync(src, destFile);
+  const piAgentSrc = join(REPO, 'backend', 'config', 'pi-agent');
+  if (existsSync(piAgentSrc)) {
+    cpSync(piAgentSrc, join(dirname(destFile), 'pi-agent'), { recursive: true });
+  }
 }
 
 function npmInstall(dist) {

@@ -53,6 +53,10 @@ pnpm --filter @linkagent/backend test
 - 不提交明文密钥；密码用 scrypt + 随机 salt 哈希（见 `users/store.ts`）。
 - `.runtime-state/`、`backend/config/config.yaml` 等本地运行态不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
 
+## Pi 沙箱报缺 ripgrep / socat
+
+`Sandbox initialization failed: Sandbox dependencies not available: ripgrep (rg) not found, socat not installed` 是 **跑 pi 的 Linux 机** 缺系统包，不是网关 yaml。装 `ripgrep` `socat` `bubblewrap`，完整步骤见 [`docs/pi.md`](pi.md)。Windows 本机不要装 `pi-sandbox`。
+
 ## 已知遗留 / 待办
 
 - 个人 token（`pat_`）后端、接口与「我的 Token」界面已完成；遗留 `pat_` 经 Chatbox 等第三方客户端直连 `/v1` 的端到端回归联调。

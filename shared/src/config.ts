@@ -31,6 +31,8 @@ export const agentDefSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   command: z.array(z.string()).optional(),
   model: z.string().optional(),
+  /** 缺省启用；false 时启动不纳入 /v1 与任务路由 */
+  enabled: z.boolean().optional(),
 });
 
 /**
@@ -72,14 +74,14 @@ export const gatewaySectionSchema = z.object({
   plugins: z
     .array(z.object({ package: z.string().min(1), enabled: z.boolean().default(true) }))
     .default([]),
-  /** 任务公共能力（多渠道共享）：默认任务绑定的 agent（缺省 opencode） */
+  /** 任务公共能力（多渠道共享）：默认任务绑定的 agent（缺省 pi） */
   tasks: z
     .object({
-      defaultAgentId: z.string().default('opencode'),
+      defaultAgentId: z.string().default('pi'),
       /** 任务工作空间根目录：配置后每个任务默认独立目录 <root>/<userId>/<taskId>（任务间隔离） */
       workspaceDir: z.string().optional(),
     })
-    .default({ defaultAgentId: 'opencode' }),
+    .default({ defaultAgentId: 'pi' }),
 });
 export type GatewaySection = z.infer<typeof gatewaySectionSchema>;
 
@@ -295,7 +297,7 @@ export function defaultSharedConfig(): SharedConfig {
     agents: defaultAgentDefinitions(),
     channels: {},
     plugins: [],
-    tasks: { defaultAgentId: 'opencode' },
+    tasks: { defaultAgentId: 'pi' },
     defaultCwd: '',
   });
 }
@@ -358,7 +360,7 @@ export function defaultConfig(): GatewayConfig {
     channels: {},
     plugins: [],
     weixin: { mode: 'weixin-bot' },
-    tasks: { defaultAgentId: 'opencode' },
+    tasks: { defaultAgentId: 'pi' },
     defaultCwd: '',
   };
 }

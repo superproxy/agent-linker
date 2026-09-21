@@ -3,8 +3,9 @@
  * - opencode：  ~/.config/opencode/opencode.json（或仓库根 opencode.json）provider.<id>.models 的键
  * - pi：        ~/.pi/agent/models.json provider.<id>.models[].id
  * - 其它类型（workbuddy/trace-cli/codex/…）：本地模型配置路径暂无公开文档，暂不收集（返回空列表，UI 可手动输入）
- * 结果统一为 "providerId/modelId"（如 volcengine/deepseek-v4-flash-ga-260731），与
+ * 结果统一为 "providerId/modelId"（与本机该 agent 配置文件一致），与
  * AcpWrapper 通过 ACP set_config_option('model') 下发的取值一致。
+ * 网关不写死火山等厂商模型；pi 的清单以 ~/.pi/agent/models.json 为准。
  * 文件缺失 / 结构不符 / 解析失败一律静默降级为空列表（UI 仍可手动输入模型）。
  */
 import { readFileSync } from 'node:fs';

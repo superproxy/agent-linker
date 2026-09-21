@@ -239,7 +239,7 @@ function PageRouter(props: {
         />
       );
     case 'tasks':
-      return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} username={username} />;
+      return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} username={username} isAdmin={isAdmin} />;
     case 'keys':
       return <KeysPage base={base} token={token} onAuthError={onAuthError} />;
     case 'my-token':

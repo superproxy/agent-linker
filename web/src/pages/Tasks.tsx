@@ -29,6 +29,7 @@ export function TasksPage(props: {
   onAuthError: AuthErrorHandler;
   onOpenChat: (session: ChatSession) => void;
   username?: string;
+  isAdmin?: boolean;
 }) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
@@ -41,14 +42,17 @@ export function TasksPage(props: {
   const [open, setOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Key[]>([]);
   const [form] = Form.useForm();
+  const isAdmin = Boolean(props.isAdmin);
+  const remoteNodes = useMemo(() => nodes.filter((n) => n.nodeId !== 'local'), [nodes]);
 
   const nodeId = Form.useWatch('nodeId', form) as string | undefined;
   const isLocalNode = (id?: string) => !id || id === 'local';
   const agentOptions = useMemo<{ id: string; displayName?: string }[]>(() => {
+    if (editing?.task?.id === 'default') return [{ id: 'pi', displayName: 'Pi' }];
     if (!isLocalNode(nodeId)) return nodes.find((n) => n.nodeId === nodeId)?.agents ?? [];
     return localAgents;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, nodes, localAgents]);
+  }, [nodeId, nodes, localAgents, editing]);
 
   const syncAgentForNode = (nextNode?: string) => {
     const list = isLocalNode(nextNode) ? localAgents : nodes.find((n) => n.nodeId === nextNode)?.agents ?? [];
@@ -101,20 +105,27 @@ export function TasksPage(props: {
       notify.info('请先登录后再创建任务。');
       return;
     }
+    if (!isAdmin && remoteNodes.length === 0) {
+      notify.info('普通用户的默认任务固定为本机 pi。新建其它任务请先接入自己的远程机器。');
+      return;
+    }
+    const firstRemote = remoteNodes[0];
     setEditing({ channel: 'web', userId: ownerUsername, ownerUsername });
     form.setFieldsValue({
       name: '',
-      agentId: localAgents[0]?.id ?? '',
-      nodeId: '',
+      agentId: isAdmin ? (localAgents[0]?.id ?? '') : (firstRemote?.agents[0]?.id ?? ''),
+      nodeId: isAdmin ? '' : (firstRemote?.nodeId ?? ''),
       key: '',
       cwd: '',
       ownerUsername,
     });
     setOpen(true);
-    void ops
-      .getDefaultAgent()
-      .then((id) => form.setFieldValue('agentId', localAgents.some((a) => a.id === id) ? id : localAgents[0]?.id ?? ''))
-      .catch(() => undefined);
+    if (isAdmin) {
+      void ops
+        .getDefaultAgent()
+        .then((id) => form.setFieldValue('agentId', localAgents.some((a) => a.id === id) ? id : localAgents[0]?.id ?? ''))
+        .catch(() => undefined);
+    }
   };
 
   const openEdit = (t: FlatTask) => {
@@ -139,8 +150,13 @@ export function TasksPage(props: {
           await ops.patchTask(editing.channel, editing.userId, t.id, { name: v.name.trim() }, editing.ownerUsername);
         if ((v.cwd ?? '').trim() !== (t.cwd ?? ''))
           await ops.patchTask(editing.channel, editing.userId, t.id, { cwd: v.cwd?.trim() || null }, editing.ownerUsername);
-        if (v.agentId !== t.agentId || (v.nodeId ?? '') !== (t.nodeId ?? ''))
-          await ops.setTaskAgent(editing.channel, editing.userId, t.id, v.agentId, v.nodeId || undefined, editing.ownerUsername);
+        if (v.agentId !== t.agentId || (v.nodeId ?? '') !== (t.nodeId ?? '')) {
+          if (t.id === 'default') {
+            notify.info('默认任务固定使用本机 pi，不能修改 agent / 节点。');
+          } else {
+            await ops.setTaskAgent(editing.channel, editing.userId, t.id, v.agentId, v.nodeId || undefined, editing.ownerUsername);
+          }
+        }
       }, '任务已保存');
     } else {
       const ownerUsername = (typeof v.ownerUsername === 'string' && v.ownerUsername.trim()) || editing.ownerUsername;
@@ -313,7 +329,7 @@ export function TasksPage(props: {
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
       <p className="page-desc" style={{ marginBottom: 12 }}>
-        任务列表按<strong>登录用户</strong>隔离，不按微信联系人拆分。重新绑定微信会重签本页 Key（<code>k_</code>）。微信里发送 <code>/task</code> 或本页「激活」会切换你的当前任务。
+        任务列表按<strong>登录用户</strong>隔离，不按微信联系人拆分。默认任务固定本机 <code>pi</code>，不能改绑。重新绑定微信会重签本页 Key（<code>k_</code>）。微信里发送 <code>/task</code> 或本页「激活」会切换你的当前任务。
       </p>
       {users === null ? (
         <Table loading showHeader={false} pagination={false} rowKey="x" columns={[{ title: '', dataIndex: 'x' }]} dataSource={[]} />
@@ -377,8 +393,13 @@ export function TasksPage(props: {
           <Form.Item name="name" label="任务名" rules={[{ required: true, message: '请输入任务名' }]}>
             <Input placeholder="例如：默认任务" />
           </Form.Item>
-          <Form.Item name="agentId" label="Agent">
+          <Form.Item
+            name="agentId"
+            label="Agent"
+            extra={editing?.task?.id === 'default' ? '默认任务固定使用本机 pi，不能修改。' : undefined}
+          >
             <Select
+              disabled={editing?.task?.id === 'default'}
               options={[
                 ...(editing?.task ? [] : [{ value: '', label: '（跟随当前激活任务）' }]),
                 ...agentOptions.map((a) => ({ value: a.id, label: a.displayName || a.id })),
@@ -387,7 +408,14 @@ export function TasksPage(props: {
           </Form.Item>
           <Form.Item name="nodeId" label="运行节点">
             <Select
-              options={[{ value: '', label: '本机' }, ...nodes.map((n) => ({ value: n.nodeId, label: n.name }))]}
+              disabled={editing?.task?.id === 'default'}
+              options={
+                editing?.task?.id === 'default'
+                  ? [{ value: '', label: '本机' }]
+                  : isAdmin
+                    ? [{ value: '', label: '本机' }, ...nodes.map((n) => ({ value: n.nodeId, label: n.name }))]
+                    : remoteNodes.map((n) => ({ value: n.nodeId, label: n.name }))
+              }
               onChange={(v: string) => syncAgentForNode(v)}
             />
           </Form.Item>

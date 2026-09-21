@@ -125,6 +125,8 @@ export interface AgentDefinition {
    * 未设置则不调用，沿用 agent 自身默认（pi 读 ~/.pi/agent/settings.json）。
    */
   model?: string;
+  /** 是否启用；缺省 true。写入 config.yaml 后重启保留 */
+  enabled?: boolean;
 }
 
 export interface StreamCallbacks {

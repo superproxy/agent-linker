@@ -173,11 +173,11 @@ export function AgentsPage(props: {
         const cat = catalog.find((c) => c.kind === a.type);
         return (
         <Space size={6} wrap>
-          <Tooltip title={a.id === defaultAgentId ? '已是默认 agent' : '设为新任务的默认 agent'}>
+          <Tooltip title={a.id === 'pi' ? '默认任务固定为本机 pi' : '设为任务全空时的路由兜底（默认任务仍固定本机 pi）'}>
             <Button
               size="small"
               disabled={a.id === defaultAgentId || busyId === a.id}
-              onClick={() => void run(a.id, () => admin.setDefaultAgent(a.id), `已设置默认 agent：${a.id}`)}
+              onClick={() => void run(a.id, () => admin.setDefaultAgent(a.id), `已设置空列表兜底 agent：${a.id}`)}
             >
               设为默认
             </Button>
@@ -294,7 +294,7 @@ export function AgentsPage(props: {
           rowClassName={(a) => (a.id === defaultAgentId ? 'agent-default-row' : '')}
         />
         <p className="page-desc" style={{ marginTop: 12, marginBottom: 0 }}>
-          启停与切换为运行时热更新（立即生效，重启网关后还原 config.yaml）；「设为默认」会持久化到 config.yaml。
+          启停会写入 config.yaml，重启后保留；切模型仍为运行时热更新（重启网关后还原 yaml 中的 model）。
         </p>
 
         <Divider style={{ margin: '16px 0 12px' }} orientation="left" orientationMargin={0}>

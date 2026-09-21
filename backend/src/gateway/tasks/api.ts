@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { isTaskCommand, type TaskService } from './service.js';
-import { LOGIN_TASK_CHANNEL, type TaskItem, type UserTasks } from './types.js';
+import { LOGIN_TASK_CHANNEL, isDefaultTaskId, normalizeNodeId, type TaskItem, type UserTasks } from './types.js';
 
 /** 有登录归属时读写该用户唯一任务空间；无归属时沿用渠道终端文件（旧数据 / 单测） */
 function loadTaskSpace(service: TaskService, channel: string, userId: string, owner?: string): UserTasks {
@@ -205,8 +205,12 @@ export function registerTaskApi(
     // 显式指定 agent 时校验 (节点, agent) 组合当前可路由；agent 留空则继承激活任务（无需校验）
     const agentId = body.agentId?.trim().toLowerCase();
     const nodeId = body.nodeId?.trim();
-    if (agentId && deps.hasRoutingAgent && !deps.hasRoutingAgent(nodeId || 'local', agentId)) {
-      return reply.code(400).send({ error: `节点 ${nodeId || 'local'} 上没有可用 agent: ${agentId}（请确认节点在线且已提供该 agent）` });
+    const effectiveNode = normalizeNodeId(nodeId || service.resolveRoute(state).nodeId);
+    if (!isAdmin(request) && effectiveNode === 'local') {
+      return reply.code(403).send({ error: '普通用户不能把任务绑到本机 agent；默认任务已固定为本机 pi' });
+    }
+    if (agentId && deps.hasRoutingAgent && !deps.hasRoutingAgent(effectiveNode, agentId)) {
+      return reply.code(400).send({ error: `节点 ${effectiveNode} 上没有可用 agent: ${agentId}（请确认节点在线且已提供该 agent）` });
     }
     try {
       const task = service.createTask(state, body.name ?? '', body.agentId, body.key, body.cwd, nodeId);
@@ -261,9 +265,15 @@ export function registerTaskApi(
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
     if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信 / web）` };
     if (!body?.agentId?.trim()) return reply.code(400).send({ error: 'agentId 必填' });
+    if (isDefaultTaskId(params.taskId)) {
+      return reply.code(400).send({ error: '默认任务固定使用本机 pi，不能修改' });
+    }
     const agentId = body.agentId.trim().toLowerCase();
     const state = loadTaskSpace(service, body.channel, body.userId, space.owner);
     const nodeId = body.nodeId?.trim() || service.resolveRoute(state, params.taskId).nodeId;
+    if (!isAdmin(request) && normalizeNodeId(nodeId) === 'local') {
+      return reply.code(403).send({ error: '普通用户不能把任务绑到本机 agent；默认任务已固定为本机 pi' });
+    }
     if (nodeId === 'local' && deps.listAvailableAgents) {
       const available = deps.listAvailableAgents();
       if (!available.includes(agentId)) {
@@ -277,7 +287,8 @@ export function registerTaskApi(
       const task = service.setTaskAgent(state, params.taskId, agentId, body.nodeId);
       return { task };
     } catch (err) {
-      return reply.code(404).send({ error: err instanceof Error ? err.message : String(err) });
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.code(/不存在/.test(msg) ? 404 : 400).send({ error: msg });
     }
   });
 

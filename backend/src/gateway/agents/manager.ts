@@ -81,7 +81,7 @@ export class AgentManager {
       });
       this.adapters.set(def.id, adapter);
       this.descriptors.set(modelIdFor(def.id), adapter.descriptor());
-      this.enabled.add(def.id);
+      if (def.enabled !== false) this.enabled.add(def.id);
     }
     if (this.nodeManager) {
       // 启动时已在线的节点（理论上连接在 WS server listen 后才建立，这里做防御性同步）
@@ -202,7 +202,7 @@ export class AgentManager {
   }
 
   /**
-   * 运行时热更新某个 agent（模型 / 启停）。仅内存生效，重启还原 config/config.yaml。
+   * 运行时热更新某个 agent（模型 / 启停）。启停会改内存；落盘由调用方写 config.yaml。
    * 未知 agent 抛错；返回更新后的详情。
    */
   updateAgent(id: string, patch: AgentPatch): AgentDetail {
@@ -212,10 +212,17 @@ export class AgentManager {
     if (patch.enabled !== undefined) {
       if (patch.enabled) this.enabled.add(id);
       else this.enabled.delete(id);
+      const def = this.definitions.find((d) => d.id === id);
+      if (def) def.enabled = patch.enabled;
     }
     const detail = this.listAgentDetails().find((d) => d.id === id);
     if (!detail) throw new Error(`agent 详情不可用: ${id}`);
     return detail;
+  }
+
+  /** 当前定义快照（含 enabled），供落盘 config.yaml */
+  snapshotDefinitions(): AgentDefinition[] {
+    return this.definitions.map((d) => ({ ...d, enabled: this.enabled.has(d.id) }));
   }
 
   /**
@@ -232,7 +239,7 @@ export class AgentManager {
     });
     this.adapters.set(def.id, adapter);
     this.descriptors.set(modelIdFor(def.id), adapter.descriptor());
-    this.enabled.add(def.id);
+    if (def.enabled !== false) this.enabled.add(def.id);
     this.definitions.push(def);
     const detail = this.listAgentDetails().find((d) => d.id === def.id);
     if (!detail) throw new Error(`agent 详情不可用: ${def.id}`);

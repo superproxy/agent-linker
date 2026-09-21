@@ -34,7 +34,7 @@ test('普通消息 → chat，解析激活任务 agent+task，sessionKey 编码�
   svc.load('weixin', 'wx_1');
   const d = decideTaskRouting(svc, { text: '帮我写方案', channel: 'weixin', userId: 'wx_1' });
   assert.equal(d.kind, 'chat');
-  assert.equal(d.agentId, 'opencode');
+  assert.equal(d.agentId, 'pi');
   assert.equal(d.taskId, 'default');
   assert.equal(d.sessionKey, 'weixin:wx_1:task:default');
 });
@@ -143,7 +143,7 @@ test('切回 default 任务：回落 defaultAgentId，无任务 cwd', () => {
   svc.handleCommand(state, '/task default');
   const d = decideTaskRouting(svc, { text: '你好', channel: 'weixin', userId: 'wx_1' });
   assert.equal(d.kind, 'chat');
-  assert.equal(d.agentId, 'opencode'); // defaultAgentId
+  assert.equal(d.agentId, 'pi'); // 默认任务固定本机 pi
   assert.equal(d.taskId, 'default');
   assert.equal(d.cwd, undefined);
 });
@@ -197,7 +197,7 @@ test('/api/tasks: 首次 GET 返回默认任务（懒初始化落盘）', async 
     const body = res.json();
     assert.equal(body.activeTaskId, 'default');
     assert.equal(body.tasks.length, 1);
-    assert.equal(body.tasks[0].agentId, 'opencode');
+    assert.equal(body.tasks[0].agentId, 'pi');
   } finally {
     await app.close().catch(() => {});
   }
@@ -607,7 +607,7 @@ test('userId 缺省 → 走 default 用户路由；微信渠道 model 不参与 
   // 仅 channel，不写 userId → default 用户三元素路由（会话隔离在 default 名下）
   const d1 = decideTaskRouting(svc, { text: '你好', channel: 'weixin', model: 'agent:pi' });
   assert.equal(d1.kind, 'chat');
-  assert.equal(d1.agentId, 'opencode'); // 微信渠道按 default 任务绑定 agent（model 不覆盖，defaultAgentId 权威）
+  assert.equal(d1.agentId, 'pi'); // 微信渠道按 default 任务绑定 agent（model 不覆盖，固定本机 pi）
   assert.equal(d1.taskId, 'default');
   assert.equal(d1.sessionKey, 'weixin:default:task:default');
   // 显式 agent 优先于任务绑定
@@ -651,24 +651,23 @@ test('taskKey 直连 + model 覆盖任务绑定 agent', () => {
 
 /* ===================== 全局默认 Agent（tasks.defaultAgentId） ===================== */
 
-test('TaskService: 默认 agentId 缺省 opencode，setDefaultAgentId 后新用户默认任务用新值', () => {
+test('TaskService: 默认任务固定本机 pi；setDefaultAgentId 只改空列表兜底', () => {
   const svc = freshService();
-  assert.equal(svc.getDefaultAgentId(), 'opencode');
-
-  // 先建档一个用户（其 default 是 opencode 快照）
-  const before = svc.load('weixin', 'wx_old');
-  assert.equal(before.tasks[0].agentId, 'opencode');
-
-  assert.equal(svc.setDefaultAgentId(' PI '), 'pi'); // trim + 小写
   assert.equal(svc.getDefaultAgentId(), 'pi');
 
-  // 之后新建用户的默认任务快照用 pi
-  const after = svc.load('weixin', 'wx_new');
-  assert.equal(after.tasks[0].agentId, 'pi');
-  // 已存在用户的默认任务是独立快照，不被批量改写
-  assert.equal(svc.load('weixin', 'wx_old').tasks[0].agentId, 'opencode');
+  const before = svc.load('weixin', 'wx_old');
+  assert.equal(before.tasks[0].agentId, 'pi');
+  assert.equal(before.tasks[0].nodeId, 'local');
+
+  assert.equal(svc.setDefaultAgentId(' OPENCODE '), 'opencode');
+  assert.equal(svc.getDefaultAgentId(), 'opencode');
+
+  // 已存在 / 新建用户的 default 任务仍钉死 pi
+  assert.equal(svc.load('weixin', 'wx_old').tasks[0].agentId, 'pi');
+  assert.equal(svc.load('weixin', 'wx_new').tasks[0].agentId, 'pi');
 
   assert.throws(() => svc.setDefaultAgentId('   '), /agentId/);
+  assert.throws(() => svc.setTaskAgent(before, 'default', 'opencode'), /固定使用本机 pi/);
 });
 
 test('persistDefaultTaskAgentId: 就地改值并保留注释/其他键，重启重载可见', async () => {
@@ -742,7 +741,7 @@ test('PUT /api/tasks/default-agent: 校验 agent、调用持久化回调、内�
   try {
     const got = await app.inject({ method: 'GET', url: '/api/tasks/default-agent' });
     assert.equal(got.statusCode, 200);
-    assert.equal(got.json().defaultAgentId, 'opencode');
+    assert.equal(got.json().defaultAgentId, 'pi');
 
     const ok = await app.inject({
       method: 'PUT',
@@ -799,7 +798,7 @@ test('PUT /api/tasks/default-agent: 持久化抛错时回滚内存值（不成�
     assert.equal(res.statusCode, 500);
     assert.match(res.json().error, /disk full/);
     // 内存值回滚为原值
-    assert.equal(svc.getDefaultAgentId(), 'opencode');
+    assert.equal(svc.getDefaultAgentId(), 'pi');
   } finally {
     await app.close().catch(() => {});
   }
@@ -844,6 +843,42 @@ test('PATCH /api/tasks/:id/agent: 注入 agent 校验后，不存在的 agent 40
     });
     assert.equal(ok.statusCode, 200);
     assert.equal(ok.json().task.agentId, 'pi');
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
+test('PATCH 默认任务 agent 一律 400；普通用户不能新建本机任务', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  registerTaskApi(app, svc, () => true, {
+    isAdmin: (req) => req.headers['x-role'] === 'admin',
+    sessionUser: () => ({ username: 'alice' }),
+  });
+  await app.ready();
+  try {
+    const adminPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/tasks/default/agent',
+      headers: { 'x-role': 'admin' },
+      payload: { channel: 'web', userId: 'alice', agentId: 'opencode', ownerUsername: 'alice' },
+    });
+    assert.equal(adminPatch.statusCode, 400);
+    assert.match(adminPatch.json().error, /本机 pi/);
+
+    const userPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/tasks/default/agent',
+      payload: { channel: 'web', userId: 'alice', agentId: 'opencode', ownerUsername: 'alice' },
+    });
+    assert.equal(userPatch.statusCode, 400);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'web', userId: 'alice', name: '本机任务', agentId: 'pi', ownerUsername: 'alice' },
+    });
+    assert.equal(created.statusCode, 403);
   } finally {
     await app.close().catch(() => {});
   }

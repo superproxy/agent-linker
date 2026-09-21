@@ -69,7 +69,7 @@ export function buildAgentSessionKey(params: {
 /**
  * 解析路由。cfg 结构（openclaw 兼容）：
  *   { channels: { <channel>: { agentId?, session?: { dmScope?, groupScope? } } }, session?: { dmScope?, groupScope? } }
- * agentId 缺省用传入的 defaultAgentId；仍缺省则 'opencode'。
+ * agentId 缺省用传入的 defaultAgentId；仍缺省则 'pi'。
  */
 export function resolveAgentRoute(params: {
   cfg?: Record<string, unknown>;
@@ -90,7 +90,7 @@ export function resolveAgentRoute(params: {
   const agentId =
     normalizeAgentId(section?.agentId ?? '') ||
     normalizeAgentId(params.defaultAgentId ?? '') ||
-    'opencode';
+    'pi';
   const dmScope = params.dmScope ?? section?.session?.dmScope ?? (cfg?.session as { dmScope?: string } | undefined)?.dmScope ?? 'per-account-channel-peer';
   const groupScope = params.groupScope ?? section?.session?.groupScope ?? (cfg?.session as { groupScope?: string } | undefined)?.groupScope ?? 'per-group';
   const peer = params.peer?.id ? { kind: params.peer.kind, id: params.peer.id } : null;

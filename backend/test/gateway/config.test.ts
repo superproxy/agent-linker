@@ -15,6 +15,7 @@ import {
   readGatewayTokenFile,
   persistEnsureWeixinAccount,
   persistRemoveWeixinAccount,
+  persistAgentEnabled,
 } from '../../src/gateway/config.js';
 
 function tmpRoot(): string {
@@ -301,4 +302,17 @@ test('persistEnsureWeixinAccount：写入 accounts 并切 external；remove 去�
   persistEnsureWeixinAccount(file, 'bob');
   assert.deepEqual(migrateConfig(parse(readFileSync(file, 'utf8'))).weixin.accounts, ['alice', 'bob']);
   assert.deepEqual(persistRemoveWeixinAccount(file, 'alice'), ['bob']);
+});
+
+test('persistAgentEnabled：写入 agents[].enabled，缺列表时整表落下', () => {
+  const dir = tmpRoot();
+  const file = join(dir, 'config.yaml');
+  writeFileSync(file, 'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n');
+  const defs = defaultAgentDefinitions();
+  persistAgentEnabled(file, 'pi', false, defs);
+  const cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
+  assert.equal(cfg.gateway.agents.find((a) => a.id === 'pi')?.enabled, false);
+  assert.ok(cfg.gateway.agents.some((a) => a.id === 'opencode' && a.enabled !== false));
+  persistAgentEnabled(file, 'pi', true, cfg.gateway.agents);
+  assert.equal(migrateConfig(parse(readFileSync(file, 'utf8'))).gateway.agents.find((a) => a.id === 'pi')?.enabled, true);
 });

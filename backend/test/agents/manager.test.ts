@@ -110,3 +110,16 @@ test('addAgent：definition.permissionPolicy 透传到 adapter（策略定义层
   assert.equal((plain as AcpWrapper).permissionPolicy, undefined);
   await m.dispose();
 });
+
+test('start：definition.enabled=false 启动即停用', async () => {
+  const m = freshManager([
+    { id: 'opencode', type: 'opencode', enabled: true },
+    { id: 'pi', type: 'pi', enabled: false },
+  ]);
+  await m.start();
+  assert.equal(m.listAgentDetails().find((d) => d.id === 'opencode')?.enabled, true);
+  assert.equal(m.listAgentDetails().find((d) => d.id === 'pi')?.enabled, false);
+  assert.equal(m.resolve('agent:pi'), undefined);
+  assert.ok(m.resolve('agent:opencode'));
+  await m.dispose();
+});

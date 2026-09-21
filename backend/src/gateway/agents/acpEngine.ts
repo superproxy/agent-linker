@@ -6,6 +6,7 @@ import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntime
 import type { AgentDefinition, AgentDescriptor, PermissionPolicySpec } from '@linkagent/shared';
 import { ACP_AGENT_KINDS } from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
+import { collectModelCandidates } from '../modelcandidates.js';
 
 export type AcpAgentKind = (typeof ACP_AGENT_KINDS)[number];
 
@@ -114,7 +115,7 @@ export function installGuideFor(kind: AcpAgentKind, platform = process.platform)
     case 'pi':
       return npmGlobal(
         'pi-acp',
-        'ACP 桥接包；同时需要本机已装 pi CLI（pi-coding-agent）。安装后启动命令：npx -y pi-acp',
+        '只装 ACP 桥接；模型清单由本机 pi CLI 自己维护（~/.pi/agent/models.json），网关不写死厂商模型。同时需要已装 pi-coding-agent。启动命令：npx -y pi-acp',
       );
     case 'workbuddy':
       return {
@@ -353,15 +354,24 @@ export class AcpEngine {
       }
 
       if (opts.model) {
-        try {
-          await runtime.setConfigOption({ handle, key: 'model', value: opts.model });
-        } catch (err) {
-          if (persistent && !resetFirst && isSessionRecoveryRequiredError(err)) return attempt(true);
-          const detail = err instanceof Error ? err.message : String(err);
-          throw new Error(
-            `设置会话模型“${opts.model}”失败（请确认该 agent 可用模型，或调整会话模型）：${detail}`,
-            { cause: err },
-          );
+        const knownPi = this.agentName === 'pi' ? collectModelCandidates('pi') : [];
+        const skipUnregisteredPi = this.agentName === 'pi' && (knownPi.length === 0 || !knownPi.includes(opts.model));
+        if (skipUnregisteredPi) {
+          opts.onEvent?.({
+            kind: 'text',
+            text: `⚠️ 未应用会话模型 ${opts.model}（不在本机 pi 已注册清单中）。模型由 pi/ACP 自己安装维护，请清空网关 agents[].model 或改成 models.json 里已有的 providerId/modelId。`,
+          });
+        } else {
+          try {
+            await runtime.setConfigOption({ handle, key: 'model', value: opts.model });
+          } catch (err) {
+            if (persistent && !resetFirst && isSessionRecoveryRequiredError(err)) return attempt(true);
+            const detail = err instanceof Error ? err.message : String(err);
+            throw new Error(
+              `设置会话模型“${opts.model}”失败（请确认该 agent 可用模型，或调整会话模型）：${detail}`,
+              { cause: err },
+            );
+          }
         }
       }
 

@@ -71,6 +71,11 @@ export const TASK_COMMAND_PREFIX = '/task';
 export const TASK_KEY_PREFIX = 'k_';
 export const DEFAULT_TASK_ID = 'default';
 export const DEFAULT_TASK_NAME = '默认';
-export const DEFAULT_AGENT_ID = 'opencode';
+/** 内建默认任务固定绑定的本机 agent（普通用户不可改） */
+export const DEFAULT_AGENT_ID = 'pi';
+
+export function isDefaultTaskId(id: string): boolean {
+  return id === DEFAULT_TASK_ID;
+}
 /** 命令里可识别的 agent 别名（new 的第二个可选参数）：全部支持的 ACP agent 类型 */
 export const KNOWN_AGENT_IDS = ACP_AGENT_KINDS;

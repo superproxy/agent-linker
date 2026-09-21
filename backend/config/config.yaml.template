@@ -35,8 +35,8 @@ gateway:
       type: pi
       displayName: Pi
       description: 本地 pi（pi-coding-agent，经 pi-acp ACP 桥接），全权限
-      # model 必须是 ~/.pi/agent/models.json 已有的 providerId/modelId；省略则用 pi 自身默认
-      # model: providerId/modelId
+      # 不要写死会话 model（尤其不要写 volcengine/doubao 等厂商 id）。
+      # 模型清单由本机 pi 自己维护（~/.pi/agent/models.json）；省略 model 则用 pi 默认。
       permissionMode: approve-all
     - id: workbuddy
       type: workbuddy
@@ -70,12 +70,12 @@ gateway:
       agentId: pi # 个人微信默认对话 agent（对齐 weixin-bot 模式的 weixin.model）
 
   # ── 任务公共能力（多渠道共享）────────────────────────────
-  # tasks.defaultAgentId：每个用户首次使用时默认任务绑定的 agent（可经 /task new 切换）
+  # tasks.defaultAgentId：任务全空时的路由兜底（内建默认任务固定本机 pi，不受此项改写）
   # tasks.workspaceDir：任务工作空间根目录（缺省 .runtime-state/tasks-workspace）。
   #   配置后每个任务默认拥有独立工作目录 <root>/<userId>/<taskId>，任务间文件系统隔离；
   #   显式 /task cwd 设置的目录优先。
   tasks:
-    defaultAgentId: trace-cli
+    defaultAgentId: pi
 
 # ── weixin 个人微信进程 ───────────────────────────────────
 # 进程管理器（pm start all）按 enabled 决定是否拉起；gatewayUrl/gatewayToken

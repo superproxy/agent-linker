@@ -53,3 +53,4 @@ pnpm --filter @linkagent/web build    # 前端构建
 | [`docs/architecture.md`](docs/architecture.md) | monorepo 结构、后端分层、鉴权与凭据模型 |
 | [`docs/faq.md`](docs/faq.md) | 常用命令、测试方法、TS/ESM 坑、错误与密钥处理、已知遗留 |
 | [`docs/design.md`](docs/design.md) / [`docs/deployment.md`](docs/deployment.md) | 设计记录 / 部署说明 |
+| [`docs/pi.md`](docs/pi.md) | Pi 模型模板、云机自装、`pi-sandbox`（无 Docker）与缺 `rg`/`socat` 排障 |

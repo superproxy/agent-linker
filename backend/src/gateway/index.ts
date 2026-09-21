@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadSharedConfig, persistDefaultTaskAgentId, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth } from './config.js';
+import { loadSharedConfig, persistDefaultTaskAgentId, persistAgentEnabled, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
@@ -785,11 +785,22 @@ export async function buildServer(options?: {
       return reply.code(400).send(openaiError('请求体需含 model 或 enabled', 'invalid_request_error', 'invalid_request'));
     }
     try {
+      const prevEnabled = manager.listAgentDetails().find((a) => a.id === request.params.id)?.enabled;
       const agent = manager.updateAgent(request.params.id, patch);
+      if (patch.enabled !== undefined) {
+        try {
+          const agents = persistAgentEnabled(configPath, request.params.id, patch.enabled, manager.snapshotDefinitions());
+          config.gateway = { ...config.gateway, agents };
+        } catch (err) {
+          if (prevEnabled !== undefined) manager.updateAgent(request.params.id, { enabled: prevEnabled });
+          throw err;
+        }
+      }
       return { agent };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return reply.code(404).send(openaiError(message, 'invalid_request_error', 'agent_not_found'));
+      const code = /未知 agent/.test(message) ? 404 : 500;
+      return reply.code(code).send(openaiError(message, 'invalid_request_error', code === 404 ? 'agent_not_found' : 'persist_failed'));
     }
   });
 
