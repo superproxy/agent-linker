@@ -175,19 +175,23 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const account = loadLatestWeixinAccount(stateDir, preferredAccountId);
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
+  const ownerId = preferredAccountId?.trim() || account.id;
+  if (account.id !== ownerId) {
+    log(`[bot] 未找到 ${ownerId}.json，暂用 ${account.id} 的登录态；任务归属按账号槽 ${ownerId}`);
+  }
 
   // 用户级 token：内嵌模式用网关注入的签发器；external 独立进程用静态 token 经引导接口换取（落盘缓存）
   const tokenProvider: UserTokenProvider | undefined =
     options.userTokenProvider ??
     (gatewayToken
-      ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: account.id, log })
+      ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: ownerId, log })
       : undefined);
 
   // bot 路由层：选中任务缓存（网关 /api/tasks 为单一事实源），按用户携带用户级 token
   const router = new TaskRouter({
     gatewayUrl,
     channel: 'weixin',
-    ownerUsername: account.id,
+    ownerUsername: ownerId,
     ...(gatewayToken ? { gatewayToken } : {}),
     ...(tokenProvider
       ? { resolveToken: (userId: string, force?: boolean) => tokenProvider.resolve('weixin', userId, force) }
@@ -398,7 +402,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   log(`[bot] 网关 ${gatewayUrl}  模型 ${model}`);
   const restored = loadContextTokens(stateDir, account.id);
   if (restored > 0) log(`[bot] 恢复 ${restored} 个用户 context_token`);
-  if (!existsSync(syncBufPath)) log('[bot] 无历史游标，全新开始收消息');
+  if (!existsSync(syncBufPathOf(account.id))) log('[bot] 无历史游标，全新开始收消息');
   log(`[bot] 微信长轮询启动（${account.baseUrl}）`);
 
   const controller = new AbortController();
