@@ -247,8 +247,8 @@ export function migrateConfig(raw: unknown): SharedConfig {
  * workbuddy 依赖本机已装 codebuddy（CodeBuddy Code CLI），trace-cli 依赖本机已装 traecli（TraeCode CLI），
  * cursor 依赖本机已装 Cursor CLI（`agent acp`）。
  * 对应 CLI 未安装时 gateway 仍正常启动（probe 仅标记 unhealthy），实际调用会报 ACP_BACKEND_UNAVAILABLE。
- * pi 默认会话模型绑定本机 ~/.pi/agent/models.json 已注册的 volcengine ark（deepseek-v4-flash）：
- * 其它机器若无同名模型，可自建 config 的 agents 配置改 model，或删掉 model 字段让 pi 用其自身默认。
+ * pi 默认不绑会话模型，沿用本机 ~/.pi/agent/settings.json（defaultProvider / defaultModel）。
+ * 若要覆盖，在 config 的 agents[].model 写 ~/.pi/agent/models.json 里真实存在的 providerId/modelId。
  * 其余 ACP 类型（codex/claude/gemini/…，见 ACP_AGENT_KINDS）不在默认列表：
  * 可在管理后台「支持 ACP 的 Agent 目录」一键添加，或自建 config 的 agents 配置。
  */
@@ -265,7 +265,6 @@ export function defaultAgentDefinitions(): AgentDefinition[] {
       type: 'pi',
       displayName: 'Pi',
       description: '本地 pi（pi-coding-agent，经 pi-acp ACP 桥接），默认只读问答',
-      model: 'volcengine/deepseek-v4-flash-ga-260731',
     },
     {
       id: 'workbuddy',

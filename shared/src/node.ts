@@ -138,7 +138,7 @@ export type GatewayToNode =
       type: 'turn';
       requestId: string;
       agentId: string;
-      /** 会话模型（经 ACP set_config_option 下发，如 pi 必需） */
+      /** 会话模型（经 ACP set_config_option 下发） */
       model?: string;
       /** 会话工作目录（任务级 cwd，落在节点机） */
       cwd?: string;

@@ -70,12 +70,12 @@ agents:
     # permissionMode: approve-reads   # approve-all | approve-reads | deny-all
     # command: ["opencode", "acp", "--port", "0"]
     # env: { KEY: value }
-    # model: providerId/modelId # 会话默认模型（pi 必需，见下）
+    # model: providerId/modelId # 会话默认模型（见下；pi 须写本机已注册的 providerId/modelId）
 
   - id: pi
     type: pi
     displayName: Pi
-    model: volcengine/deepseek-v4-flash-ga-260731
+    # model: providerId/modelId  # 须为本机 ~/.pi/agent/models.json 已有项；省略则用 pi 自身默认
 
   - id: workbuddy
     type: workbuddy
@@ -105,9 +105,9 @@ plugins:
 ### 会话模型（model 字段）
 
 - 建会话后经 ACP `set_config_option('model')` 下发给 agent；
-- **pi 必需**：pi 自身默认 provider 可能没有可用凭据，需显式指到本机 `~/.pi/agent/models.json` 已注册的模型；
+- **pi**：未配置 `model` 时沿用 `~/.pi/agent/settings.json` 的 defaultProvider / defaultModel；若覆盖，必须写本机 `~/.pi/agent/models.json` 已注册的 `providerId/modelId`（写错 provider 会导致会话无法正确回答）；
 - opencode / workbuddy / trace-cli 配置了也会生效，未配置则沿用 agent 自身默认；
-- 模型写法统一为 `providerId/modelId`（如 `volcengine/deepseek-v4-flash-ga-260731`）。
+- 模型写法统一为 `providerId/modelId`（须与 `~/.pi/agent/models.json` 的 `providers.<id>` 一致）。
 
 ## OpenAI 兼容 API
 

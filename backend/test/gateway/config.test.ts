@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
-import { migrateConfig, defaultSharedConfig } from '@linkagent/shared';
+import { migrateConfig, defaultSharedConfig, defaultAgentDefinitions } from '@linkagent/shared';
 import {
   loadSharedConfig,
   resolveGatewayAuth,
@@ -94,6 +94,12 @@ test('defaultSharedConfig：内置默认 agent 且 local 鉴权', () => {
     cfg.gateway.agents.map((a) => a.id),
     ['opencode', 'pi', 'workbuddy', 'trace-cli', 'cursor'],
   );
+});
+
+test('defaultAgentDefinitions：pi 不绑死外机模型，沿用本机 pi 默认', () => {
+  const pi = defaultAgentDefinitions().find((a) => a.id === 'pi');
+  assert.ok(pi);
+  assert.equal(pi.model, undefined);
 });
 
 // ── loadSharedConfig：文件 / 缺省回退 ───────────────────────────────────────

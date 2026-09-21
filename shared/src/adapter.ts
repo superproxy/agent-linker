@@ -121,9 +121,8 @@ export interface AgentDefinition {
   command?: string[];
   /**
    * 会话默认模型：建会话后经 ACP session/set_config_option（configId "model"）下发。
-   * pi（pi-acp）必需——pi 自身默认 provider 可能无可用凭据，需显式指到本机
-   * ~/.pi/agent/models.json 已注册的模型（如 "volcengine/deepseek-v4-flash-ga-260731"）；
-   * 未设置则不调用，沿用 agent 自身默认。
+   * 取值必须是该 agent 已注册的模型（pi 为 ~/.pi/agent/models.json 的 providerId/modelId）。
+   * 未设置则不调用，沿用 agent 自身默认（pi 读 ~/.pi/agent/settings.json）。
    */
   model?: string;
 }

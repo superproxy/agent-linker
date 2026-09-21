@@ -839,7 +839,7 @@
       return;
     }
     els.activeAgentId.textContent = a.id;
-    els.activeModelValue.textContent = a.model || 'agent 默认';
+    els.activeModelValue.textContent = a.model || '—';
     els.composerHint.textContent = state.taskMode
       ? (a.enabled ? '任务路由：消息发往持久任务会话（侧栏任务或 URL key/三元素，有记忆）' : '该 Agent 已停用，请选择其他 Agent')
       : (a.enabled ? 'oneshot 无状态会话：消息发往所选 Agent（不带 channel/userId）' : '该 Agent 已停用，请选择其他 Agent');

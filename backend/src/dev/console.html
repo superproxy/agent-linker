@@ -778,7 +778,7 @@
     }
     els.activeType.textContent = a.enabled ? '当前会话' : '';
     els.activeAgentId.textContent = a.id;
-    els.activeModelValue.textContent = a.model || 'agent 默认';
+    els.activeModelValue.textContent = a.model || '—';
     els.composerHint.textContent = '全局模式：消息发往所选 Agent（不带 channel/userId）；oneshot 会话';
     els.sendBtn.disabled = false;
   }

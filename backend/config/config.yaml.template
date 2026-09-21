@@ -35,7 +35,8 @@ gateway:
       type: pi
       displayName: Pi
       description: 本地 pi（pi-coding-agent，经 pi-acp ACP 桥接），全权限
-      model: volcengine/deepseek-v4-flash-ga-260731
+      # model 必须是 ~/.pi/agent/models.json 已有的 providerId/modelId；省略则用 pi 自身默认
+      # model: providerId/modelId
       permissionMode: approve-all
     - id: workbuddy
       type: workbuddy

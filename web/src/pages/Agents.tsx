@@ -145,7 +145,7 @@ export function AgentsPage(props: {
       dataIndex: 'model',
       key: 'model',
       responsive: ['lg'],
-      render: (v?: string) => (v ? <Text code style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">agent 默认</Text>),
+      render: (v?: string) => (v ? <Text code style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">—</Text>),
     },
     {
       title: '状态',
