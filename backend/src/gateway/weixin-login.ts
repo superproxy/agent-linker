@@ -15,8 +15,10 @@ import { getLayout } from '../install/layout.js';
 import { notifyBotStop } from '../channels/ilink-client.js';
 import {
   assertWeixinUsername,
+  bindingHolderForBot,
   claimWeixinBinding,
   listWeixinBindings,
+  normalizeBotAccountId,
   readWeixinBinding,
   removeWeixinBinding,
   type ClaimBindingResult,
@@ -252,6 +254,43 @@ export class WeixinLoginService {
     if (plugins.length === 0) return false;
     const newest = plugins.reduce((best, a) => (a.savedAt >= best.savedAt ? a : best));
     return this.claimBinding(user, newest.id) === 'ok';
+  }
+
+  /**
+   * 同一微信换绑到新登录用户失败时的说明（一机一微信一登录账号）。
+   * 有明确占用者或本机文件全被占用时返回文案；否则 undefined，由通用提示兜底。
+   */
+  rebindBlockedMessage(forUser: string, pluginAccountId?: string): string | undefined {
+    const user = forUser.trim();
+    if (!user) return undefined;
+    if (pluginAccountId) {
+      const holder = bindingHolderForBot(this.stateDir, pluginAccountId, user);
+      if (holder) {
+        return `这个微信机器人已绑在登录用户「${holder}」上。一个微信只能对应一个登录账号，请「${holder}」先在微信页解绑或清空登录态后，您再扫码。当前渠道是 weixin-bot。`;
+      }
+      const bot = normalizeBotAccountId(pluginAccountId);
+      if (bot.endsWith('-im-bot') && !this.readAccountFiles().some((a) => a.id === bot)) {
+        return `微信侧已连接过该机器人，但本机没有 ${bot}.json，无法绑到新账号。请原绑定用户解绑并清空，或在手机微信退出该机器人后重新扫码以生成登录文件。当前渠道是 weixin-bot。`;
+      }
+    }
+    const taken = new Set(
+      listWeixinBindings(this.stateDir)
+        .filter((b) => b.username !== user)
+        .map((b) => b.botAccountId),
+    );
+    const plugins = this.readAccountFiles().filter((a) => a.id.endsWith('-im-bot'));
+    if (plugins.length > 0 && plugins.every((a) => taken.has(a.id))) {
+      const holders = [
+        ...new Set(
+          listWeixinBindings(this.stateDir)
+            .filter((b) => taken.has(b.botAccountId))
+            .map((b) => b.username),
+        ),
+      ];
+      const who = holders.length > 0 ? holders.join('、') : '其他登录用户';
+      return `本机机器人登录文件均已被占用（${who}）。要把同一微信换到新登录用户，请先让上述账号解绑。当前渠道是 weixin-bot。`;
+    }
+    return undefined;
   }
 
   /**
@@ -515,10 +554,18 @@ export function registerWeixinApi(
       let hasLocalToken = accountId ? service.hasToken(accountId) : false;
       if (!hasLocalToken && accountId && isWeixinBotAlreadyBoundMessage(raw.message)) {
         // 已连接过：插件常不再写盘，但会带回 ilink_bot_id；优先绑到该机器人文件
-        if (raw.accountId && service.claimBinding(accountId, raw.accountId) === 'ok') {
-          hasLocalToken = true;
-        } else {
-          hasLocalToken = service.bindNewestUnclaimed(accountId);
+        if (raw.accountId) {
+          const claim = service.claimBinding(accountId, raw.accountId);
+          if (claim === 'ok') hasLocalToken = true;
+          else if (claim === 'taken') {
+            const message = service.rebindBlockedMessage(accountId, raw.accountId);
+            return { connected: false, accountId, message: message ?? '这个微信已经绑在其他登录用户上。' };
+          }
+        }
+        if (!hasLocalToken) hasLocalToken = service.bindNewestUnclaimed(accountId);
+        if (!hasLocalToken) {
+          const message = service.rebindBlockedMessage(accountId, raw.accountId);
+          if (message) return { connected: false, accountId, message };
         }
       }
       const wait = normalizeQrWait(raw, { hasLocalToken });

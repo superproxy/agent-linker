@@ -40,6 +40,7 @@ function buildStub() {
     hasToken: (id: string) => id === 'acc-1' || id === 'alice',
     bindNewestUnclaimed: () => false,
     claimBinding: () => 'ok' as const,
+    rebindBlockedMessage: () => undefined,
   } as unknown as WeixinLoginService;
   return { service, calls };
 }
@@ -146,6 +147,41 @@ test('GET /api/weixin/qr/status binded_redirect 带回 accountId → claimBindin
     assert.equal(body.accountId, 'admin');
     assert.deepEqual(bound, ['admin']);
     assert.equal(svc.hasToken('admin'), true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /api/weixin/qr/status 同一微信已被 alice 占用 → bob 扫码提示先解绑', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-taken-'));
+  const dir = join(stateDir, 'openclaw-weixin', 'accounts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'bb2222222222-im-bot.json'),
+    JSON.stringify({ token: 'tok-y', userId: 'wx', savedAt: '2026-09-22T00:00:00.000Z' }),
+  );
+  claimWeixinBinding(stateDir, 'alice', 'bb2222222222-im-bot');
+  const svc = new WeixinLoginService({ stateDir });
+  (svc as { waitQr: typeof svc.waitQr }).waitQr = async () => ({
+    connected: false,
+    message: '已连接过此 OpenClaw，无需重复连接。',
+    accountId: 'bb2222222222@im.bot',
+  });
+  const app = Fastify();
+  registerWeixinApi(app, svc, () => true, {
+    sessionUser: () => ({ username: 'bob' }),
+    isAdmin: () => false,
+  });
+  try {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=bob',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { connected: boolean; message?: string };
+    assert.equal(body.connected, false);
+    assert.match(body.message ?? '', /alice/);
+    assert.match(body.message ?? '', /解绑/);
   } finally {
     await app.close();
   }

@@ -74,6 +74,14 @@ export function claimWeixinBinding(stateDir: string, username: string, pluginAcc
   return 'ok';
 }
 
+/** 该机器人是否已被其它登录用户占用；返回占用者的用户名 */
+export function bindingHolderForBot(stateDir: string, pluginAccountId: string, exceptUsername?: string): string | undefined {
+  const bot = normalizeBotAccountId(pluginAccountId);
+  const except = exceptUsername?.trim();
+  const hit = listWeixinBindings(stateDir).find((b) => b.botAccountId === bot && b.username !== except);
+  return hit?.username;
+}
+
 export function removeWeixinBinding(stateDir: string, username: string): WeixinUserBinding | null {
   const id = assertWeixinUsername(username);
   const prev = readWeixinBinding(stateDir, id);
