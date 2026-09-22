@@ -85,19 +85,23 @@ function savedAtMs(acc: WeixinAccount): number {
 }
 
 /**
- * 扫码后热更新用：优先 preferredId 对应文件，否则取 savedAt 最新的一份。
- * 无 LINKAGENT_ACCOUNT_ID 的遗留 `weixin` 进程也能捡到刚扫上的 token。
+ * 扫码后热更新用：指定了账号槽就必须读到该文件，找不到直接报错，不借用其它登录态。
+ * 未指定账号槽时才取 savedAt 最新的一份（无 LINKAGENT_ACCOUNT_ID 的遗留进程）。
  */
 export function loadLatestWeixinAccount(accountsRootDir: string, preferredId?: string): WeixinAccount {
   const all = listWeixinAccounts(accountsRootDir);
-  if (all.length === 0) {
-    const dir = accountsDirOf(accountsRootDir);
-    throw new Error(`未找到微信登录态目录 ${dir} 或其中没有可用账号；${getLayout().loginHint}`);
-  }
   const want = preferredId?.trim();
   if (want) {
     const hit = all.find((a) => a.id === want);
-    if (hit) return hit;
+    if (!hit) {
+      const dir = accountsDirOf(accountsRootDir);
+      throw new Error(`未找到 ${want}.json（${dir}）。微信进程不会创建或借用其它登录态。`);
+    }
+    return hit;
+  }
+  if (all.length === 0) {
+    const dir = accountsDirOf(accountsRootDir);
+    throw new Error(`未找到微信登录态目录 ${dir} 或其中没有可用账号；${getLayout().loginHint}`);
   }
   return all.reduce((best, a) => (savedAtMs(a) >= savedAtMs(best) ? a : best));
 }
@@ -170,6 +174,13 @@ async function postJson(baseUrl: string, endpoint: string, token: string, body: 
   const rawText = await res.text();
   if (!res.ok) throw new Error(`${endpoint} HTTP ${res.status}: ${rawText.slice(0, 300)}`);
   return JSON.parse(rawText) as PostResult;
+}
+
+/** 告诉微信这个 bot 客户端已停止。失败不阻断本地清登录态。 */
+export async function notifyBotStop(account: { baseUrl?: string; token: string }): Promise<void> {
+  const token = account.token.trim();
+  if (!token) return;
+  await postJson(account.baseUrl || ILINK_DEFAULT_BASE_URL, 'ilink/bot/msg/notifystop', token, { base_info: buildBaseInfo() }, 8_000);
 }
 
 /** ilink 登录态失效：继续用旧 token 轮询只会打出 session timeout */

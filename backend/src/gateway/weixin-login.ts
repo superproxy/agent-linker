@@ -12,7 +12,7 @@ import { readdirSync, readFileSync, existsSync, rmSync, copyFileSync } from 'nod
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getLayout } from '../install/layout.js';
-import { loadWeixinAccount } from '../channels/ilink-client.js';
+import { loadWeixinAccount, notifyBotStop } from '../channels/ilink-client.js';
 
 interface LoginGatewayHandle {
   loginWithQrStart(params: { accountId?: string; force?: boolean; verbose?: boolean }): Promise<{
@@ -212,18 +212,81 @@ export class WeixinLoginService {
   }
 
   /**
-   * 取消绑定：删除该账号槽的登录态及附属文件（sync / context-tokens / user-tokens）。
-   * 不存在的文件视为已解绑（幂等）。
+   * 微信不再下发新 token 时，沿用插件已落盘的唯一一份 *-im-bot 登录态。
+   * 进程读的是 <登录用户名>.json；插件文件名对不上就会被误判成「本机没有 token」。
+   * 多份机器人登录态或已有其他用户槽时不猜测归属。
    */
-  unbind(accountId: string): { accountId: string; removed: string[] } {
+  adoptSolePluginToken(slotId: string): boolean {
+    const slot = slotId.trim();
+    if (!slot || !/^[A-Za-z0-9._-]+$/.test(slot)) return false;
+    if (this.hasToken(slot)) return true;
+    const plugins = this.status().accounts.filter((a) => a.id !== slot && a.id.endsWith('-im-bot'));
+    if (plugins.length !== 1) return false;
+    const only = plugins[0];
+    if (!only) return false;
+    this.adoptPluginAccount(slot, only.id);
+    return this.hasToken(slot);
+  }
+
+  /**
+   * 取消绑定：删除该账号槽的登录态。
+   * 若没有其它用户的账号文件，一并清掉无人认领的 *-im-bot 登录态（否则页面显示未绑定，文件却还在，扫码又说已绑定）。
+   * 其它用户槽还在时，只删和本槽 token 相同的插件文件。
+   */
+  unbind(accountId: string): { accountId: string; removed: string[]; sessions: { baseUrl: string; token: string }[] } {
     const id = this.assertAccountId(accountId);
-    const removed = this.removeAccountFiles(id, [
+    const accounts = this.readAccountFiles();
+    const slot = accounts.find((a) => a.id === id);
+    const otherSlots = accounts.filter((a) => a.id !== id && !a.id.endsWith('-im-bot'));
+    const names = new Set([
       `${id}.json`,
       `${id}.sync.json`,
       `${id}.context-tokens.json`,
       `${id}.user-tokens.json`,
     ]);
-    return { accountId: id, removed };
+    const sessions: { baseUrl: string; token: string }[] = [];
+    if (slot?.token) sessions.push({ baseUrl: slot.baseUrl, token: slot.token });
+    const dropPlugin = (token: string) =>
+      otherSlots.length === 0 || (slot?.token !== undefined && token === slot.token && !otherSlots.some((a) => a.token === token));
+    for (const plugin of accounts) {
+      if (!plugin.id.endsWith('-im-bot') || plugin.id === id) continue;
+      if (!dropPlugin(plugin.token)) continue;
+      names.add(`${plugin.id}.json`);
+      names.add(`${plugin.id}.sync.json`);
+      names.add(`${plugin.id}.context-tokens.json`);
+      names.add(`${plugin.id}.user-tokens.json`);
+      if (!sessions.some((s) => s.token === plugin.token)) {
+        sessions.push({ baseUrl: plugin.baseUrl, token: plugin.token });
+      }
+    }
+    if (otherSlots.length === 0) {
+      const dir = this.accountsDir();
+      if (existsSync(dir)) {
+        for (const f of readdirSync(dir)) {
+          if (/^[A-Za-z0-9._-]+-im-bot\.(sync|context-tokens|user-tokens)\.json$/.test(f)) names.add(f);
+        }
+      }
+    }
+    return { accountId: id, removed: this.removeAccountFiles(id, [...names]), sessions };
+  }
+
+  private readAccountFiles(): { id: string; token: string; baseUrl: string }[] {
+    const dir = this.accountsDir();
+    if (!existsSync(dir)) return [];
+    const out: { id: string; token: string; baseUrl: string }[] = [];
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.json') || f === 'accounts.json' || f.includes('context-tokens') || f.includes('user-tokens') || f.endsWith('.sync.json')) {
+        continue;
+      }
+      try {
+        const raw = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { token?: string; baseUrl?: string };
+        if (typeof raw.token !== 'string' || !raw.token) continue;
+        out.push({ id: f.replace(/\.json$/, ''), token: raw.token, baseUrl: raw.baseUrl ?? '' });
+      } catch {
+        /* 跳过坏文件 */
+      }
+    }
+    return out;
   }
 
   /**
@@ -451,7 +514,11 @@ export function registerWeixinApi(
     try {
       const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 180_000);
       const raw = await service.waitQr(q.sessionKey, timeoutMs, accountId);
-      const wait = normalizeQrWait(raw, { hasLocalToken: accountId ? service.hasToken(accountId) : false });
+      let hasLocalToken = accountId ? service.hasToken(accountId) : false;
+      if (!hasLocalToken && accountId && isWeixinBotAlreadyBoundMessage(raw.message)) {
+        hasLocalToken = service.adoptSolePluginToken(accountId);
+      }
+      const wait = normalizeQrWait(raw, { hasLocalToken });
       if (wait.connected) {
         // 插件可能回自己的 *-im-bot id；进程/缓存/任务 key 必须以登录账号槽为准
         const boundId = accountId || wait.accountId;
@@ -524,6 +591,13 @@ export function registerWeixinApi(
     if (!accountId) return reply.code(400).send({ error: '账号槽必填' });
     try {
       const result = service.unbind(accountId);
+      for (const session of result.sessions ?? []) {
+        try {
+          await notifyBotStop(session);
+        } catch (err) {
+          deps.log?.(`微信 notifyStop 失败（本地登录态已删除）：${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       try {
         await deps.onUnbound?.(accountId);
       } catch (err) {

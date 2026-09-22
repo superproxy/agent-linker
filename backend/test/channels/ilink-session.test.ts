@@ -30,4 +30,6 @@ test('loadLatestWeixinAccount：优先 preferredId，否则取 savedAt 最新', 
   assert.equal(loadLatestWeixinAccount(root).token, 'tok-new');
   assert.equal(loadLatestWeixinAccount(root).id, 'local');
   assert.equal(loadWeixinAccount(root, 'old').token, 'tok-old');
+  assert.throws(() => loadLatestWeixinAccount(root, 'yxz'), /未找到 yxz\.json/);
+  assert.throws(() => loadWeixinAccount(root, 'yxz'), /找不到 yxz\.json/);
 });

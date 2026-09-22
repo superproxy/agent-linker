@@ -29,8 +29,8 @@
 - **个人微信 / 企业微信**：两种实现形态——插件运行时（openclaw 插件）或网关内嵌/独立进程的 botAgent（`channels/weixin-bot.ts`、`wecom-bot.ts`）。
 - `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起）。
 - **多账号**：每个**登录用户**绑定自己的微信（账号槽 = 用户名，进程 `weixin:<username>`）。流程是：**注册/登录账号 → 扫码绑定 → 重启该用户微信进程**。扫码成功后写入 `weixin.accounts` 并将 `weixin.mode` 设为 `external`、打开 `weixin.enabled`，由进程管理器为该用户单独拉起 bot（pid/日志/登录态隔离）。`pnpm restart:all` 只拉起**已绑定**的 `weixin:<用户名>`，未绑定不会空跑默认 `weixin`。管理员在「本机 · 进程」可见全部实例；普通用户只在「微信登录」页看自己的绑定与进程状态。yaml 里仍可用 `weixin.accounts` 预置账号。
-- 扫码登录复用微信 **bot** 插件（`ilink_appid=bot`）拿二维码和 token；消息收发是 `weixin-bot` 直连 ilink，不走 OpenClaw 插件运行时。插件若返回「已连接过此 OpenClaw」，表示该机器人已绑定且不再下发 token：本机已有登录态则沿用并拉起进程，没有则需先在微信里断开再扫。
-- 支持扫码登录与**取消绑定**（删除该用户登录态、从 `weixin.accounts` 移除并停止 `weixin:<用户名>`）；绑定成功后**重启**对应用户的微信进程，吊销 `ct_`、清掉 bot 本地 token 缓存（含插件生成的 `*-im-bot.user-tokens.json`），并**重签该用户任务 key（`k_`）**。后台「任务 / Key」页展示的是 `k_`，换绑后应变新。
+- 扫码登录复用微信 **bot** 插件（`ilink_appid=bot`）拿二维码和 token；消息收发是 `weixin-bot` 直连 ilink，不走 OpenClaw 插件运行时。插件若返回「已连接过此 OpenClaw」，表示该机器人已绑定且不再下发 token。进程只读 `<登录用户名>.json`。文件不存在就启动失败，不会自行创建，也不会借用其它 `*-im-bot` 登录态。
+- 支持扫码登录与**取消绑定 / 清空登录态**（删除该用户登录态；没有其他用户账号文件时，连同残留的 `*-im-bot.json` 一起删除，并通知微信停止。从 `weixin.accounts` 移除并停止 `weixin:<用户名>`）。手机微信若仍显示已连接，需要在手机上退出该机器人后，新的扫码才会拿到 token。绑定成功后**重启**对应用户的微信进程，吊销 `ct_`、清掉 bot 本地 token 缓存（含插件生成的 `*-im-bot.user-tokens.json`），并**重签该用户任务 key（`k_`）**。后台「任务 / Key」页展示的是 `k_`，换绑后应变新。
 - **任务切换**：每个登录用户一份任务列表。微信里 `/task list|use|new|default` 由该用户的微信连接器解析并写入同一空间；后台「激活」写同一 `activeTaskId`，连接器短缓存后按新任务路由。不同联系人共用任务列表，对话上下文按联系人分开。
 
 ## 管理后台（web /ui）

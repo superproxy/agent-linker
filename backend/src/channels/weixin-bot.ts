@@ -34,6 +34,7 @@ import {
   getUpdates,
   isIlinkSessionExpired,
   loadLatestWeixinAccount,
+  loadWeixinAccount,
   sendText,
   type WeixinAccount,
   type WeixinInboundMessage,
@@ -171,14 +172,13 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const gatewayToken = options.gatewayToken ?? DEFAULT_GATEWAY_TOKEN;
   const model = options.model ?? DEFAULT_GATEWAY_MODEL;
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
-  const preferredAccountId = options.accountId ?? DEFAULT_ACCOUNT_ID;
-  const account = loadLatestWeixinAccount(stateDir, preferredAccountId);
+  const preferredAccountId = (options.accountId ?? DEFAULT_ACCOUNT_ID)?.trim();
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
-  const ownerId = preferredAccountId?.trim() || account.id;
-  if (account.id !== ownerId) {
-    log(`[bot] 未找到 ${ownerId}.json，暂用 ${account.id} 的登录态；任务归属按账号槽 ${ownerId}`);
-  }
+  const account = preferredAccountId
+    ? loadWeixinAccount(stateDir, preferredAccountId)
+    : loadLatestWeixinAccount(stateDir);
+  const ownerId = account.id;
 
   // 用户级 token：内嵌模式用网关注入的签发器；external 独立进程用静态 token 经引导接口换取（落盘缓存）
   const tokenProvider: UserTokenProvider | undefined =

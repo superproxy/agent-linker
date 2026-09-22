@@ -123,8 +123,9 @@ export function WeixinPage(props: {
     const slot = status?.bindAccountId;
     const ok = await confirmAsync({
       title: '取消绑定微信机器人？',
-      content: '将停止该账号的微信进程并删除本机登录态，之后需要重新扫码才能收发消息。任务空间不会删除。',
-      okText: '取消绑定',
+      content:
+        '会停掉该账号的微信进程，并删除本机登录态。若没有其他用户的账号文件，一并清掉残留的 *-im-bot 登录态，避免页面显示未绑定却扫码提示已绑定。任务空间不会删除。',
+      okText: status?.configured ? '取消绑定' : '清空登录态',
       okButtonProps: { danger: true },
     });
     if (!ok) return;
@@ -256,11 +257,9 @@ export function WeixinPage(props: {
                 重启渠道
               </Button>
             ) : null}
-            {status?.configured ? (
-              <Button danger loading={unbinding} disabled={scanning} onClick={() => void unbind()}>
-                取消绑定
-              </Button>
-            ) : null}
+            <Button danger loading={unbinding} disabled={scanning || !slot} onClick={() => void unbind()}>
+              {status?.configured ? '取消绑定' : '清空登录态'}
+            </Button>
           </Space>
 
           {msg ? <Alert style={{ marginTop: 14 }} type={msg.type} showIcon message={msg.text} /> : null}
