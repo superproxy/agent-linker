@@ -192,6 +192,26 @@ export function TasksPage(props: {
       ),
     [users],
   );
+  const hasDefault = flatTasks.some((t) => t.id === 'default');
+
+  const createDefault = () => {
+    const ownerUsername = props.username;
+    if (!ownerUsername) {
+      notify.info('请先登录后再创建默认任务。');
+      return;
+    }
+    void withBusy(
+      () =>
+        ops.createTask({
+          channel: 'web',
+          userId: ownerUsername,
+          name: '默认',
+          ownerUsername,
+          createDefault: true,
+        }),
+      '已创建默认任务',
+    );
+  };
 
   const taskRowKey = (t: FlatTask) => `${t.ownerUsername ?? ''}:${t.channel}:${t.userId}:${t.id}`;
 
@@ -342,6 +362,11 @@ export function TasksPage(props: {
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建任务
             </Button>
+            {!hasDefault ? (
+              <Button disabled={busy} onClick={createDefault}>
+                创建默认任务
+              </Button>
+            ) : null}
             <Button
               danger
               icon={<DeleteOutlined />}
@@ -352,7 +377,7 @@ export function TasksPage(props: {
             </Button>
           </Space>
           {flatTasks.length === 0 ? (
-            <EmptyHint text="还没有任务。点「新建任务」即可创建，微信连接器会使用同一份列表。" />
+            <EmptyHint text="还没有任务。可「创建默认任务」（本机 pi），或「新建任务」。微信里发送 /task new default 也会重建默认任务。" />
           ) : (
             <Table
               rowKey={taskRowKey}

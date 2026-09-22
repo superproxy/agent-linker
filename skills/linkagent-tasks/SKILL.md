@@ -46,7 +46,7 @@ Content-Type: application/json
 
 ## 约束
 
-1. 默认任务 `default` **可以删**；删光后列表为空，微信普通消息回落到全局兜底 agent。
+1. 默认任务 `default` **可以删**；删光后列表为空，微信普通消息回落到全局兜底 agent。要补回：`/task new default`（固定本机 `pi`，并成为激活任务）。
 2. 默认任务固定本机 `pi`，不能改 `agent`/`node`。
 3. 普通用户**不能**把新任务绑到本机 `local`；须用自己的远程 `nodeId`。管理员可以把任务绑到 `local`。
 4. `POST /api/tasks` 成功后新任务自动成为激活任务。

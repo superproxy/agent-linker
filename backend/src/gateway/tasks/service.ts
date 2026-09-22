@@ -117,24 +117,12 @@ export class TaskService {
       }
       return this.ensureKeys(existing);
     }
-    const workspace = this.taskWorkspaceDir(userId, DEFAULT_TASK_ID);
     const fresh: UserTasks = {
       channel,
       userId,
       ...(ownerUsername ? { ownerUsername } : {}),
       activeTaskId: DEFAULT_TASK_ID,
-      tasks: [
-        {
-          id: DEFAULT_TASK_ID,
-          key: newTaskKey(),
-          keyEnabled: true,
-          name: DEFAULT_TASK_NAME,
-          agentId: DEFAULT_AGENT_ID,
-          nodeId: LOCAL_NODE_ID,
-          ...(workspace ? { cwd: workspace } : {}),
-          createdAt: Date.now(),
-        },
-      ],
+      tasks: [this.buildDefaultTask(userId)],
     };
     this.store.write(fresh);
     return this.ensureKeys(fresh);
@@ -244,6 +232,35 @@ export class TaskService {
         token,
       }),
     );
+  }
+
+  /** 内建默认任务：id=default，固定本机 pi。首次建档与显式重建共用。 */
+  private buildDefaultTask(userId: string): TaskItem {
+    const workspace = this.taskWorkspaceDir(userId, DEFAULT_TASK_ID);
+    return {
+      id: DEFAULT_TASK_ID,
+      key: newTaskKey(),
+      keyEnabled: true,
+      name: DEFAULT_TASK_NAME,
+      agentId: DEFAULT_AGENT_ID,
+      nodeId: LOCAL_NODE_ID,
+      ...(workspace ? { cwd: workspace } : {}),
+      createdAt: Date.now(),
+    };
+  }
+
+  /**
+   * 补回已删除的默认任务并激活。已存在则抛错。
+   * 后台「创建默认任务」与微信 `/task new default` 走这里。
+   */
+  ensureDefaultTask(state: UserTasks): TaskItem {
+    if (state.tasks.some((t) => isDefaultTaskId(t.id))) throw new Error('默认任务已存在');
+    const task = this.buildDefaultTask(state.userId);
+    state.tasks.unshift(task);
+    state.activeTaskId = task.id;
+    this.store.write(state);
+    this.syncSkillFiles(state);
+    return task;
   }
 
   /**
@@ -515,8 +532,23 @@ export class TaskService {
 
     switch (cmd) {
       case 'new': {
-        // /task new <名称...> [agent]
         const rest = parts.slice(1);
+        const head = rest[0]?.toLowerCase();
+        const second = rest[1]?.toLowerCase();
+        // /task new default [agent]：重建内建默认任务，agent 参数忽略，固定本机 pi
+        if (head === 'default' && (rest.length === 1 || (rest.length === 2 && second !== undefined && known.includes(second)))) {
+          try {
+            const task = this.ensureDefaultTask(state);
+            return {
+              text: `✅ 已创建默认任务 [${task.name}]（${task.id} · ${task.key}）→ 本机 ${task.agentId}（已激活）`,
+              activeTaskId: task.id,
+              activeAgentId: task.agentId,
+            };
+          } catch (err) {
+            return { text: `❌ ${err instanceof Error ? err.message : String(err)}` };
+          }
+        }
+        // /task new <名称...> [agent]
         let name = rest.join(' ');
         let agentId: string | undefined;
         if (rest.length >= 2) {
@@ -555,7 +587,7 @@ export class TaskService {
       }
       case 'default': {
         const task = state.tasks.find((t) => t.id === DEFAULT_TASK_ID);
-        if (!task) return { text: '❌ 默认任务不存在（已删除）。用 /task new 新建，或 /task use 切换。' };
+        if (!task) return { text: '❌ 默认任务不存在（已删除）。用 /task new default 重建。' };
         this.activateTask(state, task.id);
         return {
           text: `🔀 已切换到默认任务 [${task.name}] → ${task.agentId}`,
@@ -615,6 +647,7 @@ export class TaskService {
           text: [
             '📌 任务命令：',
             '/task new <名称> [agent]    新建任务（agent: pi/opencode）',
+            '/task new default           重建已删除的默认任务（本机 pi）',
             '/task list                 查看全部任务（带 id/key/序号）',
             '/task use <id|key|名称|序号> 切换到指定任务（支持唯一前缀）',
             '/task default              切回默认任务',

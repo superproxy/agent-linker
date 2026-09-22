@@ -359,7 +359,7 @@ test('/api/tasks DELETE: 渠道用户凭据可删自己的任务；越权/无凭
   }
 });
 
-test('/api/tasks/all: 返回全部登录用户任务空间（管理后台任务页）', async () => {
+test('/api/tasks/all: 无登录身份时不列出他人任务空间', async () => {
   const app = await freshApp();
   try {
     await app.inject({
@@ -374,20 +374,7 @@ test('/api/tasks/all: 返回全部登录用户任务空间（管理后台任务�
     });
     const res = await app.inject({ method: 'GET', url: '/api/tasks/all' });
     assert.equal(res.statusCode, 200);
-    const users = res.json().users;
-    assert.ok(users.length >= 2);
-    assert.ok(users.every((u: { channel: string }) => u.channel === 'web'));
-
-    const u1 = users.find((u: { userId: string }) => u.userId === 'alice');
-    assert.ok(u1);
-    assert.equal(u1.tasks.length, 2); // default + 方案A
-    assert.equal(u1.tasks.find((t: { name: string }) => t.name === '方案A').agentId, 'pi');
-
-    const u2 = users.find((u: { userId: string }) => u.userId === 'bob');
-    assert.ok(u2);
-    const created = u2.tasks.find((t: { name: string }) => t.name === '周报');
-    assert.ok(created);
-    assert.equal(u2.activeTaskId, created.id);
+    assert.deepEqual(res.json().users, []);
   } finally {
     await app.close().catch(() => {});
   }
@@ -418,7 +405,9 @@ test('非管理员：任务汇总/渠道用户/改任务 403；ct_ 作用域读�
   registerTaskApi(app, svc, () => true, { isAdmin: () => false });
   await app.ready();
   try {
-    assert.equal((await app.inject({ method: 'GET', url: '/api/tasks/all' })).statusCode, 403);
+    const all = await app.inject({ method: 'GET', url: '/api/tasks/all' });
+    assert.equal(all.statusCode, 200);
+    assert.deepEqual(all.json().users, []);
     assert.equal((await app.inject({ method: 'GET', url: '/api/users' })).statusCode, 403);
     assert.equal(
       (await app.inject({ method: 'GET', url: '/api/tasks?channel=weixin&userId=wx_1' })).statusCode,
@@ -439,7 +428,7 @@ test('非管理员：任务汇总/渠道用户/改任务 403；ct_ 作用域读�
   }
 });
 
-test('登录用户只能看到自己的任务空间；管理员可见全部', async () => {
+test('登录用户（含管理员）只能看到自己的任务空间', async () => {
   const svc = freshService();
   svc.createTask(svc.load('weixin', 'wx_same', 'alice'), 'alice任务', 'opencode');
   svc.createTask(svc.load('weixin', 'wx_same', 'bob'), 'bob任务', 'pi');
@@ -471,9 +460,9 @@ test('登录用户只能看到自己的任务空间；管理员可见全部', as
     assert.ok(!bobUsers.some((u) => u.tasks.some((t) => t.name === 'alice任务')));
 
     const admin = await app.inject({ method: 'GET', url: '/api/tasks/all', headers: { 'x-user': 'admin' } });
-    const adminUsers = (admin.json() as { users: Array<{ tasks: { name: string }[] }> }).users;
-    assert.ok(adminUsers.some((u) => u.tasks.some((t) => t.name === 'alice任务')));
-    assert.ok(adminUsers.some((u) => u.tasks.some((t) => t.name === 'bob任务')));
+    const adminUsers = (admin.json() as { users: Array<{ ownerUsername?: string; userId: string; tasks: { name: string }[] }> }).users;
+    assert.ok(adminUsers.every((u) => u.ownerUsername === 'admin' && u.userId === 'admin'));
+    assert.ok(!adminUsers.some((u) => u.tasks.some((t) => t.name === 'alice任务' || t.name === 'bob任务')));
   } finally {
     await app.close().catch(() => {});
   }
@@ -879,6 +868,24 @@ test('PATCH 默认任务 agent 一律 400；普通用户不能新建本机任务
       payload: { channel: 'web', userId: 'alice', name: '本机任务', agentId: 'pi', ownerUsername: 'alice' },
     });
     assert.equal(created.statusCode, 403);
+
+    svc.deleteTask(svc.ensureLoginSpace('alice'), 'default');
+    const rebuilt = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'web', userId: 'alice', createDefault: true, ownerUsername: 'alice' },
+    });
+    assert.equal(rebuilt.statusCode, 200, rebuilt.body);
+    assert.equal(rebuilt.json().id, 'default');
+    assert.equal(rebuilt.json().agentId, 'pi');
+    assert.equal(rebuilt.json().nodeId, 'local');
+    const dup = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'web', userId: 'alice', createDefault: true, ownerUsername: 'alice' },
+    });
+    assert.equal(dup.statusCode, 400);
+    assert.match(dup.json().error, /已存在/);
   } finally {
     await app.close().catch(() => {});
   }

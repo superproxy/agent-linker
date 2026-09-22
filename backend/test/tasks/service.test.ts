@@ -163,7 +163,13 @@ test('handleCommand: default 快捷切回默认任务', () => {
   assert.equal(r2.activeTaskId, DEFAULT_TASK_ID);
   svc.handleCommand(state, '/task del default');
   const rGone = svc.handleCommand(state, '/task default')!;
-  assert.ok(rGone.text.includes('默认任务不存在'));
+  assert.ok(rGone.text.includes('/task new default'));
+  const rebuilt = svc.handleCommand(state, '/task new default')!;
+  assert.equal(rebuilt.activeTaskId, DEFAULT_TASK_ID);
+  assert.equal(rebuilt.activeAgentId, 'pi');
+  assert.ok(state.tasks.some((t) => t.id === DEFAULT_TASK_ID && t.nodeId === 'local'));
+  const again = svc.handleCommand(state, '/task new default')!;
+  assert.ok(again.text.includes('已存在'));
 });
 
 test('handleCommand: list 展示任务 id，new 回复携带新 id', () => {

@@ -98,10 +98,12 @@ test('普通用户不能读本机 agent；任务/渠道用户仅自己的空间'
   }
   const adminAll = (
     (await app.inject({ method: 'GET', url: '/api/tasks/all', headers: auth(adminToken) })).json() as {
-      users: Array<{ tasks: { name: string }[] }>;
+      users: Array<{ ownerUsername?: string; userId: string; tasks: { name: string }[] }>;
     }
   ).users;
+  assert.ok(adminAll.every((u) => u.ownerUsername === 'admin' && u.userId === 'admin'));
   assert.ok(adminAll.some((u) => u.tasks.some((t) => t.name === 'admin微信任务')));
+  assert.ok(!adminAll.some((u) => u.ownerUsername === 'alice'));
 });
 
 test('普通用户节点列表不含本机；by-node / node-agents 不带 local', async () => {

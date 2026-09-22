@@ -156,16 +156,13 @@ export function registerTaskApi(
     };
   });
 
-  // GET /api/tasks/all —— 登录用户任务空间（管理后台「任务」页）
-  // 普通用户打开时确保自己的 web/<username> 存在；管理员只列出已落盘的登录空间。
+  // GET /api/tasks/all —— 当前登录用户自己的任务空间（管理员同样只看自己）
   app.get('/api/tasks/all', async (request, reply) => {
     if (blockSkill(request, reply)) return { error: 'forbidden' };
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
-    const admin = isAdmin(request);
     const username = deps.sessionUser?.(request)?.username;
-    if (!admin && !username) return reply.code(403).send({ error: 'forbidden' });
-    if (!admin && username) return { users: [service.ensureLoginSpace(username)] };
-    return { users: service.listLoginSpaces() };
+    if (!username) return { users: [] };
+    return { users: [service.ensureLoginSpace(username)] };
   });
 
   // GET /api/users —— 全部渠道终端摘要（含任务数）
@@ -213,7 +210,7 @@ export function registerTaskApi(
 
   // DELETE /api/users/:channel/:userId 由网关入口注册（需级联吊销渠道用户 token，见 gateway/index.ts）
 
-  // POST /api/tasks { channel, userId, name, agentId?, nodeId?, key? } —— key 可选自定义（缺省自动生成）
+  // POST /api/tasks { channel, userId, name, agentId?, nodeId?, key?, createDefault? }
   app.post('/api/tasks', async (request, reply) => {
     if (blockSkill(request, reply)) return { error: 'forbidden' };
     const body = request.body as {
@@ -225,12 +222,21 @@ export function registerTaskApi(
       key?: string;
       cwd?: string;
       ownerUsername?: string;
+      /** true：补回已删除的内建默认任务（本机 pi），不走普通任务的本机绑定限制 */
+      createDefault?: boolean;
     };
     const space = spaceOf(request, body.ownerUsername);
     if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
     if (!body?.channel || !body?.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
     if (!ensureTaskChannel(body.channel, reply)) return { error: `渠道 ${body.channel} 不支持任务机制（活动任务仅微信 / web）` };
     const state = loadTaskSpace(service, body.channel, body.userId, space.owner);
+    if (body.createDefault === true) {
+      try {
+        return service.ensureDefaultTask(state);
+      } catch (err) {
+        return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }
     // 显式指定 agent 时校验 (节点, agent) 组合当前可路由；agent 留空则继承激活任务（无需校验）
     const agentId = body.agentId?.trim().toLowerCase();
     const nodeId = body.nodeId?.trim();

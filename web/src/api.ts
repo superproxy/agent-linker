@@ -838,6 +838,8 @@ export class OpsClient {
     key?: string;
     cwd?: string;
     ownerUsername?: string;
+    /** 补回已删除的内建默认任务（id=default，本机 pi） */
+    createDefault?: boolean;
   }): Promise<TaskItem> {
     return (await this.request('/api/tasks', { method: 'POST', body: JSON.stringify(input) })) as TaskItem;
   }
