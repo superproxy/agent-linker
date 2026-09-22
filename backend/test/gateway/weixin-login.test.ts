@@ -41,6 +41,7 @@ function buildStub() {
     bindNewestUnclaimed: () => false,
     claimBinding: () => 'ok' as const,
     rebindBlockedMessage: () => undefined,
+    forceClaimBinding: () => ({ result: 'ok' as const, displacedSessions: [] }),
   } as unknown as WeixinLoginService;
   return { service, calls };
 }
@@ -147,6 +148,52 @@ test('GET /api/weixin/qr/status binded_redirect 带回 accountId → claimBindin
     assert.equal(body.accountId, 'admin');
     assert.deepEqual(bound, ['admin']);
     assert.equal(svc.hasToken('admin'), true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /api/weixin/qr/status 管理员强制换绑 → bob 挤掉 alice', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-force-'));
+  const dir = join(stateDir, 'openclaw-weixin', 'accounts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'cc3333333333-im-bot.json'),
+    JSON.stringify({ token: 'tok-z', userId: 'wx', savedAt: '2026-09-22T00:00:00.000Z' }),
+  );
+  claimWeixinBinding(stateDir, 'alice', 'cc3333333333-im-bot');
+  const svc = new WeixinLoginService({ stateDir });
+  (svc as { waitQr: typeof svc.waitQr }).waitQr = async () => ({
+    connected: false,
+    message: '已连接过此 OpenClaw，无需重复连接。',
+    accountId: 'cc3333333333@im.bot',
+  });
+  const unbound: string[] = [];
+  const bound: string[] = [];
+  const app = Fastify();
+  registerWeixinApi(app, svc, () => true, {
+    isAdmin: () => true,
+    sessionUser: () => ({ username: 'bob' }),
+    onUnbound: async (id) => {
+      unbound.push(id);
+    },
+    onBound: async (id) => {
+      bound.push(id);
+    },
+  });
+  try {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=bob&forceRebind=1',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { connected: boolean; accountId?: string; boundWarning?: string };
+    assert.equal(body.connected, true);
+    assert.equal(body.accountId, 'bob');
+    assert.deepEqual(unbound, ['alice']);
+    assert.deepEqual(bound, ['bob']);
+    assert.equal(svc.hasToken('bob'), true);
+    assert.equal(svc.hasToken('alice'), false);
   } finally {
     await app.close();
   }

@@ -74,6 +74,25 @@ export function claimWeixinBinding(stateDir: string, username: string, pluginAcc
   return 'ok';
 }
 
+/**
+ * 强制把机器人绑到 username：先去掉其它用户的指向（不删 *-im-bot.json）。
+ * 返回被挤掉的用户名（若有）。
+ */
+export function forceClaimWeixinBinding(
+  stateDir: string,
+  username: string,
+  pluginAccountId: string,
+): { result: ClaimBindingResult; displacedUsername?: string } {
+  const user = username.trim();
+  const holder = bindingHolderForBot(stateDir, pluginAccountId, user);
+  if (holder) removeWeixinBinding(stateDir, holder);
+  const result = claimWeixinBinding(stateDir, user, pluginAccountId);
+  if (result !== 'ok') {
+    return { result };
+  }
+  return holder ? { result, displacedUsername: holder } : { result };
+}
+
 /** 该机器人是否已被其它登录用户占用；返回占用者的用户名 */
 export function bindingHolderForBot(stateDir: string, pluginAccountId: string, exceptUsername?: string): string | undefined {
   const bot = normalizeBotAccountId(pluginAccountId);

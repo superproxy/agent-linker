@@ -238,6 +238,28 @@ export class WeixinLoginService {
   }
 
   /**
+   * 管理员强制换绑：解除原登录用户指向（含 unbind 侧车清理），再绑到 username。
+   */
+  forceClaimBinding(
+    username: string,
+    pluginAccountId: string,
+  ): { result: ClaimBindingResult; displacedUsername?: string; displacedSessions: { baseUrl: string; token: string }[] } {
+    const user = username.trim();
+    const holder = bindingHolderForBot(this.stateDir, pluginAccountId, user);
+    const displacedSessions: { baseUrl: string; token: string }[] = [];
+    if (holder) {
+      const un = this.unbind(holder);
+      displacedSessions.push(...un.sessions);
+    }
+    const result = this.claimBinding(user, pluginAccountId);
+    return {
+      result,
+      ...(holder && result === 'ok' ? { displacedUsername: holder } : {}),
+      displacedSessions,
+    };
+  }
+
+  /**
    * 微信不再下发新 token 时，把当前用户指向尚未被其他用户占用、savedAt 最新的 *-im-bot。
    * 只写绑定，不复制文件。这是用户正在扫码，不是进程启动时借用。
    */
@@ -266,7 +288,7 @@ export class WeixinLoginService {
     if (pluginAccountId) {
       const holder = bindingHolderForBot(this.stateDir, pluginAccountId, user);
       if (holder) {
-        return `这个微信机器人已绑在登录用户「${holder}」上。一个微信只能对应一个登录账号，请「${holder}」先在微信页解绑或清空登录态后，您再扫码。当前渠道是 weixin-bot。`;
+        return `这个微信机器人已绑在登录用户「${holder}」上。请「${holder}」先解绑，或由管理员扫码并勾选「强制换绑」。当前渠道是 weixin-bot。`;
       }
       const bot = normalizeBotAccountId(pluginAccountId);
       if (bot.endsWith('-im-bot') && !this.readAccountFiles().some((a) => a.id === bot)) {
@@ -478,6 +500,39 @@ export function registerWeixinApi(
     return null;
   };
 
+  const wantForceRebind = (request: FastifyRequest, raw?: string): boolean => {
+    const v = (raw ?? '').trim().toLowerCase();
+    if (v !== '1' && v !== 'true') return false;
+    return isAdmin(request);
+  };
+
+  /** 写绑定；forceRebind 时管理员可挤掉原登录用户（unbind + notifyStop + onUnbound） */
+  const finishClaim = async (
+    accountId: string,
+    pluginAccountId: string,
+    forceRebind: boolean,
+  ): Promise<{ result: ClaimBindingResult; displacedUsername?: string }> => {
+    if (!forceRebind) {
+      return { result: service.claimBinding(accountId, pluginAccountId) };
+    }
+    const out = service.forceClaimBinding(accountId, pluginAccountId);
+    if (out.displacedUsername) {
+      for (const session of out.displacedSessions) {
+        try {
+          await notifyBotStop(session);
+        } catch (err) {
+          deps.log?.(`微信 notifyStop（强制换绑）失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      try {
+        await deps.onUnbound?.(out.displacedUsername);
+      } catch (err) {
+        deps.log?.(`强制换绑后停止原用户进程失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return { result: out.result, ...(out.displacedUsername ? { displacedUsername: out.displacedUsername } : {}) };
+  };
+
   const scopedStatus = (request: FastifyRequest) => {
     const full = service.status();
     const user = deps.sessionUser?.(request);
@@ -545,24 +600,38 @@ export function registerWeixinApi(
 
   app.get('/api/weixin/qr/status', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!requireAuth(request, reply)) return;
-    const q = request.query as { sessionKey?: string; timeoutMs?: string; accountId?: string };
+    const q = request.query as { sessionKey?: string; timeoutMs?: string; accountId?: string; forceRebind?: string };
     const accountId = resolveAccountId(request, q.accountId);
     if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
+    const forceRebind = wantForceRebind(request, q.forceRebind);
+    if ((q.forceRebind === '1' || q.forceRebind === 'true') && !forceRebind) {
+      return reply.code(403).send({ error: '强制换绑仅管理员可用' });
+    }
     try {
       const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 180_000);
       const raw = await service.waitQr(q.sessionKey, timeoutMs, accountId);
       let hasLocalToken = accountId ? service.hasToken(accountId) : false;
+      let displacedUsername: string | undefined;
       if (!hasLocalToken && accountId && isWeixinBotAlreadyBoundMessage(raw.message)) {
         // 已连接过：插件常不再写盘，但会带回 ilink_bot_id；优先绑到该机器人文件
         if (raw.accountId) {
-          const claim = service.claimBinding(accountId, raw.accountId);
-          if (claim === 'ok') hasLocalToken = true;
-          else if (claim === 'taken') {
+          const claim = await finishClaim(accountId, raw.accountId, forceRebind);
+          if (claim.result === 'ok') {
+            hasLocalToken = true;
+            displacedUsername = claim.displacedUsername;
+          } else if (claim.result === 'taken') {
             const message = service.rebindBlockedMessage(accountId, raw.accountId);
             return { connected: false, accountId, message: message ?? '这个微信已经绑在其他登录用户上。' };
           }
         }
         if (!hasLocalToken) hasLocalToken = service.bindNewestUnclaimed(accountId);
+        if (!hasLocalToken && forceRebind && raw.accountId) {
+          const claim = await finishClaim(accountId, raw.accountId, true);
+          if (claim.result === 'ok') {
+            hasLocalToken = true;
+            displacedUsername = claim.displacedUsername;
+          }
+        }
         if (!hasLocalToken) {
           const message = service.rebindBlockedMessage(accountId, raw.accountId);
           if (message) return { connected: false, accountId, message };
@@ -571,15 +640,16 @@ export function registerWeixinApi(
       const wait = normalizeQrWait(raw, { hasLocalToken });
       if (wait.connected && accountId) {
         if (wait.accountId) {
-          const claim = service.claimBinding(accountId, wait.accountId);
-          if (claim === 'taken') {
+          const claim = await finishClaim(accountId, wait.accountId, forceRebind);
+          if (claim.displacedUsername) displacedUsername = claim.displacedUsername;
+          if (claim.result === 'taken') {
             return {
               connected: false,
               accountId,
               message: '这个微信已经绑在其他登录用户上。一个登录用户只对应一个微信，一个微信也只对应一个登录用户。',
             };
           }
-          if (claim === 'missing') {
+          if (claim.result === 'missing') {
             return {
               connected: false,
               accountId,
@@ -596,10 +666,13 @@ export function registerWeixinApi(
           };
         }
         let boundWarning: string | undefined;
+        if (displacedUsername) {
+          boundWarning = `已从登录用户「${displacedUsername}」强制换绑到「${accountId}」。`;
+        }
         try {
           await deps.onBound?.(accountId);
         } catch (err) {
-          boundWarning = `登录态已保存，但拉起微信进程失败：${err instanceof Error ? err.message : String(err)}`;
+          boundWarning = `${boundWarning ? `${boundWarning} ` : ''}登录态已保存，但拉起微信进程失败：${err instanceof Error ? err.message : String(err)}`;
           deps.log?.(boundWarning);
         }
         return { ...wait, accountId, ...(boundWarning ? { boundWarning } : {}) };

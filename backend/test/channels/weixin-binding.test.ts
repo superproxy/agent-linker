@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   claimWeixinBinding,
+  forceClaimWeixinBinding,
   loadBoundWeixinAccount,
   normalizeBotAccountId,
   readWeixinBinding,
@@ -30,6 +31,19 @@ test('claimWeixinBinding：只写绑定，不复制 admin.json', () => {
   const acc = loadBoundWeixinAccount(stateDir, 'admin');
   assert.equal(acc.id, '89b53341f048-im-bot');
   assert.equal(acc.token, 'tok-a');
+});
+
+test('forceClaimWeixinBinding：挤掉原用户后绑到新用户', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-fc-'));
+  const dir = join(stateDir, 'openclaw-weixin', 'accounts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'bot-im-bot.json'), JSON.stringify({ token: 't', savedAt: '2026-01-01' }));
+  claimWeixinBinding(stateDir, 'alice', 'bot-im-bot');
+  const out = forceClaimWeixinBinding(stateDir, 'bob', 'bot-im-bot');
+  assert.equal(out.result, 'ok');
+  assert.equal(out.displacedUsername, 'alice');
+  assert.equal(readWeixinBinding(stateDir, 'alice'), null);
+  assert.equal(readWeixinBinding(stateDir, 'bob')?.botAccountId, 'bot-im-bot');
 });
 
 test('claimWeixinBinding：同一机器人不能绑两个登录用户', () => {

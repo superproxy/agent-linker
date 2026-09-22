@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Col, Descriptions, Row, Space, Spin, Steps, Tag } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Row, Space, Spin, Steps, Tag } from 'antd';
 import { QrcodeOutlined, ReloadOutlined } from '@ant-design/icons';
 import { WeixinClient, type WeixinStatus } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
@@ -11,6 +11,7 @@ export function WeixinPage(props: {
   onAuthError: AuthErrorHandler;
   onStatus?: (s: WeixinStatus | null) => void;
   username?: string;
+  isAdmin?: boolean;
 }) {
   const wx = useMemo(() => new WeixinClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
@@ -20,6 +21,7 @@ export function WeixinPage(props: {
   const [scanning, setScanning] = useState(false);
   const [unbinding, setUnbinding] = useState(false);
   const [msg, setMsg] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const [forceRebind, setForceRebind] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -70,7 +72,7 @@ export function WeixinPage(props: {
         }).catch(() => {});
       }, 2000);
       try {
-        const st = await wx.qrStatus(r.sessionKey, 120_000, slot, ac.signal);
+        const st = await wx.qrStatus(r.sessionKey, 120_000, slot, ac.signal, props.isAdmin && forceRebind);
         if (ac.signal.aborted) return;
         setScanning(false);
         if (st.connected) {
@@ -253,6 +255,14 @@ export function WeixinPage(props: {
                   </div>
                 ))}
               </Space>
+            </div>
+          ) : null}
+
+          {props.isAdmin ? (
+            <div style={{ marginTop: 12 }}>
+              <Checkbox checked={forceRebind} disabled={scanning} onChange={(e) => setForceRebind(e.target.checked)}>
+                强制换绑（解除原登录用户对该微信的绑定，仅管理员）
+              </Checkbox>
             </div>
           ) : null}
 
