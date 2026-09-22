@@ -69,8 +69,8 @@ export function isWeixinBotAlreadyBoundMessage(message?: string): boolean {
 
 /**
  * 插件 connected=false 时的两种结果：
- * - 本机已有该账号槽的 bot token：沿用登录态，拉起 weixin-bot；
- * - 本机没有 token：不能当成绑定成功，需要先在微信里断开该机器人再扫。
+ * - 本机已把机器人登录态绑到该账号槽：沿用并拉起 weixin-bot；
+ * - 没有可绑定的登录文件：不能当成成功。微信不再发 token，手机里仍显示已连接时才需要先退出。
  */
 export function normalizeQrWait(
   wait: {
@@ -94,7 +94,7 @@ export function normalizeQrWait(
       connected: false,
       ...(wait.accountId ? { accountId: wait.accountId } : {}),
       message:
-        '微信侧该机器人已绑定，但没有下发新的登录态，本机也没有 token。请先在手机微信里断开该机器人后再扫码。当前渠道是 weixin-bot，不走 OpenClaw。',
+        '微信没有下发新登录态，本机也没有可绑到该账号的机器人登录文件。当前渠道是 weixin-bot。若手机里仍显示已连接，需要先退出该机器人再扫。',
     };
   }
   return {
@@ -212,19 +212,19 @@ export class WeixinLoginService {
   }
 
   /**
-   * 微信不再下发新 token 时，沿用插件已落盘的唯一一份 *-im-bot 登录态。
-   * 进程读的是 <登录用户名>.json；插件文件名对不上就会被误判成「本机没有 token」。
-   * 多份机器人登录态或已有其他用户槽时不猜测归属。
+   * 重新绑定时微信不再发 token：把尚未属于其他用户的 *-im-bot 登录态写成当前账号槽。
+   * 多份时用 savedAt 最新的一份。这是用户正在扫码绑定，不是重启时偷偷借用。
    */
   adoptSolePluginToken(slotId: string): boolean {
     const slot = slotId.trim();
     if (!slot || !/^[A-Za-z0-9._-]+$/.test(slot)) return false;
     if (this.hasToken(slot)) return true;
-    const plugins = this.status().accounts.filter((a) => a.id !== slot && a.id.endsWith('-im-bot'));
-    if (plugins.length !== 1) return false;
-    const only = plugins[0];
-    if (!only) return false;
-    this.adoptPluginAccount(slot, only.id);
+    const files = this.readAccountFiles();
+    const owned = new Set(files.filter((a) => !a.id.endsWith('-im-bot') && a.id !== slot).map((a) => a.token));
+    const plugins = files.filter((a) => a.id.endsWith('-im-bot') && a.id !== slot && !owned.has(a.token));
+    if (plugins.length === 0) return false;
+    const newest = plugins.reduce((best, a) => (a.savedAt >= best.savedAt ? a : best));
+    this.adoptPluginAccount(slot, newest.id);
     return this.hasToken(slot);
   }
 
@@ -270,18 +270,23 @@ export class WeixinLoginService {
     return { accountId: id, removed: this.removeAccountFiles(id, [...names]), sessions };
   }
 
-  private readAccountFiles(): { id: string; token: string; baseUrl: string }[] {
+  private readAccountFiles(): { id: string; token: string; baseUrl: string; savedAt: string }[] {
     const dir = this.accountsDir();
     if (!existsSync(dir)) return [];
-    const out: { id: string; token: string; baseUrl: string }[] = [];
+    const out: { id: string; token: string; baseUrl: string; savedAt: string }[] = [];
     for (const f of readdirSync(dir)) {
       if (!f.endsWith('.json') || f === 'accounts.json' || f.includes('context-tokens') || f.includes('user-tokens') || f.endsWith('.sync.json')) {
         continue;
       }
       try {
-        const raw = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { token?: string; baseUrl?: string };
+        const raw = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { token?: string; baseUrl?: string; savedAt?: string };
         if (typeof raw.token !== 'string' || !raw.token) continue;
-        out.push({ id: f.replace(/\.json$/, ''), token: raw.token, baseUrl: raw.baseUrl ?? '' });
+        out.push({
+          id: f.replace(/\.json$/, ''),
+          token: raw.token,
+          baseUrl: raw.baseUrl ?? '',
+          savedAt: typeof raw.savedAt === 'string' ? raw.savedAt : '',
+        });
       } catch {
         /* 跳过坏文件 */
       }
@@ -318,6 +323,11 @@ export class WeixinLoginService {
     const src = join(dir, `${from}.json`);
     if (!existsSync(src)) return;
     copyFileSync(src, join(dir, `${slot}.json`));
+    for (const suffix of ['.sync.json', '.context-tokens.json'] as const) {
+      const side = join(dir, `${from}${suffix}`);
+      const dest = join(dir, `${slot}${suffix}`);
+      if (existsSync(side) && !existsSync(dest)) copyFileSync(side, dest);
+    }
   }
 
   private assertAccountId(accountId: string): string {
@@ -455,24 +465,22 @@ export function registerWeixinApi(
     const user = deps.sessionUser?.(request);
     const admin = isAdmin(request);
     if (!user && !admin) return null;
-    if (admin) {
-      const own = user?.username;
+    const savedPlugins = full.accounts.filter((a) => a.id.endsWith('-im-bot'));
+    const bindId = user?.username;
+    if (!bindId) {
+      const slots = full.accounts.filter((a) => !a.id.endsWith('-im-bot'));
       return {
-        ...full,
-        ...(own
-          ? {
-              bindAccountId: own,
-              processId: `weixin:${own}`,
-              processRunning: deps.isProcessRunning?.(own) === true,
-            }
-          : {}),
+        configured: slots.length > 0,
+        accounts: slots,
+        savedPlugins,
+        activeAccountId: slots[0]?.id,
       };
     }
-    const bindId = user!.username;
     const accounts = full.accounts.filter((a) => a.id === bindId);
     return {
       configured: accounts.length > 0,
       accounts,
+      savedPlugins,
       activeAccountId: accounts[0]?.id,
       bindAccountId: bindId,
       processId: `weixin:${bindId}`,

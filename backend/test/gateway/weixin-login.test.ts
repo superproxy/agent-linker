@@ -70,7 +70,7 @@ test('normalizeQrWait：OpenClaw 文案是 bot 已绑定；没有本机 token �
   assert.equal(missing.connected, false);
   assert.equal(missing.alreadyBound, undefined);
   assert.match(missing.message ?? '', /weixin-bot/);
-  assert.match(missing.message ?? '', /没有 token/);
+  assert.match(missing.message ?? '', /没有可绑/);
 
   const reuse = normalizeQrWait(
     { connected: false, message: '已连接过此 OpenClaw，无需重复连接。' },
@@ -105,7 +105,7 @@ test('GET /api/weixin/qr/status 机器人已绑定但本机无 token → 不拉�
     const body = res.json() as { connected: boolean; alreadyBound?: boolean; message?: string };
     assert.equal(body.connected, false);
     assert.equal(body.alreadyBound, undefined);
-    assert.match(body.message ?? '', /不走 OpenClaw/);
+    assert.match(body.message ?? '', /weixin-bot/);
     assert.deepEqual(bound, []);
   } finally {
     await app.close();
@@ -142,28 +142,30 @@ test('GET /api/weixin/qr/status 机器人已绑定且只有 *-im-bot.json → �
   }
 });
 
-test('adoptSolePluginToken：唯一 *-im-bot 登录态拷到登录用户名，多份不猜测', () => {
+test('adoptSolePluginToken：重新绑定把最新且未被其他用户占用的 im-bot 登录态写入账号槽', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-adopt-'));
   const dir = join(stateDir, 'openclaw-weixin', 'accounts');
   mkdirSync(dir, { recursive: true });
-  const acc = (id: string) => JSON.stringify({ token: `tok-${id}`, userId: `wx_${id}`, savedAt: '2026-01-01' });
-  writeFileSync(join(dir, '9e36d56ffb65-im-bot.json'), acc('plugin'));
+  const acc = (id: string, savedAt: string) =>
+    JSON.stringify({ token: `tok-${id}`, userId: `wx_${id}`, savedAt });
+  writeFileSync(join(dir, '9e36d56ffb65-im-bot.json'), acc('plugin', '2026-09-21T07:41:42.402Z'));
   writeFileSync(join(dir, '9e36d56ffb65-im-bot.sync.json'), '{}');
   const svc = new WeixinLoginService({ stateDir });
   assert.equal(svc.hasToken('admin'), false);
   assert.equal(svc.adoptSolePluginToken('admin'), true);
   assert.equal(svc.hasToken('admin'), true);
   assert.equal(JSON.parse(readFileSync(join(dir, 'admin.json'), 'utf8')).token, 'tok-plugin');
+  assert.equal(existsSync(join(dir, 'admin.sync.json')), true);
 
   const stateDir2 = mkdtempSync(join(tmpdir(), 'linkagent-wx-adopt2-'));
   const dir2 = join(stateDir2, 'openclaw-weixin', 'accounts');
   mkdirSync(dir2, { recursive: true });
-  writeFileSync(join(dir2, '111111111111-im-bot.json'), acc('a'));
-  writeFileSync(join(dir2, '222222222222-im-bot.json'), acc('b'));
-  writeFileSync(join(dir2, 'alice.json'), acc('alice'));
+  writeFileSync(join(dir2, '111111111111-im-bot.json'), acc('a', '2026-01-01T00:00:00.000Z'));
+  writeFileSync(join(dir2, '222222222222-im-bot.json'), acc('b', '2026-09-22T00:00:00.000Z'));
+  writeFileSync(join(dir2, 'alice.json'), acc('alice', '2026-08-01T00:00:00.000Z'));
   const svc2 = new WeixinLoginService({ stateDir: stateDir2 });
-  assert.equal(svc2.adoptSolePluginToken('bob'), false);
-  assert.equal(existsSync(join(dir2, 'bob.json')), false);
+  assert.equal(svc2.adoptSolePluginToken('bob'), true);
+  assert.equal(JSON.parse(readFileSync(join(dir2, 'bob.json'), 'utf8')).token, 'tok-b');
 });
 
 test('GET /api/weixin/qr/status 机器人已绑定且本机有 token → 沿用并拉起进程', async () => {
@@ -266,6 +268,58 @@ test('非管理员无登录会话 → 微信接口 403', async () => {
     assert.equal((await app.inject({ method: 'POST', url: '/api/weixin/unbind', payload: {} })).statusCode, 403);
   } finally {
     await app.close();
+  }
+});
+
+test('管理员也只看自己的绑定；残留 *-im-bot 不算已绑定', async () => {
+  const { service } = buildStub();
+  (service as { status: () => unknown }).status = () => ({
+    configured: true,
+    accounts: [
+      { id: 'admin', userId: 'wx_admin' },
+      { id: '518304d8e5fd-im-bot', userId: 'o9cq80@im.wechat', savedAt: '2026-09-21T07:41:42.402Z' },
+    ],
+    activeAccountId: '518304d8e5fd-im-bot',
+  });
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, {
+    isAdmin: () => true,
+    sessionUser: () => ({ username: 'admin' }),
+  });
+  try {
+    const st = await app.inject({ method: 'GET', url: '/api/weixin/status' });
+    assert.equal(st.statusCode, 200);
+    const body = st.json() as {
+      configured: boolean;
+      bindAccountId?: string;
+      accounts: { id: string }[];
+      savedPlugins?: { id: string }[];
+    };
+    assert.equal(body.bindAccountId, 'admin');
+    assert.equal(body.configured, true);
+    assert.deepEqual(body.accounts.map((a) => a.id), ['admin']);
+    assert.deepEqual(body.savedPlugins?.map((a) => a.id), ['518304d8e5fd-im-bot']);
+  } finally {
+    await app.close();
+  }
+
+  (service as { status: () => unknown }).status = () => ({
+    configured: true,
+    accounts: [{ id: '518304d8e5fd-im-bot', userId: 'o9cq80@im.wechat' }],
+    activeAccountId: '518304d8e5fd-im-bot',
+  });
+  const app2 = Fastify();
+  registerWeixinApi(app2, service, () => true, {
+    isAdmin: () => true,
+    sessionUser: () => ({ username: 'admin' }),
+  });
+  try {
+    const st = await app2.inject({ method: 'GET', url: '/api/weixin/status' });
+    const body = st.json() as { configured: boolean; accounts: { id: string }[] };
+    assert.equal(body.configured, false);
+    assert.deepEqual(body.accounts, []);
+  } finally {
+    await app2.close();
   }
 });
 

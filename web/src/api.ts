@@ -187,6 +187,8 @@ export interface WeixinAccountInfo {
 export interface WeixinStatus {
   configured: boolean;
   accounts: WeixinAccountInfo[];
+  /** 磁盘上的 *-im-bot 登录文件。没有对应用户槽绑定时，进程不会使用。 */
+  savedPlugins?: WeixinAccountInfo[];
   activeAccountId?: string;
   bindAccountId?: string;
   processId?: string;

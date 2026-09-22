@@ -227,6 +227,15 @@ export function WeixinPage(props: {
             ]}
           />
 
+          {status && !status.configured && (status.savedPlugins?.length ?? 0) > 0 ? (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 14 }}
+              message="本机还留着机器人登录文件，但当前账号没有绑定关系。重启不会使用这份旧配置。一个账号只能绑一个微信，请重新绑定。"
+            />
+          ) : null}
+
           {status && status.accounts.length > 0 ? (
             <div style={{ marginTop: 14 }}>
               <div className="sub-muted" style={{ marginBottom: 6 }}>
