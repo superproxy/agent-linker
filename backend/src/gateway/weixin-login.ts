@@ -14,6 +14,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { getLayout } from '../install/layout.js';
 import { notifyBotStop } from '../channels/ilink-client.js';
 import {
+  ensureWeixinLoginStateDir,
+  listWeixinLoginUsernames,
+  weixinLoginStateDir,
+} from '../channels/weixin-login-state.js';
+import {
   assertWeixinUsername,
   bindingHolderForBot,
   claimWeixinBinding,
@@ -181,36 +186,59 @@ export interface WeixinLoginDeps {
 }
 
 export class WeixinLoginService {
-  private readonly stateDir: string;
+  /** 插件运行态根目录；每登录用户实际目录为 login-users/<用户名>/ */
+  private readonly pluginsRoot: string;
   private readonly log: (...args: unknown[]) => void;
   private channelHandle: WeixinChannelPlugin | null = null;
   /** 等待扫码期间插件刷新出来的新二维码内容（sessionKey → url） */
   private readonly liveQr = new Map<string, string>();
 
-  constructor(deps: { stateDir?: string; log?: (...args: unknown[]) => void } = {}) {
-    this.stateDir = deps.stateDir ?? getLayout().pluginsState;
+  constructor(deps: { pluginsRoot?: string; /** 测试：等同 pluginsRoot */ stateDir?: string; log?: (...args: unknown[]) => void } = {}) {
+    this.pluginsRoot = deps.pluginsRoot ?? deps.stateDir ?? getLayout().pluginsState;
     this.log = deps.log ?? (() => {});
   }
 
-  private accountsDir(): string {
-    return join(this.stateDir, 'openclaw-weixin', 'accounts');
+  private userRoot(username: string): string {
+    return weixinLoginStateDir(this.pluginsRoot, username);
   }
 
-  /** 磁盘上的机器人登录文件 + 绑定表。configured 只看绑定能否对上一个带 token 的 *-im-bot 文件。 */
+  private preparePluginEnv(username: string): string {
+    const root = ensureWeixinLoginStateDir(this.pluginsRoot, username);
+    process.env.OPENCLAW_STATE_DIR = root;
+    return root;
+  }
+
+  private accountsDirFor(stateRoot: string): string {
+    return join(stateRoot, 'openclaw-weixin', 'accounts');
+  }
+
+  /** 聚合各登录用户目录 + 遗留的共享 accounts/（只展示，新扫码只写用户目录） */
   status(): WeixinStatus {
-    const accounts = this.readAccountFiles().map((a) => ({ id: a.id, userId: '', savedAt: a.savedAt }));
-    const dir = this.accountsDir();
-    if (existsSync(dir)) {
-      for (const account of accounts) {
+    const accounts: WeixinAccountInfo[] = [];
+    const bindings: WeixinUserBinding[] = [];
+    const seen = new Set<string>();
+    const pushFromRoot = (stateRoot: string) => {
+      for (const a of this.readAccountFiles(stateRoot)) {
+        if (seen.has(a.id)) continue;
+        seen.add(a.id);
+        let userId = '';
         try {
-          const raw = JSON.parse(readFileSync(join(dir, `${account.id}.json`), 'utf8')) as { userId?: string };
-          if (typeof raw.userId === 'string') account.userId = raw.userId;
+          const raw = JSON.parse(readFileSync(join(this.accountsDirFor(stateRoot), `${a.id}.json`), 'utf8')) as { userId?: string };
+          if (typeof raw.userId === 'string') userId = raw.userId;
         } catch {
-          /* userId 缺失不影响绑定判断 */
+          /* ignore */
         }
+        accounts.push({ id: a.id, userId, savedAt: a.savedAt });
       }
+      for (const b of listWeixinBindings(stateRoot)) {
+        if (!bindings.some((x) => x.username === b.username && x.botAccountId === b.botAccountId)) bindings.push(b);
+      }
+    };
+    for (const u of listWeixinLoginUsernames(this.pluginsRoot)) {
+      pushFromRoot(this.userRoot(u));
     }
-    const bindings = listWeixinBindings(this.stateDir);
+    const legacyAccounts = join(this.pluginsRoot, 'openclaw-weixin', 'accounts');
+    if (existsSync(legacyAccounts)) pushFromRoot(this.pluginsRoot);
     const live = bindings.filter((b) => accounts.some((a) => a.id === b.botAccountId));
     return {
       configured: live.length > 0,
@@ -220,110 +248,118 @@ export class WeixinLoginService {
     };
   }
 
+  /** 单个登录用户目录下的绑定与插件落盘文件 */
+  listLoginUsernames(): string[] {
+    return listWeixinLoginUsernames(this.pluginsRoot);
+  }
+
+  userPluginStatus(username: string): { bindings: WeixinUserBinding[]; pluginAccounts: WeixinAccountInfo[] } {
+    const id = username.trim();
+    const stateRoot = this.userRoot(id);
+    const pluginAccounts = this.readAccountFiles(stateRoot)
+      .filter((a) => a.id.endsWith('-im-bot'))
+      .map((a) => {
+        let userId = '';
+        try {
+          const raw = JSON.parse(readFileSync(join(this.accountsDirFor(stateRoot), `${a.id}.json`), 'utf8')) as { userId?: string };
+          if (typeof raw.userId === 'string') userId = raw.userId;
+        } catch {
+          /* ignore */
+        }
+        return { id: a.id, userId, savedAt: a.savedAt };
+      });
+    const hit = readWeixinBinding(stateRoot, id);
+    const bindings = hit ? [hit] : [];
+    return { bindings, pluginAccounts };
+  }
+
   /** 该登录用户是否已指向一份仍在磁盘上的机器人登录态 */
   hasToken(accountId: string): boolean {
     const id = accountId.trim();
     if (!id) return false;
-    const binding = readWeixinBinding(this.stateDir, id);
+    const stateRoot = this.userRoot(id);
+    const binding = readWeixinBinding(stateRoot, id);
     if (!binding) return false;
-    return this.readAccountFiles().some((a) => a.id === binding.botAccountId);
+    return this.readAccountFiles(stateRoot).some((a) => a.id === binding.botAccountId);
   }
 
-  /**
-   * 扫码确认后把登录用户指向插件写下的机器人文件。不复制 json。
-   * 返回 taken 表示这个机器人已经属于别的登录用户。
-   */
   claimBinding(username: string, pluginAccountId: string): ClaimBindingResult {
-    return claimWeixinBinding(this.stateDir, username, pluginAccountId);
+    const user = username.trim();
+    for (const u of listWeixinLoginUsernames(this.pluginsRoot)) {
+      if (u === user) continue;
+      const holder = bindingHolderForBot(this.userRoot(u), pluginAccountId, user);
+      if (holder) return 'taken';
+    }
+    return claimWeixinBinding(this.userRoot(user), user, pluginAccountId);
   }
 
-  /**
-   * 管理员强制换绑：解除原登录用户指向（含 unbind 侧车清理），再绑到 username。
-   */
+  /** 管理员强制：先解除其它登录用户对该 bot 文件的绑定，再绑到 username（各用户插件目录相互隔离） */
   forceClaimBinding(
     username: string,
     pluginAccountId: string,
   ): { result: ClaimBindingResult; displacedUsername?: string; displacedSessions: { baseUrl: string; token: string }[] } {
-    const user = username.trim();
-    const holder = bindingHolderForBot(this.stateDir, pluginAccountId, user);
+    const user = this.assertAccountId(username);
+    const bot = normalizeBotAccountId(pluginAccountId);
     const displacedSessions: { baseUrl: string; token: string }[] = [];
-    if (holder) {
-      const un = this.unbind(holder);
-      displacedSessions.push(...un.sessions);
+    let displacedUsername: string | undefined;
+    for (const u of listWeixinLoginUsernames(this.pluginsRoot)) {
+      if (u === user) continue;
+      const sd = this.userRoot(u);
+      if (bindingHolderForBot(sd, pluginAccountId, user)) {
+        displacedUsername = u;
+        const un = this.unbind(u);
+        displacedSessions.push(...un.sessions);
+        break;
+      }
     }
     const result = this.claimBinding(user, pluginAccountId);
     return {
       result,
-      ...(holder && result === 'ok' ? { displacedUsername: holder } : {}),
+      ...(displacedUsername && result === 'ok' ? { displacedUsername } : {}),
       displacedSessions,
     };
   }
 
-  /**
-   * 微信不再下发新 token 时，把当前用户指向尚未被其他用户占用、savedAt 最新的 *-im-bot。
-   * 只写绑定，不复制文件。这是用户正在扫码，不是进程启动时借用。
-   */
+  /** 在当前用户的插件目录里，指向最新一份 *-im-bot（不读其它登录用户目录） */
   bindNewestUnclaimed(username: string): boolean {
     const user = username.trim();
     if (!user || !/^[A-Za-z0-9._-]+$/.test(user)) return false;
     if (this.hasToken(user)) return true;
-    const taken = new Set(
-      listWeixinBindings(this.stateDir)
-        .filter((b) => b.username !== user)
-        .map((b) => b.botAccountId),
-    );
-    const plugins = this.readAccountFiles().filter((a) => a.id.endsWith('-im-bot') && !taken.has(a.id));
+    const stateRoot = this.userRoot(user);
+    const plugins = this.readAccountFiles(stateRoot).filter((a) => a.id.endsWith('-im-bot'));
     if (plugins.length === 0) return false;
     const newest = plugins.reduce((best, a) => (a.savedAt >= best.savedAt ? a : best));
     return this.claimBinding(user, newest.id) === 'ok';
   }
 
-  /**
-   * 同一微信换绑到新登录用户失败时的说明（一机一微信一登录账号）。
-   * 有明确占用者或本机文件全被占用时返回文案；否则 undefined，由通用提示兜底。
-   */
   rebindBlockedMessage(forUser: string, pluginAccountId?: string): string | undefined {
     const user = forUser.trim();
     if (!user) return undefined;
+    const stateRoot = this.userRoot(user);
     if (pluginAccountId) {
-      const holder = bindingHolderForBot(this.stateDir, pluginAccountId, user);
-      if (holder) {
-        return `这个微信机器人已绑在登录用户「${holder}」上。请「${holder}」先解绑，或由管理员扫码并勾选「强制换绑」。当前渠道是 weixin-bot。`;
+      for (const u of listWeixinLoginUsernames(this.pluginsRoot)) {
+        if (u === user) continue;
+        const holder = bindingHolderForBot(this.userRoot(u), pluginAccountId, user);
+        if (holder) {
+          return `这个微信机器人在本机已绑在登录用户「${holder}」的插件目录。要绑到「${user}」请用不同微信扫码，或由管理员勾选「强制换绑」。当前渠道是 weixin-bot。`;
+        }
       }
       const bot = normalizeBotAccountId(pluginAccountId);
-      if (bot.endsWith('-im-bot') && !this.readAccountFiles().some((a) => a.id === bot)) {
-        return `微信侧已连接过该机器人，但本机没有 ${bot}.json，无法绑到新账号。请原绑定用户解绑并清空，或在手机微信退出该机器人后重新扫码以生成登录文件。当前渠道是 weixin-bot。`;
+      if (bot.endsWith('-im-bot') && !this.readAccountFiles(stateRoot).some((a) => a.id === bot)) {
+        return `微信侧已连接过该机器人，但在「${user}」的插件目录没有 ${bot}.json。请在本账号下重新扫码（插件会写到 login-users/${user}/）；或在手机微信退出该机器人后再扫。当前渠道是 weixin-bot。`;
       }
     }
-    const taken = new Set(
-      listWeixinBindings(this.stateDir)
-        .filter((b) => b.username !== user)
-        .map((b) => b.botAccountId),
-    );
-    const plugins = this.readAccountFiles().filter((a) => a.id.endsWith('-im-bot'));
-    if (plugins.length > 0 && plugins.every((a) => taken.has(a.id))) {
-      const holders = [
-        ...new Set(
-          listWeixinBindings(this.stateDir)
-            .filter((b) => taken.has(b.botAccountId))
-            .map((b) => b.username),
-        ),
-      ];
-      const who = holders.length > 0 ? holders.join('、') : '其他登录用户';
-      return `本机机器人登录文件均已被占用（${who}）。要把同一微信换到新登录用户，请先让上述账号解绑。当前渠道是 weixin-bot。`;
+    if (this.readAccountFiles(stateRoot).filter((a) => a.id.endsWith('-im-bot')).length === 0) {
+      return `「${user}」的插件目录里还没有机器人登录文件。请确认扫码时登录的是该账号，且网关已更新（按用户隔离 login-users/<用户名>/）。当前渠道是 weixin-bot。`;
     }
     return undefined;
   }
 
-  /**
-   * 取消绑定：去掉该登录用户的指向，并删掉旧逻辑留下的 <用户名>.json 副本。
-   * 插件写下的 *-im-bot.json 留在磁盘上，但没有绑定就不会被任何进程使用。
-   * 通知停止只用这份绑定指向的机器人 token。
-   */
   unbind(accountId: string): { accountId: string; removed: string[]; sessions: { baseUrl: string; token: string }[] } {
     const id = this.assertAccountId(accountId);
-    const binding = removeWeixinBinding(this.stateDir, id);
-    const accounts = this.readAccountFiles();
+    const stateRoot = this.userRoot(id);
+    const binding = removeWeixinBinding(stateRoot, id);
+    const accounts = this.readAccountFiles(stateRoot);
     const sessions: { baseUrl: string; token: string }[] = [];
     const boundBot = binding ? accounts.find((a) => a.id === binding.botAccountId) : undefined;
     if (boundBot?.token) sessions.push({ baseUrl: boundBot.baseUrl, token: boundBot.token });
@@ -331,13 +367,13 @@ export class WeixinLoginService {
     if (binding) {
       names.push(`${binding.botAccountId}.context-tokens.json`, `${binding.botAccountId}.user-tokens.json`);
     }
-    const removed = this.removeAccountFiles(id, names);
+    const removed = this.removeAccountFiles(stateRoot, names);
     if (binding) removed.push(`binding:${id}`);
     return { accountId: id, removed, sessions };
   }
 
-  private readAccountFiles(): { id: string; token: string; baseUrl: string; savedAt: string }[] {
-    const dir = this.accountsDir();
+  private readAccountFiles(stateRoot: string): { id: string; token: string; baseUrl: string; savedAt: string }[] {
+    const dir = this.accountsDirFor(stateRoot);
     if (!existsSync(dir)) return [];
     const out: { id: string; token: string; baseUrl: string; savedAt: string }[] = [];
     for (const f of readdirSync(dir)) {
@@ -366,21 +402,22 @@ export class WeixinLoginService {
    */
   clearChannelTokenCache(accountId: string): { accountId: string; removed: string[] } {
     const id = this.assertAccountId(accountId);
-    const binding = readWeixinBinding(this.stateDir, id);
+    const stateRoot = this.userRoot(id);
+    const binding = readWeixinBinding(stateRoot, id);
     const names = new Set<string>([`${id}.context-tokens.json`, `${id}.user-tokens.json`]);
     if (binding) {
       names.add(`${binding.botAccountId}.context-tokens.json`);
       names.add(`${binding.botAccountId}.user-tokens.json`);
     }
-    return { accountId: id, removed: this.removeAccountFiles(id, [...names]) };
+    return { accountId: id, removed: this.removeAccountFiles(stateRoot, [...names]) };
   }
 
   private assertAccountId(accountId: string): string {
     return assertWeixinUsername(accountId);
   }
 
-  private removeAccountFiles(id: string, names: string[]): string[] {
-    const dir = this.accountsDir();
+  private removeAccountFiles(stateRoot: string, names: string[]): string[] {
+    const dir = this.accountsDirFor(stateRoot);
     const removed: string[] = [];
     for (const name of names) {
       const file = join(dir, name);
@@ -394,7 +431,6 @@ export class WeixinLoginService {
   /** 懒加载 openclaw-weixin channel 插件（模拟 register 提取 gateway.loginWithQr*） */
   private async handle(): Promise<WeixinChannelPlugin> {
     if (this.channelHandle) return this.channelHandle;
-    process.env.OPENCLAW_STATE_DIR = this.stateDir;
     const mod = (await import('@tencent-weixin/openclaw-weixin/dist/index.js')) as { default?: unknown };
     const plugin = mod.default as { register(api: unknown): void };
     if (!plugin || typeof plugin.register !== 'function') {
@@ -425,7 +461,10 @@ export class WeixinLoginService {
    * 插件自己把 token 写成 *-im-bot.json，绑定由扫码结果另记。
    */
   async startQr(force = true, accountId?: string): Promise<{ sessionKey?: string; qrContent: string }> {
-    if (accountId) this.assertAccountId(accountId);
+    if (accountId) {
+      this.assertAccountId(accountId);
+      this.preparePluginEnv(accountId);
+    }
     const h = await this.handle();
     const start = await h.gateway.loginWithQrStart({ force, verbose: false });
     if (!start.qrDataUrl) {
@@ -436,7 +475,10 @@ export class WeixinLoginService {
 
   /** 轮询扫码结果。accountId 不传给插件，避免插件按登录用户名另写一份登录态。 */
   async waitQr(sessionKey?: string, timeoutMs = 8_000, accountId?: string): Promise<QrWaitResult> {
-    if (accountId) this.assertAccountId(accountId);
+    if (accountId) {
+      this.assertAccountId(accountId);
+      this.preparePluginEnv(accountId);
+    }
     const h = await this.handle();
     const stopWatch = sessionKey
       ? watchQrRefresh((url) => {
@@ -538,21 +580,21 @@ export function registerWeixinApi(
     const user = deps.sessionUser?.(request);
     const admin = isAdmin(request);
     if (!user && !admin) return null;
-    const savedPlugins = full.accounts.filter((a) => a.id.endsWith('-im-bot'));
-    const bindings = full.bindings ?? [];
     const slotFor = (username: string): WeixinAccountInfo | undefined => {
-      const binding = bindings.find((b) => b.username === username);
-      if (!binding) return undefined;
-      const bot = full.accounts.find((a) => a.id === binding.botAccountId);
-      if (!bot) return undefined;
+      if (!service.hasToken(username)) return undefined;
+      const { bindings, pluginAccounts } = service.userPluginStatus(username);
+      const binding = bindings[0];
+      const bot = binding ? pluginAccounts.find((a) => a.id === binding.botAccountId) : undefined;
+      if (!binding || !bot) return undefined;
       return { id: username, userId: bot.userId, savedAt: bot.savedAt, botAccountId: bot.id };
     };
     const bindId = user?.username;
     if (!bindId) {
-      const slots = bindings.flatMap((b) => {
-        const slot = slotFor(b.username);
+      const slots = service.listLoginUsernames().flatMap((u) => {
+        const slot = slotFor(u);
         return slot ? [slot] : [];
       });
+      const savedPlugins = full.accounts.filter((a) => a.id.endsWith('-im-bot'));
       return {
         configured: slots.length > 0,
         accounts: slots,
@@ -561,6 +603,7 @@ export function registerWeixinApi(
       };
     }
     const mine = slotFor(bindId);
+    const savedPlugins = service.userPluginStatus(bindId).pluginAccounts;
     return {
       configured: mine !== undefined,
       accounts: mine ? [mine] : [],

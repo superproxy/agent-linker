@@ -33,11 +33,15 @@ pnpm --filter @linkagent/web build    # 前端构建
 
 ### 三类数据（不要混成 `<用户名>.json`）
 
+**与 admin / 普通用户角色无关**：凡 web 登录账号（含 `admin`）扫码、`weixin:<username>` 进程，一律单独设置 **`OPENCLAW_STATE_DIR`** = `<pluginsRoot>/login-users/<username>/`（见 `weixin-login-state.ts`）。共用顶层 `plugins/openclaw-weixin/accounts/` 会导致任意两人 token 串号、`binded_redirect` 错绑，不是「仅普通用户」才需要隔离。
+
 | 位置 | 含义 |
 |---|---|
-| `OPENCLAW_STATE_DIR/openclaw-weixin/accounts/<botId>-im-bot.json` | 插件扫码后写入的 **ilink 机器人登录态**（token、游标 `.sync.json` 等） |
-| `OPENCLAW_STATE_DIR/openclaw-weixin/bindings/<username>.json` | **绑定表**：登录用户 → 指向哪个 `*-im-bot` 文件（`weixin-binding.ts`，KV store） |
+| `login-users/<username>/openclaw-weixin/accounts/<botId>-im-bot.json` | 该用户扫码后插件写入的 **ilink 机器人登录态**（token、游标 `.sync.json` 等） |
+| `login-users/<username>/openclaw-weixin/bindings/<username>.json` | **绑定表**：该登录用户 → 指向本目录下哪个 `*-im-bot` 文件（`weixin-binding.ts`，KV store） |
 | `config.yaml` → `weixin.accounts` | 哪些登录用户需要维护 **`weixin:<username>`** 进程（扫码成功后写入，`mode: external`） |
+
+遗留的共享 `plugins/openclaw-weixin/accounts/` 仅 status 聚合展示；新扫码只写对应用户的 `login-users/<username>/`。
 
 规则：**不复制**插件 json 成 `admin.json`；**没有绑定**时页面不算已绑定，`weixin:admin` **启动即失败**，不会借用别的 `*-im-bot`。
 
@@ -45,7 +49,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 
 1. **注册/登录** web 账号（如 `admin`、`alice`）。
 2. **扫码**：`POST /api/weixin/qr` + 轮询 `GET /api/weixin/qr/status`（`accountId` = 当前登录用户名；**不传给插件**，避免插件按用户名另写登录文件）。
-3. **插件落盘**：成功时在 `accounts/` 写入 `89b53341f048-im-bot.json`（回传 id 常为 `89b53341f048@im.bot`，网关侧 `normalizeBotAccountId` 再绑定）。
+3. **插件落盘**：成功时在 **当前用户的** `login-users/<username>/openclaw-weixin/accounts/` 写入 `89b53341f048-im-bot.json`（回传 id 常为 `89b53341f048@im.bot`，网关侧 `normalizeBotAccountId` 再绑定）。
 4. **写绑定**：`claimWeixinBinding(username, pluginAccountId)`；若微信 `binded_redirect` 不再下发 token，则 `bindNewestUnclaimed` 把**尚未被其他用户占用**的最新 `*-im-bot` 指给当前用户（仍只写 bindings，不复制文件）。
 5. **登记进程**：`onBound` → `persistEnsureWeixinAccount` 把用户名写入 `weixin.accounts`，`pm.restart(['weixin:<username>'])`。
 6. **独立 bot 进程**：supervisor 注入 `LINKAGENT_ACCOUNT_ID=<username>` → `loadBoundWeixinAccount` → 读绑定指向的 `*-im-bot.json` 做 getUpdates/sendMessage。

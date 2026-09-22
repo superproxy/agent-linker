@@ -30,6 +30,7 @@ import { runChatSession, GatewayUnauthorizedError } from './gateway-chat.js';
 import { TaskRouter } from './task-router.js';
 import { HttpUserTokenProvider, type UserTokenProvider } from './user-token.js';
 import { loadBoundWeixinAccount } from './weixin-binding.js';
+import { ensureWeixinLoginStateDir } from './weixin-login-state.js';
 import {
   extractText,
   getUpdates,
@@ -44,7 +45,8 @@ import {
 const DEFAULT_GATEWAY_URL = process.env.LINKAGENT_GATEWAY_URL ?? 'http://127.0.0.1:8787';
 const DEFAULT_GATEWAY_MODEL = process.env.LINKAGENT_GATEWAY_MODEL ?? 'agent:pi';
 const DEFAULT_GATEWAY_TOKEN = process.env.LINKAGENT_GATEWAY_TOKEN ?? '';
-const DEFAULT_STATE_DIR = process.env.LINKAGENT_STATE_DIR ?? getLayout().pluginsState;
+/** 插件运行态根；每登录用户实际为 <root>/login-users/<用户名>/ */
+const DEFAULT_PLUGINS_ROOT = process.env.LINKAGENT_STATE_DIR ?? getLayout().pluginsState;
 const DEFAULT_ACCOUNT_ID = process.env.LINKAGENT_ACCOUNT_ID;
 
 /** 单条微信消息体长度上限（ilink 文本消息建议 <=2000 字符，超出分段发送） */
@@ -171,12 +173,13 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const gatewayUrl = options.gatewayUrl ?? DEFAULT_GATEWAY_URL;
   const gatewayToken = options.gatewayToken ?? DEFAULT_GATEWAY_TOKEN;
   const model = options.model ?? DEFAULT_GATEWAY_MODEL;
-  const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
-  /** 登录用户名（weixin:<username> 进程注入）；有值时必须已有绑定，再读插件写下的 *-im-bot.json */
+  const pluginsRoot = options.stateDir ?? DEFAULT_PLUGINS_ROOT;
+  /** 登录用户名（weixin:<username> 进程注入）；有值时必须已有绑定，再读该用户插件目录下的 *-im-bot.json */
   const bindUsername = (options.accountId ?? DEFAULT_ACCOUNT_ID)?.trim();
+  const stateDir = bindUsername ? ensureWeixinLoginStateDir(pluginsRoot, bindUsername) : pluginsRoot;
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
-  const account = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(stateDir);
+  const account = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(pluginsRoot);
   /** 任务空间 / ct_ 归属登录用户，不是 ilink 机器人 id */
   const ownerUsername = bindUsername ?? account.id;
 
@@ -322,7 +325,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 
     const applyDiskToken = (): boolean => {
       try {
-        const fresh = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(stateDir);
+        const fresh = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(pluginsRoot);
         if (fresh.token === account.token && fresh.baseUrl === account.baseUrl && fresh.id === account.id) return false;
         account.id = fresh.id;
         account.token = fresh.token;
