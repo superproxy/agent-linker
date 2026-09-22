@@ -18,7 +18,7 @@
  *   LINKAGENT_GATEWAY_URL    网关 base（默认 http://127.0.0.1:8787）
  *   LINKAGENT_GATEWAY_MODEL  模型（默认 agent:pi）
  *   LINKAGENT_GATEWAY_TOKEN  网关静态 token（网关开启 auth 时必填；托管时进程自读共享配置）
- *   LINKAGENT_ACCOUNT_ID     微信登录态账号 id（缺省取 accounts/ 下第一个）
+ *   LINKAGENT_ACCOUNT_ID     登录用户名。进程只读该用户的绑定，再打开对应的 *-im-bot.json
  *   LINKAGENT_STATE_DIR      登录态目录（默认 <repo>/.runtime-state/plugins）
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -29,12 +29,12 @@ import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { runChatSession, GatewayUnauthorizedError } from './gateway-chat.js';
 import { TaskRouter } from './task-router.js';
 import { HttpUserTokenProvider, type UserTokenProvider } from './user-token.js';
+import { loadBoundWeixinAccount } from './weixin-binding.js';
 import {
   extractText,
   getUpdates,
   isIlinkSessionExpired,
   loadLatestWeixinAccount,
-  loadWeixinAccount,
   sendText,
   type WeixinAccount,
   type WeixinInboundMessage,
@@ -172,26 +172,26 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const gatewayToken = options.gatewayToken ?? DEFAULT_GATEWAY_TOKEN;
   const model = options.model ?? DEFAULT_GATEWAY_MODEL;
   const stateDir = options.stateDir ?? DEFAULT_STATE_DIR;
-  const preferredAccountId = (options.accountId ?? DEFAULT_ACCOUNT_ID)?.trim();
+  /** 登录用户名（weixin:<username> 进程注入）；有值时必须已有绑定，再读插件写下的 *-im-bot.json */
+  const bindUsername = (options.accountId ?? DEFAULT_ACCOUNT_ID)?.trim();
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
-  const account = preferredAccountId
-    ? loadWeixinAccount(stateDir, preferredAccountId)
-    : loadLatestWeixinAccount(stateDir);
-  const ownerId = account.id;
+  const account = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(stateDir);
+  /** 任务空间 / ct_ 归属登录用户，不是 ilink 机器人 id */
+  const ownerUsername = bindUsername ?? account.id;
 
   // 用户级 token：内嵌模式用网关注入的签发器；external 独立进程用静态 token 经引导接口换取（落盘缓存）
   const tokenProvider: UserTokenProvider | undefined =
     options.userTokenProvider ??
     (gatewayToken
-      ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: ownerId, log })
+      ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: ownerUsername, log })
       : undefined);
 
   // bot 路由层：选中任务缓存（网关 /api/tasks 为单一事实源），按用户携带用户级 token
   const router = new TaskRouter({
     gatewayUrl,
     channel: 'weixin',
-    ownerUsername: ownerId,
+    ownerUsername,
     ...(gatewayToken ? { gatewayToken } : {}),
     ...(tokenProvider
       ? { resolveToken: (userId: string, force?: boolean) => tokenProvider.resolve('weixin', userId, force) }
@@ -280,7 +280,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
         model,
         channel: 'weixin',
         userId: from,
-        ownerUsername: account.id,
+        ownerUsername,
         message: text,
         ...(bearer ? { gatewayToken: bearer } : {}),
         // 命令：网关本地解析回文本；普通消息：按激活任务路由（agent/task 透传）
@@ -322,8 +322,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
 
     const applyDiskToken = (): boolean => {
       try {
-        const fresh = loadLatestWeixinAccount(stateDir, preferredAccountId);
-        if (fresh.token === account.token && fresh.baseUrl === account.baseUrl) return false;
+        const fresh = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(stateDir);
+        if (fresh.token === account.token && fresh.baseUrl === account.baseUrl && fresh.id === account.id) return false;
         account.id = fresh.id;
         account.token = fresh.token;
         account.baseUrl = fresh.baseUrl;
@@ -331,7 +331,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
         account.savedAt = fresh.savedAt;
         buf = '';
         consecutiveFailures = 0;
-        log(`[bot] 已从磁盘热更新微信 token（账号 ${fresh.id}），继续收消息`);
+        log(`[bot] 已从磁盘热更新微信 token（机器人 ${fresh.id}${bindUsername ? `，登录用户 ${bindUsername}` : ''}），继续收消息`);
         return true;
       } catch {
         return false;
@@ -398,7 +398,9 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
     log('[bot] monitor 已停止');
   };
 
-  log(`[bot] 账号 ${account.id} (${account.userId || '未知用户'})`);
+  log(
+    `[bot] 机器人 ${account.id} (${account.userId || '未知微信侧用户'})${bindUsername && bindUsername !== account.id ? ` · 登录用户 ${bindUsername}` : ''}`,
+  );
   log(`[bot] 网关 ${gatewayUrl}  模型 ${model}`);
   const restored = loadContextTokens(stateDir, account.id);
   if (restored > 0) log(`[bot] 恢复 ${restored} 个用户 context_token`);

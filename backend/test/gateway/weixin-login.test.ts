@@ -10,6 +10,7 @@ import Fastify from 'fastify';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { claimWeixinBinding } from '../../src/channels/weixin-binding.js';
 import { registerWeixinApi, WeixinLoginService, normalizeQrWait, takeRefreshedQrUrl } from '../../src/gateway/weixin-login.js';
 
 interface StartCall {
@@ -36,9 +37,9 @@ function buildStub() {
       // 模拟插件回写 *-im-bot，与登录账号槽不一致
       return { connected: true, accountId: '51d9f31fb43e-im-bot' };
     },
-    hasToken: () => false,
-    adoptSolePluginToken: () => false,
-    adoptPluginAccount() {},
+    hasToken: (id: string) => id === 'acc-1' || id === 'alice',
+    bindNewestUnclaimed: () => false,
+    claimBinding: () => 'ok' as const,
   } as unknown as WeixinLoginService;
   return { service, calls };
 }
@@ -112,13 +113,14 @@ test('GET /api/weixin/qr/status 机器人已绑定但本机无 token → 不拉�
   }
 });
 
-test('GET /api/weixin/qr/status 机器人已绑定且只有 *-im-bot.json → 拷到账号槽并拉起', async () => {
+test('GET /api/weixin/qr/status 机器人已绑定且只有 *-im-bot.json → 写绑定并拉起', async () => {
   const { service, calls } = buildStub();
   (service as { waitQr: typeof service.waitQr }).waitQr = async (sessionKey, timeoutMs, accountId) => {
     calls.wait.push({ sessionKey, timeoutMs, accountId });
     return { connected: false, message: '已连接过此 OpenClaw，无需重复连接。' };
   };
-  (service as { adoptSolePluginToken: (id: string) => boolean }).adoptSolePluginToken = (id) => id === 'alice';
+  (service as { bindNewestUnclaimed: (id: string) => boolean }).bindNewestUnclaimed = (id) => id === 'alice';
+  (service as { hasToken: (id: string) => boolean }).hasToken = (id) => id === 'alice';
   const bound: string[] = [];
   const app = Fastify();
   registerWeixinApi(app, service, () => true, {
@@ -142,30 +144,32 @@ test('GET /api/weixin/qr/status 机器人已绑定且只有 *-im-bot.json → �
   }
 });
 
-test('adoptSolePluginToken：重新绑定把最新且未被其他用户占用的 im-bot 登录态写入账号槽', () => {
+test('bindNewestUnclaimed：重新绑定只写指向，不复制 <用户名>.json', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-adopt-'));
   const dir = join(stateDir, 'openclaw-weixin', 'accounts');
   mkdirSync(dir, { recursive: true });
   const acc = (id: string, savedAt: string) =>
     JSON.stringify({ token: `tok-${id}`, userId: `wx_${id}`, savedAt });
   writeFileSync(join(dir, '9e36d56ffb65-im-bot.json'), acc('plugin', '2026-09-21T07:41:42.402Z'));
-  writeFileSync(join(dir, '9e36d56ffb65-im-bot.sync.json'), '{}');
   const svc = new WeixinLoginService({ stateDir });
   assert.equal(svc.hasToken('admin'), false);
-  assert.equal(svc.adoptSolePluginToken('admin'), true);
+  assert.equal(svc.bindNewestUnclaimed('admin'), true);
   assert.equal(svc.hasToken('admin'), true);
-  assert.equal(JSON.parse(readFileSync(join(dir, 'admin.json'), 'utf8')).token, 'tok-plugin');
-  assert.equal(existsSync(join(dir, 'admin.sync.json')), true);
+  assert.equal(existsSync(join(dir, 'admin.json')), false);
+  assert.equal(svc.claimBinding('admin2', '89b53341f048@im.bot'), 'missing');
+  writeFileSync(join(dir, '89b53341f048-im-bot.json'), acc('fresh', '2026-09-22T03:00:00.000Z'));
+  assert.equal(svc.claimBinding('admin2', '89b53341f048@im.bot'), 'ok');
+  assert.equal(existsSync(join(dir, 'admin2.json')), false);
 
   const stateDir2 = mkdtempSync(join(tmpdir(), 'linkagent-wx-adopt2-'));
   const dir2 = join(stateDir2, 'openclaw-weixin', 'accounts');
   mkdirSync(dir2, { recursive: true });
   writeFileSync(join(dir2, '111111111111-im-bot.json'), acc('a', '2026-01-01T00:00:00.000Z'));
   writeFileSync(join(dir2, '222222222222-im-bot.json'), acc('b', '2026-09-22T00:00:00.000Z'));
-  writeFileSync(join(dir2, 'alice.json'), acc('alice', '2026-08-01T00:00:00.000Z'));
+  claimWeixinBinding(stateDir2, 'alice', '111111111111-im-bot');
   const svc2 = new WeixinLoginService({ stateDir: stateDir2 });
-  assert.equal(svc2.adoptSolePluginToken('bob'), true);
-  assert.equal(JSON.parse(readFileSync(join(dir2, 'bob.json'), 'utf8')).token, 'tok-b');
+  assert.equal(svc2.bindNewestUnclaimed('bob'), true);
+  assert.equal(existsSync(join(dir2, 'bob.json')), false);
 });
 
 test('GET /api/weixin/qr/status 机器人已绑定且本机有 token → 沿用并拉起进程', async () => {
@@ -275,10 +279,8 @@ test('管理员也只看自己的绑定；残留 *-im-bot 不算已绑定', asyn
   const { service } = buildStub();
   (service as { status: () => unknown }).status = () => ({
     configured: true,
-    accounts: [
-      { id: 'admin', userId: 'wx_admin' },
-      { id: '518304d8e5fd-im-bot', userId: 'o9cq80@im.wechat', savedAt: '2026-09-21T07:41:42.402Z' },
-    ],
+    accounts: [{ id: '518304d8e5fd-im-bot', userId: 'o9cq80@im.wechat', savedAt: '2026-09-21T07:41:42.402Z' }],
+    bindings: [{ username: 'admin', botAccountId: '518304d8e5fd-im-bot', boundAt: '2026-09-21T07:41:42.402Z' }],
     activeAccountId: '518304d8e5fd-im-bot',
   });
   const app = Fastify();
@@ -306,6 +308,7 @@ test('管理员也只看自己的绑定；残留 *-im-bot 不算已绑定', asyn
   (service as { status: () => unknown }).status = () => ({
     configured: true,
     accounts: [{ id: '518304d8e5fd-im-bot', userId: 'o9cq80@im.wechat' }],
+    bindings: [],
     activeAccountId: '518304d8e5fd-im-bot',
   });
   const app2 = Fastify();
@@ -328,10 +331,14 @@ test('普通用户扫码强制本人账号槽，看不到其他人账号', async
   (service as { status: () => unknown }).status = () => ({
     configured: true,
     accounts: [
-      { id: 'alice', userId: 'wx_a' },
-      { id: 'admin', userId: 'wx_admin' },
+      { id: 'bot-alice-im-bot', userId: 'wx_a' },
+      { id: 'bot-admin-im-bot', userId: 'wx_admin' },
     ],
-    activeAccountId: 'admin',
+    bindings: [
+      { username: 'alice', botAccountId: 'bot-alice-im-bot', boundAt: '2026-01-01' },
+      { username: 'admin', botAccountId: 'bot-admin-im-bot', boundAt: '2026-01-01' },
+    ],
+    activeAccountId: 'bot-admin-im-bot',
   });
   const bound: string[] = [];
   const app = Fastify();
@@ -422,40 +429,31 @@ test('POST /api/weixin/unbind：普通用户只能解绑自己，并回调 onUnb
   }
 });
 
-test('WeixinLoginService.unbind：删除账号槽登录态且不影响其它账号', () => {
+test('WeixinLoginService.unbind：去掉绑定并清缓存，保留 *-im-bot.json', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-unbind-'));
   const dir = join(stateDir, 'openclaw-weixin', 'accounts');
   mkdirSync(dir, { recursive: true });
   const acc = (id: string) =>
     JSON.stringify({ token: `tok-${id}`, userId: `wx_${id}`, savedAt: '2026-01-01' });
-  writeFileSync(join(dir, 'alice.json'), acc('alice'));
-  writeFileSync(join(dir, 'alice.sync.json'), '{}');
-  writeFileSync(join(dir, 'alice.context-tokens.json'), '{}');
-  writeFileSync(join(dir, 'alice.user-tokens.json'), '{}');
+  writeFileSync(join(dir, '51d9f31fb43e-im-bot.json'), acc('plugin'));
   writeFileSync(join(dir, '51d9f31fb43e-im-bot.user-tokens.json'), '{}');
-  writeFileSync(join(dir, 'bob.json'), acc('bob'));
+  writeFileSync(join(dir, 'alice.user-tokens.json'), '{}');
+  claimWeixinBinding(stateDir, 'alice', '51d9f31fb43e-im-bot');
+  writeFileSync(join(dir, '222222222222-im-bot.json'), acc('bob-bot'));
+  claimWeixinBinding(stateDir, 'bob', '222222222222-im-bot');
   const svc = new WeixinLoginService({ stateDir });
   assert.equal(svc.status().configured, true);
-  writeFileSync(join(dir, '51d9f31fb43e-im-bot.json'), acc('plugin'));
-  svc.adoptPluginAccount('carol', '51d9f31fb43e-im-bot');
-  assert.equal(existsSync(join(dir, 'carol.json')), true);
   const cache = svc.clearChannelTokenCache('alice');
-  assert.deepEqual(cache.removed.sort(), [
-    '51d9f31fb43e-im-bot.user-tokens.json',
-    'alice.context-tokens.json',
-    'alice.user-tokens.json',
-  ]);
-  assert.equal(existsSync(join(dir, 'alice.json')), true);
+  assert.deepEqual(cache.removed.sort(), ['51d9f31fb43e-im-bot.user-tokens.json', 'alice.user-tokens.json']);
   const r = svc.unbind('alice');
-  assert.deepEqual(r.removed.sort(), ['alice.json', 'alice.sync.json']);
-  assert.equal(existsSync(join(dir, 'alice.json')), false);
-  assert.equal(existsSync(join(dir, 'bob.json')), true);
-  const left = svc.status().accounts.map((a) => a.id).sort();
-  assert.deepEqual(left, ['51d9f31fb43e-im-bot', 'bob', 'carol']);
+  assert.ok(r.removed.includes('binding:alice'));
+  assert.equal(existsSync(join(dir, '51d9f31fb43e-im-bot.json')), true);
+  assert.equal(svc.hasToken('alice'), false);
+  assert.equal(svc.hasToken('bob'), true);
   assert.throws(() => svc.unbind('../evil'), /非法微信账号槽/);
 });
 
-test('WeixinLoginService.unbind：没有用户槽时清掉无人认领的 *-im-bot 登录态', () => {
+test('WeixinLoginService.unbind：无绑定时只删遗留的 <用户名>.json', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-orphan-'));
   const dir = join(stateDir, 'openclaw-weixin', 'accounts');
   mkdirSync(dir, { recursive: true });
@@ -463,12 +461,11 @@ test('WeixinLoginService.unbind：没有用户槽时清掉无人认领的 *-im-b
     join(dir, '518304d8e5fd-im-bot.json'),
     JSON.stringify({ token: 'tok-remote', baseUrl: 'https://ilinkai.weixin.qq.com', userId: 'wx', savedAt: '2026-09-22' }),
   );
-  writeFileSync(join(dir, '518304d8e5fd-im-bot.sync.json'), JSON.stringify({ get_updates_buf: 'cursor' }));
+  writeFileSync(join(dir, 'yxz.json'), JSON.stringify({ token: 'legacy', savedAt: '2026-01-01' }));
   const svc = new WeixinLoginService({ stateDir });
   const r = svc.unbind('yxz');
-  assert.equal(existsSync(join(dir, '518304d8e5fd-im-bot.json')), false);
-  assert.equal(existsSync(join(dir, '518304d8e5fd-im-bot.sync.json')), false);
-  assert.equal(r.sessions.length, 1);
-  assert.equal(r.sessions[0]?.token, 'tok-remote');
+  assert.equal(existsSync(join(dir, '518304d8e5fd-im-bot.json')), true);
+  assert.equal(existsSync(join(dir, 'yxz.json')), false);
+  assert.equal(r.sessions.length, 0);
   assert.equal(svc.status().configured, false);
 });

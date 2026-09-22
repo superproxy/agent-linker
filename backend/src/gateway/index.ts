@@ -869,18 +869,20 @@ export async function buildServer(options?: {
 
   // weixin-bot 句柄：server listen 后由 main 启动（长轮询 monitor 需网关 /v1 已就绪）
   let weixinBotHandle: WeixinBotHandle | null = null;
+  const embedWeixinLoginUser =
+    config.weixin?.accounts?.find((a) => a.trim())?.trim() || config.weixin?.accountId?.trim() || undefined;
   const weixinBot = embedWeixinBot
     ? {
         async start(): Promise<void> {
           weixinBotHandle = await startWeixinBot({
             gatewayUrl: `http://127.0.0.1:${gw.server.port}`,
             model: config.weixin?.model || undefined,
-            accountId: config.weixin?.accountId || undefined,
+            ...(embedWeixinLoginUser ? { accountId: embedWeixinLoginUser } : {}),
             // 内嵌模式回连本机网关：local/token 模式携带永久 gateway token（回环免登录亦可，但显式带 token 更稳）
             ...(auth.token ? { gatewayToken: auth.token } : {}),
             // 内嵌模式：直接在进程内为每个微信用户签发/复用用户级 token（无需 HTTP 引导）
             userTokenProvider: new InProcessUserTokenProvider((channel, userId) =>
-              channelTokenStore.ensure(channel, userId, undefined, config.weixin?.accountId).token,
+              channelTokenStore.ensure(channel, userId, undefined, embedWeixinLoginUser).token,
             ),
             log: (...args: unknown[]) => app.log.info(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')),
             errLog: (...args: unknown[]) => app.log.error(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' ')),
