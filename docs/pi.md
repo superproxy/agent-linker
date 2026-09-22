@@ -97,18 +97,28 @@ pi list
 
 先装 `pi-auto-review`，沙箱出网审批依赖它的 broker。
 
-可选白名单 `~/.pi/agent/extensions/pi-sandbox/config.json`（无人值守时至少放行模型/包管理域名，否则 bash 出网会卡住）：
+`--sandbox` 会合并 `~/.pi/agent/extensions/pi-sandbox/config.json`（已有项保留，只补缺）：
 
 ```json
 {
   "subagents": { "provider": "builtin" },
+  "filesystem": {
+    "additionalAllowRead": [
+      "/home/user/.pi/agent/skills",
+      "/home/user/.agents/skills"
+    ]
+  },
   "network": {
-    "allowedDomains": ["registry.npmjs.org:443"]
+    "allowedDomains": ["127.0.0.1"]
   }
 }
 ```
 
-火山方舟实际域名按你 `models.json` 的 `baseUrl` 补进 `allowedDomains`（例如 `ark.cn-beijing.volces.com:443`）。不要把可当投递通道的宽域名随手放开。
+沙箱默认拒绝读整个家目录，bash 里的 `ls` / `read` 因此看不到全局 skills，skill 加载会失败。`additionalAllowRead` 只放开这两个目录。`127.0.0.1` 让沙箱内 `curl` 能打本机网关（任务 skill 的 `LINKAGENT_BASE_URL`）。插件不接受无点的 `localhost`，地址请用 `127.0.0.1`。
+
+插件的 `hostIPC.preflightCommandPrefixes` 只是把某条命令送去一次性审批，没有界面时会直接拒绝，不能当成默认放行 `ls` 或 `curl`。
+
+火山方舟、npm 等其它域名仍按需补进 `allowedDomains`（例如 `ark.cn-beijing.volces.com:443`、`registry.npmjs.org:443`）。不要把可当投递通道的宽域名随手放开。
 
 自检：在工作区外读 `~/.ssh` 或写 `/etc` 应被拒；只改当前工作区应通过。
 
@@ -120,6 +130,8 @@ pi list
 | `Sandbox not supported on win32` / 扩展提示 Windows 不可用 | 适配器不支持 Windows | 把 pi 放到 Linux 云机或 WSL2，不要在 Win 上开沙箱 |
 | 会话答非所问 / 设模型失败 / Internal error | yaml 写死了未在 pi 注册的 `volcengine/...` 等 | 清空 `agents[].model`，用 pi 自己的 settings 默认；后台切模型只能选 `models.json` 已有项 |
 | bash 卡住等审批 | 出网未进 `allowedDomains`，且无人点审批 | 写 trusted `config.json` 白名单，或关沙箱只留 ACP 策略 |
+| 沙箱里 `ls` 不到全局 skills，skill 读不到 `SKILL.md` | 家目录默认拒绝读 | 重跑 `pnpm setup:pi --sandbox`，确认 `additionalAllowRead` 含 `~/.pi/agent/skills` 与 `~/.agents/skills` |
+| `curl http://127.0.0.1:...` 被沙箱拒绝 | 回环不在白名单；`localhost` 写法插件不接受 | 白名单写 `127.0.0.1`（`--sandbox` 会补上） |
 | `bwrap: ... Operation not permitted` | 云镜像关闭非特权 user namespace | AppArmor / sysctl，见 §3.1 |
 
 ## 5. 网关不会自动做的事

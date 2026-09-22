@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -11,8 +11,10 @@ import {
   identityForLoginTask,
   isSkillRequest,
   readTaskSkillMarkdown,
+  TASK_SKILL_DIR,
   taskSkillProcessEnv,
   writeTaskSkillFiles,
+  writeTaskSkillMarkdown,
 } from '../../src/gateway/tasks/skill-files.js';
 import { findRepoRoot } from '../../src/install/layout.js';
 
@@ -52,7 +54,7 @@ test('ensureLoginSpace 只给默认任务写 SKILL.md，凭据走 env 不落盘 
   const space = svc.ensureLoginSpace('alice');
   const cwd = space.tasks[0]?.cwd;
   assert.ok(cwd);
-  const skillPath = join(cwd, '.skills', 'linkagent-tasks', 'SKILL.md');
+  const skillPath = join(cwd, TASK_SKILL_DIR, 'SKILL.md');
   const identPath = join(cwd, '.linkagent', 'identity.json');
   assert.equal(existsSync(skillPath), true);
   assert.equal(existsSync(identPath), false);
@@ -63,7 +65,7 @@ test('ensureLoginSpace 只给默认任务写 SKILL.md，凭据走 env 不落盘 
   assert.equal(env?.LINKAGENT_TOKEN, 'pat_alice');
   const extra = svc.createTask(space, '执行任务', 'pi', undefined, undefined, 'node-1');
   assert.equal(svc.skillEnvForTask(space, extra.id), undefined);
-  assert.equal(existsSync(join(extra.cwd!, '.skills', 'linkagent-tasks', 'SKILL.md')), false);
+  assert.equal(existsSync(join(extra.cwd!, TASK_SKILL_DIR, 'SKILL.md')), false);
 });
 
 test('X-LinkAgent-Skill + 网关 token 类凭据 → 403；personal 放行', async () => {
@@ -102,7 +104,17 @@ test('writeTaskSkillFiles 落盘', () => {
     taskKey: 'k_1',
     token: 'pat_1',
   }));
-  assert.equal(existsSync(join(cwd, '.skills', 'linkagent-tasks', 'SKILL.md')), true);
+  assert.equal(existsSync(join(cwd, TASK_SKILL_DIR, 'SKILL.md')), true);
+});
+
+test('writeTaskSkillMarkdown 写到 .agents/skills，并删掉旧的 .skills 副本', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'cwd-'));
+  const legacy = join(cwd, '.skills', 'linkagent-tasks');
+  mkdirSync(legacy, { recursive: true });
+  writeFileSync(join(legacy, 'SKILL.md'), '# old\n');
+  writeTaskSkillMarkdown(cwd, '# skill\n');
+  assert.equal(existsSync(join(cwd, '.agents', 'skills', 'linkagent-tasks', 'SKILL.md')), true);
+  assert.equal(existsSync(legacy), false);
 });
 
 test('taskSkillProcessEnv 映射 LINKAGENT_*', () => {

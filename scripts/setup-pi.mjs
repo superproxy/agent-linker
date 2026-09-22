@@ -12,7 +12,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PI_CODING_AGENT = '@earendil-works/pi-coding-agent';
@@ -68,6 +68,90 @@ export function mergePiSettings(existing, patch, force) {
     next.defaultModel = patch.defaultModel;
   }
   return next;
+}
+
+/** 沙箱里 bash 访问本机网关用的地址。插件不接受无点的 localhost。 */
+export const PI_SANDBOX_LOOPBACK = '127.0.0.1';
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function uniqueStrings(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of values) {
+    if (typeof value !== 'string' || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+/**
+ * pi 全局 skills 在 ~/.pi/agent/skills，Agent Skills 规范目录在 ~/.agents/skills。
+ * --home 指向某个 `.pi` 时，后者跟该目录的上一级，而不是当前进程的用户主目录。
+ */
+export function piSandboxSkillReadPaths(agentDir) {
+  const piHome = dirname(agentDir);
+  const userHome = basename(piHome) === '.pi' ? dirname(piHome) : homedir();
+  return [join(agentDir, 'skills'), join(userHome, '.agents', 'skills')];
+}
+
+/** 首次安装沙箱时写入的默认策略：可读 skills，bash 可访问 127.0.0.1。 */
+export function defaultPiSandboxConfig(agentDir) {
+  return {
+    subagents: { provider: 'builtin' },
+    filesystem: {
+      additionalAllowRead: piSandboxSkillReadPaths(agentDir),
+    },
+    network: {
+      allowedDomains: [PI_SANDBOX_LOOPBACK],
+    },
+  };
+}
+
+/**
+ * 合并已有 pi-sandbox 配置。补上 skills 读路径和 127.0.0.1，保留用户已有域名、provider、hostIPC。
+ */
+export function mergePiSandboxConfig(existing, patch) {
+  const base = isPlainObject(existing) ? existing : {};
+  const filesystem = isPlainObject(base.filesystem) ? base.filesystem : {};
+  const network = isPlainObject(base.network) ? base.network : {};
+  const subagents = isPlainObject(base.subagents) ? { provider: 'builtin', ...base.subagents } : { provider: 'builtin' };
+  return {
+    ...base,
+    subagents,
+    filesystem: {
+      ...filesystem,
+      additionalAllowRead: uniqueStrings([
+        ...(Array.isArray(filesystem.additionalAllowRead) ? filesystem.additionalAllowRead : []),
+        ...patch.filesystem.additionalAllowRead,
+      ]),
+    },
+    network: {
+      ...network,
+      allowedDomains: uniqueStrings([
+        ...(Array.isArray(network.allowedDomains) ? network.allowedDomains : []),
+        ...patch.network.allowedDomains,
+      ]),
+    },
+  };
+}
+
+/**
+ * 写 ~/.pi/agent/extensions/pi-sandbox/config.json。
+ * 这是插件唯一接受的持久放行：additionalAllowRead 让沙箱内 ls/read 能看到 skills；
+ * allowedDomains 让 curl 访问 127.0.0.1。hostIPC 命令前缀只触发审批，不在这里打开。
+ */
+export function applyPiSandboxConfig({ agentDir }) {
+  const configDir = join(agentDir, 'extensions', 'pi-sandbox');
+  mkdirSync(configDir, { recursive: true });
+  const configPath = join(configDir, 'config.json');
+  const existing = existsSync(configPath) ? readJson(configPath) : {};
+  const config = mergePiSandboxConfig(existing, defaultPiSandboxConfig(agentDir));
+  writeJson(configPath, config);
+  return { configPath, config };
 }
 
 /**
@@ -142,8 +226,9 @@ export function setupPi(opts) {
   const templateDir = resolveTemplateDir(opts.templates);
   if (!opts.skipInstall) installCli();
   const result = applyPiAgentConfig({ agentDir, templateDir, force: Boolean(opts.force) });
+  const sandboxConfig = opts.sandbox ? applyPiSandboxConfig({ agentDir }) : undefined;
   if (opts.sandbox) installSandbox();
-  return { home, ...result };
+  return { home, ...result, sandboxConfig };
 }
 
 function isMain() {
@@ -159,6 +244,10 @@ if (isMain()) {
     console.log(`pi 配置：${r.agentDir}`);
     console.log(`  models.json  ${r.models === 'wrote' ? '已写入' : '已存在（--force 可覆盖）'}`);
     console.log('  settings.json 已合并 defaultProvider / defaultModel');
+    if (r.sandboxConfig) {
+      console.log(`  ${r.sandboxConfig.configPath}`);
+      console.log('  沙箱默认可读 skills 目录，bash 可 curl 127.0.0.1');
+    }
     console.log('密钥：export ARK_API_KEY=你的火山方舟密钥（models.json 使用 ${ARK_API_KEY}，不要把明文写入仓库）');
   } catch (e) {
     console.error(e instanceof Error ? e.message : e);

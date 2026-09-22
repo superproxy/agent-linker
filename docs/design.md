@@ -341,12 +341,11 @@ flowchart TD
 
 | 文件 | 内容 | 写入时机 | 写入方 |
 |---|---|---|---|
-| `.skills/linkagent-tasks/SKILL.md` | **通用模板**：教 agent 怎么调 `/api/tasks`，curl 示例里的 `baseUrl / channel / userId / token` 占位从 `.linkagent/identity.json` 取（不再写死示例 token） | `TaskService.load()` / `createTask()` 同步写一次 | `TaskService` |
+| `.agents/skills/linkagent-tasks/SKILL.md` | **通用模板**：教 agent 怎么调 `/api/tasks`，curl 示例里的 `baseUrl / channel / userId / token` 占位从 `.linkagent/identity.json` 取（不再写死示例 token）。这是 pi 在当前目录扫描的项目 skill 目录 | `TaskService.load()` / `createTask()` 同步写一次 | `TaskService` |
 | `.linkagent/identity.json` | per-task 渲染：`{ baseUrl, channel, userId, taskId, taskKey, tokenKind: 'personal' \| 'channel', token }` | 同上；`setTaskAgent` / `setTaskNode` / `setTaskCwd` 等字段变更**不重写**（agent 已读，无需重建） | 同上 |
 
 **承载形式**：写到 cwd 下而非 prompt 注入——不依赖特定 agent 的 system prompt 支持；
-与各 agent 自带的 skills 目录约定解耦（`.skills/` 是约定俗成路径，是否扫描由各 agent
-自行决定；网关只保证文件存在 + 内容正确）。
+目录对齐 pi 的项目 skill：当前工作目录下的 `.agents/skills/`。旧的 `.skills/linkagent-tasks/` pi 不扫描，重写时会删掉。
 
 **Token 注入**：模板 + 身份文件——`SKILL.md` 是只读副本（仓库维护
 `skills/linkagent-tasks/SKILL.md` 单一一份），改 token 只需重写
@@ -381,7 +380,7 @@ flowchart TD
 
 - 任务存储结构 `TaskItem` 不新增字段（skill 文件落盘在 cwd，运行时计算）。
 - 不动 `legacy` 路径（Chatbox 等接入仍走原 taskKey / 三元素路由）。
-- 不强制 agent 客户端使用 skill（agent 是否读 `.skills/` 是各 agent 自己的事；
+- 不强制 agent 客户端使用 skill（agent 是否读 `.agents/skills/` 是各 agent 自己的事；
   网关只保证 skill 文件在那里 + token 正确）。
 - 不引入新鉴权凭据类型（`pat_` / `ct_` 已有）。
 - 仓库根 `skills/linkagent-tasks/SKILL.md` **保留**为外部编码助手（Claude Code /
