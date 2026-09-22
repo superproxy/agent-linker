@@ -12,7 +12,12 @@ interface Row {
   t: TaskItem;
 }
 
-export function KeysPage(props: { base: string; token: string; onAuthError: AuthErrorHandler }) {
+export function KeysPage(props: {
+  base: string;
+  token: string;
+  onAuthError: AuthErrorHandler;
+  isAdmin: boolean;
+}) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
   const [users, setUsers] = useState<UserTasks[] | null>(null);
@@ -58,10 +63,10 @@ export function KeysPage(props: { base: string; token: string; onAuthError: Auth
 
   const columns: ColumnsType<Row> = [
     {
-      title: 'Key',
+      title: '任务 Key（k_）',
       dataIndex: ['t', 'key'],
       key: 'key',
-      render: (k: string) => <CopyableCode text={k} truncate title="点击复制完整 Key" />,
+      render: (k: string) => <CopyableCode text={k} truncate title="点击查看并复制完整 Key" />,
     },
     {
       title: '归属用户',
@@ -103,10 +108,8 @@ export function KeysPage(props: { base: string; token: string; onAuthError: Auth
 
   return (
     <div>
-      <p className="page-desc">
-        任务 key 随任务自动生成，可直接填入 Chatbox 或任意 OpenAI 客户端的 <code>API Key</code>（
-        <code>Bearer &lt;key&gt;</code>）做任务级直连，无需全局静态 token 与 channel/userId/task；
-        该凭据只能访问这一个任务且不能切换 agent。任务按登录用户隔离。停用后该 Key 立即失效。
+      <p className="page-desc" style={{ marginBottom: 10 }}>
+        本页仅管理<strong>任务 Key（k_）</strong>，供 Chatbox 等客户端锁定单个任务；点击 Key 可复制完整值。
       </p>
       <Input
         prefix={<SearchOutlined style={{ color: 'rgba(229,233,240,0.35)' }} />}

@@ -10,7 +10,7 @@
  *   PUT  /api/pm/gateway-targets/:id       { url, token? } 落盘后自动重启该进程（url 空串=切回本机）
  *
  * 安全：仅管理员（authGuard.isAdmin：open / 静态 token / local 默认用户 / admin 会话）。
- * web 与网关同端口，打开哪台机器的 /admin 就管哪台机器上的进程。
+ * web 与网关同端口，打开哪台机器的后台（/）就管哪台机器上的进程。
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { readFileSync, existsSync } from 'node:fs';

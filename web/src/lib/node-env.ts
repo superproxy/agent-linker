@@ -5,6 +5,8 @@ export type NodeEnvFlavor = 'dotenv' | 'bash' | 'powershell';
 export interface NodeEnvFields {
   gatewayUrl: string;
   token?: string;
+  /** 匿名申请时的 nu_ 归属申明码 */
+  claimToken?: string;
   agents: string;
 }
 
@@ -25,6 +27,7 @@ function pwshQuote(value: string): string {
 function pairs(fields: NodeEnvFields): Array<[string, string]> {
   const rows: Array<[string, string]> = [['LINKAGENT_GATEWAY_URL', fields.gatewayUrl]];
   if (fields.token) rows.push(['LINKAGENT_GATEWAY_TOKEN', fields.token]);
+  if (fields.claimToken) rows.push(['LINKAGENT_NODE_CLAIM', fields.claimToken]);
   rows.push(['LINKAGENT_NODE_AGENTS', fields.agents]);
   return rows;
 }

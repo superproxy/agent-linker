@@ -13,6 +13,7 @@ import { AuthError, type UserStore } from './store.js';
 import { isLoopbackIp, type AuthGuard } from './auth.js';
 import type { PersonalTokenStore } from './personal-token-store.js';
 import type { NodeTokenStore } from './node-token-store.js';
+import type { NodeClaimStore } from './node-claim-store.js';
 
 type HeaderCarrier = { headers: Record<string, string | string[] | undefined> };
 
@@ -173,6 +174,7 @@ export function registerUserApi(
   guard: AuthGuard,
   personalTokens?: PersonalTokenStore,
   nodeTokens?: NodeTokenStore,
+  nodeClaims?: NodeClaimStore,
   onUserDeleted?: (username: string) => void | Promise<void>,
 ): void {
   const requireAdmin = (request: FastifyRequest, reply: FastifyReply): boolean => {
@@ -236,6 +238,7 @@ export function registerUserApi(
     store.delete(username);
     personalTokens?.revokeForUser(username);
     nodeTokens?.revokeForUser(username);
+    nodeClaims?.revokeForUser(username);
     await onUserDeleted?.(username);
     request.log.info({ user: username, by: current?.username ?? 'token' }, '删除用户');
     return reply.send({ ok: true });

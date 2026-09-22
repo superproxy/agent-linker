@@ -11,6 +11,9 @@ import type {
   NodeTurnResult,
 } from '@linkagent/shared';
 import { RemoteNodeAdapter } from '../agents/remoteWrapper.js';
+import { isPersonalTokenShape } from '../users/personal-token-store.js';
+import { isNodeClaimShape } from '../users/node-claim-store.js';
+import { TASK_KEY_PREFIX } from '../tasks/types.js';
 import { NodeOfflineError, type NodeLink, type RemoteTurnRequest } from './link.js';
 import type { NodeRecord, NodeRegistry } from './store.js';
 
@@ -47,6 +50,8 @@ export interface NodeManagerOptions {
   resolveNodeToken?: (token: string) => { username: string; nodeId?: string } | null;
   /** 首次握手将 token 锁定到 nodeId */
   bindNodeToken?: (token: string, nodeId: string) => boolean;
+  /** 匿名申请 hello.claimToken（nu_）反查属主 */
+  resolveNodeClaim?: (claimToken: string) => string | null;
   pingIntervalMs?: number;
   logger?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void };
 }
@@ -76,7 +81,7 @@ type UpgradeAuth =
   | { kind: 'none' }
   | { kind: 'open' }
   | { kind: 'gateway' }
-  | { kind: 'invalid' }
+  | { kind: 'invalid'; reason?: 'pat' | 'task-key' | 'claim' }
   | { kind: 'node'; username: string; token: string; boundNodeId?: string };
 
 /** 管理远程节点的 WebSocket 连接、准入审批、心跳、turn 多路复用与注册信息持久化 */
@@ -85,6 +90,7 @@ export class NodeManager {
   private readonly expectedToken: string;
   private readonly resolveNodeToken?: NodeManagerOptions['resolveNodeToken'];
   private readonly bindNodeToken?: NodeManagerOptions['bindNodeToken'];
+  private readonly resolveNodeClaim?: NodeManagerOptions['resolveNodeClaim'];
   private readonly logger: NonNullable<NodeManagerOptions['logger']>;
   private readonly wss = new WebSocketServer({ noServer: true });
   /** 含待审批连接（approved=false）；路由相关方法只认 approved 连接 */
@@ -97,6 +103,7 @@ export class NodeManager {
     this.expectedToken = options.expectedToken ?? '';
     this.resolveNodeToken = options.resolveNodeToken;
     this.bindNodeToken = options.bindNodeToken;
+    this.resolveNodeClaim = options.resolveNodeClaim;
     this.logger = options.logger ?? {
       info: (m) => console.log(`[nodes] ${m}`),
       warn: (m) => console.warn(`[nodes] ${m}`),
@@ -138,7 +145,13 @@ export class NodeManager {
     if (this.expectedToken) {
       const check = this.classifyUpgradeToken(req);
       if (check.kind === 'invalid') {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        const hint =
+          check.reason === 'pat'
+            ? 'personal API token (pat_) is not valid for node WebSocket; use nt_ machine token from the admin UI'
+            : check.reason === 'task-key'
+              ? 'task key (k_) is not valid for node WebSocket; use nt_ machine token'
+              : 'gateway token or nt_ machine token required';
+        socket.write(`HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${hint}`);
         socket.destroy();
         return;
       }
@@ -153,7 +166,7 @@ export class NodeManager {
     const qToken = url.searchParams.get('token') ?? '';
     const h = req.headers.authorization ?? '';
     const bearer = h.startsWith('Bearer ') ? h.slice('Bearer '.length) : '';
-    return qToken || bearer;
+    return (qToken || bearer).trim();
   }
 
   /** 网关 token、用户机器 token 都可通过；错误令牌拒绝；未携带走匿名/凭证重连 */
@@ -163,6 +176,20 @@ export class NodeManager {
     if (this.expectedToken && provided === this.expectedToken) return { kind: 'gateway' };
     const nt = this.resolveNodeToken?.(provided);
     if (nt) return { kind: 'node', username: nt.username, token: provided, boundNodeId: nt.nodeId };
+    if (isPersonalTokenShape(provided)) {
+      this.logger.warn('节点 upgrade 使用了 pat_ 个人 API token；请改用后台颁发的 nt_ 机器凭证');
+      return { kind: 'invalid', reason: 'pat' };
+    }
+    if (provided.startsWith(TASK_KEY_PREFIX)) {
+      this.logger.warn('节点 upgrade 使用了 k_ 任务 key；请改用 nt_ 机器凭证');
+      return { kind: 'invalid', reason: 'task-key' };
+    }
+    if (isNodeClaimShape(provided)) {
+      this.logger.warn(
+        '节点 upgrade 使用了 nu_ 归属申明码；请改用环境变量 LINKAGENT_NODE_CLAIM，Upgrade 不要带 Bearer',
+      );
+      return { kind: 'invalid', reason: 'claim' };
+    }
     return { kind: 'invalid' };
   }
 
@@ -464,7 +491,14 @@ export class NodeManager {
 
     // 4) 匿名申请：进入待审批（nodeId 缺失/非法/已被占用时网关注发新身份，防冒名）
     const claimed = requested && NODE_ID_PATTERN.test(requested) && !this.registry.get(requested) ? requested : newNodeId();
-    this.applyForAdmission(ws, hello, agents, remoteAddress, claimed);
+    const claimRaw = hello.claimToken?.trim();
+    let ownerUsername: string | undefined;
+    if (claimRaw) {
+      const user = this.resolveNodeClaim?.(claimRaw);
+      if (user) ownerUsername = user;
+      else this.logger.warn('节点申请携带无效或过期的 nu_ 归属申明码，属主留空');
+    }
+    this.applyForAdmission(ws, hello, agents, remoteAddress, claimed, ownerUsername);
   }
 
   /** 已准入上线（令牌直连或凭证重连） */
@@ -598,6 +632,7 @@ export class NodeManager {
     agents: NodeInfo['agents'],
     remoteAddress: string | undefined,
     nodeId: string,
+    ownerUsername?: string,
   ): void {
     const existing = this.connections.get(nodeId);
     if (existing) {
@@ -634,12 +669,16 @@ export class NodeManager {
       ...(conn.version ? { version: conn.version } : {}),
       status: 'pending',
       secret,
+      ...(ownerUsername ? { ownerUsername } : {}),
       createdAt: now,
       lastSeenAt: now,
     });
 
     this.send(ws, { type: 'welcome', nodeId, approved: false, secret });
-    this.logger.info(`节点申请准入: ${nodeId}（${conn.name}）agents=${agents.map((a) => a.id).join(',') || '无'}，等待管理员审批`);
+    const ownerHint = ownerUsername ? `，属主=${ownerUsername}` : '';
+    this.logger.info(
+      `节点申请准入: ${nodeId}（${conn.name}）agents=${agents.map((a) => a.id).join(',') || '无'}${ownerHint}，等待管理员审批`,
+    );
 
     ws.on('pong', () => {
       conn.isAlive = true;

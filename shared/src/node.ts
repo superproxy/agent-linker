@@ -31,7 +31,7 @@ export interface NodeInfo {
   /** 最近一次心跳/消息时间（ms） */
   lastSeenAt?: number;
   remoteAddress?: string;
-  /** 用户颁发机器 token 接入时的属主登录名；网关 token / 匿名审批接入可为空 */
+  /** 用户颁发机器 token 或 nu_ 申明码接入时的属主登录名；纯匿名可为空 */
   ownerUsername?: string;
   /**
    * 是否被管理员临时停用：true 时不参与路由（resolveForRouting 走 'offline'），重连时被关
@@ -115,7 +115,17 @@ export type NodeToGateway =
    *   secret = 网关此前为该 nodeId 签发的节点凭证（审批通过/待审批重连时携带）
    * 两者皆空且网关开启鉴权 → 进入待审批；token 错误 → 拒绝
    */
-  | { type: 'hello'; token?: string; secret?: string; nodeId?: string; name: string; version?: string; agents: NodeAgentInfo[] }
+  | {
+      type: 'hello';
+      token?: string;
+      secret?: string;
+      /** 匿名申请时可选：nu_ 归属申明码（不要填进 Upgrade Bearer） */
+      claimToken?: string;
+      nodeId?: string;
+      name: string;
+      version?: string;
+      agents: NodeAgentInfo[];
+    }
   | { type: 'pong' }
   | { type: 'turnEvent'; requestId: string; event: NodeTurnEvent }
   | { type: 'turnResult'; requestId: string; result: NodeTurnResult }

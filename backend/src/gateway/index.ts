@@ -28,10 +28,12 @@ import { AuthGuard } from './users/auth.js';
 import { ChannelTokenStore } from './users/channel-token-store.js';
 import { PersonalTokenStore } from './users/personal-token-store.js';
 import { NodeTokenStore } from './users/node-token-store.js';
+import { NodeClaimStore } from './users/node-claim-store.js';
 import { registerAuthApi, registerUserApi } from './users/api.js';
 import { registerChannelTokenApi } from './users/channel-token-api.js';
 import { registerPersonalTokenApi } from './users/personal-token-api.js';
 import { registerNodeTokenApi } from './users/node-token-api.js';
+import { registerNodeClaimApi } from './users/node-claim-api.js';
 import { startWeixinBot, type WeixinBotHandle } from '../channels/weixin-bot.js';
 import { InProcessUserTokenProvider } from '../channels/user-token.js';
 import { registerWeixinApi, WeixinLoginService } from './weixin-login.js';
@@ -147,6 +149,7 @@ export async function buildServer(options?: {
   // ── 远程节点：注册表落 .runtime-state/nodes，WebSocket 服务在 app.listen 后挂到同一 http server ──
   const nodeRegistry = createNodeRegistry(layout.nodesState);
   const nodeTokenStore = new NodeTokenStore(layout.usersState);
+  const nodeClaimStore = new NodeClaimStore(layout.usersState);
   const nodeManager = new NodeManager({
     registry: nodeRegistry,
     // local/token：网关 token 或用户颁发的 nt_ 均可直连；open 不校验
@@ -158,6 +161,12 @@ export async function buildServer(options?: {
       return { username: rec.username, ...(rec.nodeId ? { nodeId: rec.nodeId } : {}) };
     },
     bindNodeToken: (token, nodeId) => nodeTokenStore.bindNode(token, nodeId),
+    resolveNodeClaim: (claimToken) => {
+      const rec = nodeClaimStore.resolve(claimToken);
+      if (!rec) return null;
+      nodeClaimStore.touch(claimToken);
+      return rec.username;
+    },
     logger: {
       info: (m) => console.log(`[nodes] ${m}`),
       warn: (m) => console.warn(`[nodes] ${m}`),
@@ -188,20 +197,8 @@ export async function buildServer(options?: {
   // ── web 管理端静态资源（只在网关 8787 单端口提供，不再有独立 vite dev server）──
   // 布局层按形态探测：dist→<root>/web，dev→web/dist（index.html + assets 同时存在才算产物）。
   const webRoot = layout.webRoot;
-  if (webRoot) {
-    // 管理后台（TS/React 构建产物）统一挂到 /admin/。vite base='./'，资源为相对路径，可直接挂子前缀。
-    // /admin 无尾斜杠时 302 到 /admin/，避免 fastify-static 前缀匹配导致 404。
-    app.get('/admin', async (_req, reply) => reply.redirect('/admin/'));
-    // 兼容旧入口 /ui：整体 302 到 /admin（含子路径）。
-    app.get('/ui', async (_req, reply) => reply.redirect('/admin/'));
-    app.get('/ui/*', async (request, reply) => {
-      const wildcard = (request.params as { '*'?: string })['*'] ?? '';
-      return reply.redirect(`/admin/${wildcard}`);
-    });
-    await app.register(fastifyStatic, { root: webRoot, prefix: '/admin/' });
-    app.log.info({ webRoot }, 'web 管理端已挂载到 /admin');
-  } else {
-    app.log.info('未找到 web 构建产物（web/dist），跳过 /admin 挂载；可执行 pnpm build:web 生成');
+  if (!webRoot) {
+    app.log.info('未找到 web 构建产物（web/dist），跳过 web 挂载；可执行 pnpm build:web 生成');
   }
 
   // ── 用户登录体系：账号密码 + 会话 token（与 gateway token 并存）──
@@ -247,7 +244,7 @@ export async function buildServer(options?: {
   const pm = new ProcessManager(layout.root, {
     extraWeixinAccounts: () => config.weixin.accounts ?? [],
   });
-  registerUserApi(app, userStore, authGuard, personalTokenStore, nodeTokenStore, async (username) => {
+  registerUserApi(app, userStore, authGuard, personalTokenStore, nodeTokenStore, nodeClaimStore, async (username) => {
     taskService.deleteOwnedBy(username);
     try {
       const next = persistRemoveWeixinAccount(configPath, username);
@@ -262,6 +259,7 @@ export async function buildServer(options?: {
   });
   registerPersonalTokenApi(app, personalTokenStore, authGuard);
   registerNodeTokenApi(app, nodeTokenStore, authGuard);
+  registerNodeClaimApi(app, nodeClaimStore, authGuard);
 
   const checkAuth = (request: FastifyRequest): boolean => authGuard.checkAuth(request);
 
@@ -598,14 +596,13 @@ export async function buildServer(options?: {
     }
   });
 
-  // 内置聊天页（布局层按形态定位：dev→backend/src/dev，dist→dev），启动时读一次。
-  // 管理后台已迁移到 TS/React 构建产物，由上方 /admin/ 静态服务提供，不再有内置 admin.html。
-  const chatPage = readFileSync(layout.page('chat'), 'utf8');
-
-  // ── 页面与运行态控制 API（GET / 聊天页；管理后台见 /admin/；/api/agents 供切换 agent/模型）──
-  app.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(chatPage);
-  });
+  // 内置聊天页：仅在没有 web 构建产物时作为 GET / 兜底（有 web 时 / 由管理后台 index.html 提供）。
+  if (!webRoot) {
+    const chatPage = readFileSync(layout.page('chat'), 'utf8');
+    app.get('/', async (_request: FastifyRequest, reply: FastifyReply) => {
+      return reply.type('text/html; charset=utf-8').header('cache-control', 'no-cache').send(chatPage);
+    });
+  }
 
   app.get('/api/agents', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) {
@@ -949,6 +946,22 @@ export async function buildServer(options?: {
         : {}),
     },
   );
+
+  // 管理后台静态资源最后挂载（prefix /），避免抢在 /v1、/api 等路由之前。
+  if (webRoot) {
+    app.get('/admin', async (_req, reply) => reply.redirect('/'));
+    app.get('/admin/*', async (request, reply) => {
+      const wildcard = (request.params as { '*'?: string })['*'] ?? '';
+      return reply.redirect(`/${wildcard}`);
+    });
+    app.get('/ui', async (_req, reply) => reply.redirect('/'));
+    app.get('/ui/*', async (request, reply) => {
+      const wildcard = (request.params as { '*'?: string })['*'] ?? '';
+      return reply.redirect(`/${wildcard}`);
+    });
+    await app.register(fastifyStatic, { root: webRoot, prefix: '/' });
+    app.log.info({ webRoot }, 'web 管理端已挂载到 /');
+  }
 
   return { app, manager, nodeManager, pluginManager, taskService, weixinBot, host: gw.server.host, port: gw.server.port, authEnabled };
 }

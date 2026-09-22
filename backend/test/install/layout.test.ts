@@ -32,9 +32,9 @@ test('dev 形态：无 marker 时 kind=dev，配置/入口/页面走 backend 源
   assert.ok(existsSync(layout.page('chat')));
   // tsx loader
   assert.ok(layout.tsxLoader.endsWith(join('tsx', 'dist', 'esm', 'index.mjs')));
-  // dev 态登录提示含 pnpm 与 /admin
+  // dev 态登录提示含 pnpm 与后台根路径
   assert.match(layout.loginHint, /pnpm/);
-  assert.match(layout.loginHint, /\/admin/);
+  assert.match(layout.loginHint, /后台/);
   assert.match(layout.restartWeixinHint, /pnpm pm restart weixin/);
 });
 
@@ -49,9 +49,9 @@ test('dist 形态：有 .linkagent-root 时 kind=dist，配置/入口/页面走�
   assert.ok(layout.entry('node').endsWith(join('server', 'node.mjs')));
   // 页面随代码走，dist 形态下仍解析到 bundle 旁的 dev 目录（此处仅校验命名规则）
   assert.ok(layout.page('chat').endsWith(join('dev', 'chat.html')));
-  // dist 态无 pnpm，只引导 /admin；重启提示走 start 脚本
+  // dist 态无 pnpm，只引导后台；重启提示走 start 脚本
   assert.doesNotMatch(layout.loginHint, /pnpm/);
-  assert.match(layout.loginHint, /\/admin/);
+  assert.match(layout.loginHint, /后台/);
   assert.match(layout.restartWeixinHint, /start\.sh restart weixin/);
 });
 

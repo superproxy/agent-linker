@@ -106,6 +106,19 @@ test('普通用户不能读本机 agent；任务/渠道用户仅自己的空间'
   assert.ok(!adminAll.some((u) => u.ownerUsername === 'alice'));
 });
 
+test('普通用户可颁发 nt_ 机器凭证（非 pat_ / 登录会话）', async () => {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/node-tokens',
+    headers: auth(userToken),
+    payload: { label: 'alice-node' },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const body = res.json() as { token: string; tokenPreview: string };
+  assert.ok(body.token.startsWith('nt_'), body.token);
+  assert.ok(body.tokenPreview.includes('…'));
+});
+
 test('普通用户节点列表不含本机；by-node / node-agents 不带 local', async () => {
   const nodes = await app.inject({ method: 'GET', url: '/api/nodes', headers: auth(userToken) });
   assert.equal(nodes.statusCode, 200, nodes.body);

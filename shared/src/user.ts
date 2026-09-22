@@ -122,3 +122,11 @@ export interface NodeTokenPublic {
   createdAt: string;
   lastUsedAt?: string;
 }
+
+// ── 节点匿名申请归属申明码（nu_，仅 hello.claimToken，非 Upgrade Bearer）──
+
+export interface NodeClaimPublic {
+  tokenPreview: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}

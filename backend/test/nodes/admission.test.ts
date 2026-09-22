@@ -9,6 +9,7 @@ import { WebSocket } from 'ws';
 import { NodeManager, type NodeManagerOptions } from '../../src/gateway/nodes/manager.js';
 import { createNodeRegistry } from '../../src/gateway/nodes/store.js';
 import { NodeTokenStore } from '../../src/gateway/users/node-token-store.js';
+import { NodeClaimStore } from '../../src/gateway/users/node-claim-store.js';
 import type { GatewayToNode, NodeToGateway } from '@linkagent/shared';
 
 interface Harness {
@@ -20,7 +21,7 @@ interface Harness {
 
 async function startManager(
   expectedToken = '',
-  extra: Pick<NodeManagerOptions, 'resolveNodeToken' | 'bindNodeToken'> = {},
+  extra: Pick<NodeManagerOptions, 'resolveNodeToken' | 'bindNodeToken' | 'resolveNodeClaim'> = {},
 ): Promise<Harness> {
   const manager = new NodeManager({
     registry: createNodeRegistry(mkdtempSync(join(tmpdir(), 'linkagent-admission-'))),
@@ -107,6 +108,21 @@ test('开启鉴权但匿名连接：进入待审批，不可路由；批准后�
   const msg = await nextMessage(ws, (m) => m.type === 'approved');
   assert.equal(msg.type, 'approved');
 
+  ws.close();
+  await h.dispose();
+});
+
+test('匿名申请携带 nu_：pending 记录写入 ownerUsername', async () => {
+  const claims = new NodeClaimStore(mkdtempSync(join(tmpdir(), 'linkagent-nu-admit-')));
+  const rec = claims.ensure('bob');
+  const h = await startManager('secret', {
+    resolveNodeClaim: (t) => claims.resolve(t)?.username ?? null,
+  });
+  const { ws, w } = await connect(h.url, hello({ nodeId: 'apply-claim', claimToken: rec.token }));
+  assert.equal(w.approved, false);
+  const pending = h.manager.list().find((n) => n.nodeId === 'apply-claim');
+  assert.equal(pending?.status, 'pending');
+  assert.equal(pending?.ownerUsername, 'bob');
   ws.close();
   await h.dispose();
 });

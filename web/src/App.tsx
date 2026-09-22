@@ -10,6 +10,7 @@ import {
   alignToPageOrigin,
   readToken,
   resolveStoredTab,
+  resolveTabRoute,
   type TabId,
 } from './lib/constants';
 import { useRefreshTick } from './lib/hooks';
@@ -23,7 +24,7 @@ import { AgentsPage } from './pages/Agents';
 import { TasksPage } from './pages/Tasks';
 import { KeysPage } from './pages/Keys';
 import { MyTokenPage } from './pages/MyToken';
-import { ChannelTokensPage } from './pages/ChannelTokens';
+import { NodeKeyPage } from './pages/NodeKey';
 import { NodesPage } from './pages/Nodes';
 import { WeixinPage } from './pages/Weixin';
 import { AccountsPage } from './pages/Accounts';
@@ -210,10 +211,11 @@ function PageRouter(props: {
   onClearChatSession: () => void;
 }) {
   const { tab, base, token, onAuthError } = props;
+  const routeTab = resolveTabRoute(tab);
   const isAdmin = props.auth.status === 'ready' ? props.auth.user.role === 'admin' : true;
   const username = props.auth.status === 'ready' ? props.auth.user.username : undefined;
 
-  switch (tab) {
+  switch (routeTab) {
     case 'overview':
       return <Overview base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'chat':
@@ -241,17 +243,23 @@ function PageRouter(props: {
     case 'tasks':
       return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} username={username} isAdmin={isAdmin} />;
     case 'keys':
-      return <KeysPage base={base} token={token} onAuthError={onAuthError} />;
+      return <KeysPage base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'my-token':
       return props.auth.status === 'ready' ? (
-        <MyTokenPage base={base} token={token} onAuthError={onAuthError} />
+        <MyTokenPage base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />
       ) : null;
-    case 'channel-tokens':
-      return isAdmin ? <ChannelTokensPage base={base} token={token} onAuthError={onAuthError} /> : null;
+    case 'node-key':
+      return props.auth.status === 'ready' ? (
+        <NodeKeyPage base={base} token={token} onAuthError={onAuthError} />
+      ) : null;
     case 'local-nodes':
-      return <NodesPage scope="local" base={base} token={token} onAuthError={onAuthError} />;
+      return (
+        <NodesPage scope="local" base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} onGoTab={props.onGoTab} />
+      );
     case 'remote-nodes':
-      return <NodesPage scope="remote" base={base} token={token} onAuthError={onAuthError} />;
+      return (
+        <NodesPage scope="remote" base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} onGoTab={props.onGoTab} />
+      );
     case 'weixin':
       return <WeixinPage base={base} token={token} onAuthError={onAuthError} username={username} isAdmin={isAdmin} />;
     case 'accounts':

@@ -167,9 +167,9 @@ export function AccountsPage(props: { base: string; token: string; onAuthError: 
     <div>
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
       <p className="page-desc" style={{ marginBottom: 14 }}>
-        这里是能登录后台、持有 <code>pat_</code> 个人 Token 的<strong>真实用户（系统账号）</strong>。
-        新建账号后，用该用户登录后台，打开「微信登录」扫码绑定，才会启动进程 <code>weixin:&lt;用户名&gt;</code>。
-        微信 / Chatbox 等渠道侧的匿名终端不是系统账号，其任务见「任务」、其凭据见「Key 管理 / 渠道凭据」。
+        管理可登录后台的<strong>系统账号</strong>（admin / user）；个人 API 见侧栏「我的 · 用户 Key（pat_）」。
+        新建账号后，请用该用户登录，在「我的 · 微信」扫码绑定，才会启动 <code>weixin:&lt;用户名&gt;</code> 进程。
+        微信聊天对象的 <code>ct_</code> 由管理员在「我的 · 用户 Key → 微信终端」管理。
       </p>
       <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>

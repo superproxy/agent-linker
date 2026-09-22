@@ -7,6 +7,10 @@ import { defaultAgentDefinitions } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { AcpEngine, DEFAULT_LABELS, type AcpAgentKind } from '../gateway/agents/acpEngine.js';
+import { isNodeTokenShape } from '../gateway/users/node-token-store.js';
+import { isNodeClaimShape } from '../gateway/users/node-claim-store.js';
+import { isPersonalTokenShape } from '../gateway/users/personal-token-store.js';
+import { TASK_KEY_PREFIX } from '../gateway/tasks/types.js';
 
 /**
  * 远程节点连接器：在「执行 agent 的机器」上运行，主动 WebSocket 连入网关，
@@ -40,6 +44,8 @@ interface ConnectorOptions {
   nodeId?: string;
   /** 网关为此前申请/已批准节点签发的凭证（持久化在状态目录，重连携带） */
   secret?: string;
+  /** 匿名申请时的 nu_ 归属申明码（hello.claimToken，非 Upgrade Bearer） */
+  claimToken?: string;
   agents: string[];
   stateDir: string;
 }
@@ -137,6 +143,7 @@ class NodeConnector {
           type: 'hello',
           ...(this.opts.token ? { token: this.opts.token } : {}),
           ...(this.opts.secret ? { secret: this.opts.secret } : {}),
+          ...(this.opts.claimToken ? { claimToken: this.opts.claimToken } : {}),
           ...(this.opts.nodeId ? { nodeId: this.opts.nodeId } : {}),
           name: this.opts.name,
           version: '0.1.0',
@@ -306,10 +313,38 @@ function main(): void {
     envAgents ??
     (config.node.agents.length > 0 ? config.node.agents : defaultAgentDefinitions().map((d) => d.id));
 
-  const token = runtime.gatewayToken || undefined;
+  const rawToken = runtime.gatewayToken.trim();
+  const token = rawToken || undefined;
+  if (token) {
+    if (isPersonalTokenShape(token)) {
+      console.error(
+        '[node] LINKAGENT_GATEWAY_TOKEN 是个人 API token（pat_），不能用于节点连接。请在后台「远程 · 节点」颁发 nt_ 机器凭证。',
+      );
+      process.exit(1);
+    }
+    if (token.startsWith(TASK_KEY_PREFIX)) {
+      console.error(
+        '[node] LINKAGENT_GATEWAY_TOKEN 是任务 key（k_），不能用于节点连接。请在后台「远程 · 节点」颁发 nt_ 机器凭证。',
+      );
+      process.exit(1);
+    }
+    if (isNodeClaimShape(token)) {
+      console.error(
+        '[node] LINKAGENT_GATEWAY_TOKEN 是归属申明码（nu_），不能用于 Upgrade。请改用 LINKAGENT_NODE_CLAIM，并删除 TOKEN 行走待审批。',
+      );
+      process.exit(1);
+    }
+    if (!isNodeTokenShape(token)) {
+      console.warn(
+        '[node] LINKAGENT_GATEWAY_TOKEN 不是 nt_ 机器凭证；若连接报 401，请确认未误用登录会话 token，并改用 nt_ 或网关静态 token。',
+      );
+    }
+  }
+  const claimToken = process.env.LINKAGENT_NODE_CLAIM?.trim() || undefined;
   const connector = new NodeConnector({
     gatewayUrl: args.gatewayUrl ?? runtime.gatewayUrl,
     ...(token ? { token } : {}),
+    ...(claimToken ? { claimToken } : {}),
     name:
       args.name ??
       process.env.LINKAGENT_NODE_NAME ??

@@ -34,7 +34,11 @@ test('listAgentCatalog：默认 agent 已配置启用，其余支持类型未配
   const zcode = catalog.find((c) => c.kind === 'zcode');
   assert.equal(zcode?.installRunnable, true);
   assert.equal(zcode?.installCommand, 'npm i -g zcode-acp-server');
-  for (const kind of ['codex', 'claude', 'gemini', 'qwen', 'openclaw', 'zcode'] as const) {
+  const hermes = catalog.find((c) => c.kind === 'hermes');
+  assert.deepEqual(hermes?.command, ['hermes', 'acp']);
+  assert.equal(hermes?.installRunnable, false);
+  assert.equal(hermes?.installCommand, 'hermes acp --check');
+  for (const kind of ['codex', 'claude', 'gemini', 'qwen', 'openclaw', 'hermes', 'zcode'] as const) {
     const item = catalog.find((c) => c.kind === kind);
     assert.ok(item, `缺目录项 ${kind}`);
     assert.equal(item.configured, false);

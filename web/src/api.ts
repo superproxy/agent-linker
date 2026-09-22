@@ -972,6 +972,14 @@ export class OpsClient {
     await this.request(`/api/node-tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  async ensureNodeClaim(): Promise<{ claimToken: string; tokenPreview: string; createdAt: string }> {
+    return (await this.request('/api/node-claims/ensure', { method: 'POST' })) as {
+      claimToken: string;
+      tokenPreview: string;
+      createdAt: string;
+    };
+  }
+
   /** 批准待审批节点：在线则立即上线，离线则待其凭凭证重连 */
   async approveNode(nodeId: string): Promise<NodeInfo> {
     const data = (await this.request(`/api/nodes/${encodeURIComponent(nodeId)}/approve`, { method: 'POST' })) as {

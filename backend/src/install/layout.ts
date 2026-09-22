@@ -101,14 +101,14 @@ export interface InstallLayout {
    * 内置 HTML 页面绝对路径（仅 chat 聊天页）。
    * 页面是随代码走的资源：基于本模块自身位置解析（dev→src/dev，dist bundle→dist/dev），
    * 不随 LINKAGENT_HOME 变化（与状态根/配置根解耦）。
-   * 管理后台已迁移到 TS/React 构建产物（webRoot，挂在 /admin/），不再有内置 admin.html。
+   * 管理后台已迁移到 TS/React 构建产物（webRoot，挂在 /），不再有内置 admin.html。
    */
   page(name: 'chat'): string;
   /** dev 形态 tsx ESM loader 绝对路径（dist 形态不用） */
   readonly tsxLoader: string;
   /** 某托管进程在当前形态下的入口绝对路径 */
   entry(id: ProcessTargetId): string;
-  /** 微信扫码登录引导（形态感知：dist 无 pnpm，只引导后台 /admin） */
+  /** 微信扫码登录引导（形态感知：dist 无 pnpm，只引导后台 /） */
   readonly loginHint: string;
   /** external 模式下重启微信进程的命令提示（形态感知） */
   readonly restartWeixinHint: string;
@@ -138,8 +138,8 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
 
   const loginHint =
     kind === 'dist'
-      ? '请打开后台管理端 /admin 扫码登录'
-      : '请先扫码登录：pnpm --filter @linkagent/backend weixin-login（或打开后台 /admin 扫码）';
+      ? '请打开后台管理端 / 扫码登录'
+      : '请先扫码登录：pnpm --filter @linkagent/backend weixin-login（或打开后台 / 扫码）';
   const restartWeixinHint =
     kind === 'dist'
       ? './start.sh restart weixin（Windows：start.bat restart weixin）'

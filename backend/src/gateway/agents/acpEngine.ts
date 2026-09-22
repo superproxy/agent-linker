@@ -47,6 +47,8 @@ export const DEFAULT_COMMANDS: Record<AcpAgentKind, string[]> = {
   droid: ['droid', 'exec', '--output-format', 'acp'],
   'fast-agent': ['uvx', 'fast-agent-mcp', 'acp'],
   'grok-build': ['grok', 'agent', 'stdio'],
+  // hermes = Nous Hermes Agent：官方 `hermes acp` / `hermes-acp` stdio ACP server（需 pip/uv 安装 .[acp]）
+  hermes: ['hermes', 'acp'],
   iflow: ['iflow', '--experimental-acp'],
   kilocode: ['npx', '-y', '@kilocode/cli', 'acp'],
   kimi: ['kimi', 'acp'],
@@ -78,6 +80,7 @@ export const DEFAULT_LABELS: Record<AcpAgentKind, { displayName: string; descrip
   droid: { displayName: 'Droid', description: 'Factory Droid（droid exec --output-format acp），默认只读问答' },
   'fast-agent': { displayName: 'Fast Agent', description: 'Fast Agent（uvx fast-agent-mcp acp），默认只读问答' },
   'grok-build': { displayName: 'Grok Build', description: 'Grok Build（grok agent stdio），默认只读问答' },
+  hermes: { displayName: 'Hermes', description: 'Hermes Agent（hermes acp），默认只读问答' },
   iflow: { displayName: 'iFlow', description: 'iFlow CLI（iflow --experimental-acp），默认只读问答' },
   kilocode: { displayName: 'Kilocode', description: 'Kilocode CLI（npx @kilocode/cli acp），默认只读问答' },
   kimi: { displayName: 'Kimi', description: 'Kimi CLI（kimi acp），默认只读问答' },
@@ -126,6 +129,11 @@ export function installGuideFor(kind: AcpAgentKind, platform = process.platform)
       return {
         command: 'traecli --version',
         hint: '请按 TraeCode CLI 文档安装 traecli（https://docs.trae.cn/cli），安装后可执行 traecli doctor。',
+      };
+    case 'hermes':
+      return {
+        command: 'hermes acp --check',
+        hint: '请先安装 Hermes Agent 并启用 ACP（如 uv pip install -e \'.[acp]\'）。启动命令：hermes acp 或 hermes-acp；健康检查：hermes acp --check',
       };
     case 'cursor':
       return platform === 'win32'

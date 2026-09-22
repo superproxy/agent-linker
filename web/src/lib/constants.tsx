@@ -41,6 +41,7 @@ export type TabId =
   | 'channel-tokens'
   | 'local-nodes'
   | 'remote-nodes'
+  | 'node-key'
   | 'weixin'
   | 'accounts'
   | 'processes'
@@ -59,7 +60,29 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+/**
+ * 侧栏信息架构（自上而下）：
+ * - 首页：总览
+ * - 我的：登录用户日常 — 任务 → 三类 Key（k_/pat_/nt_）→ 微信 → 对话
+ * - 本机 / 远程：管理员或运维的机器、网关、agent
+ * - 系统：用户管理（登录账号）
+ */
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    title: '首页',
+    items: [{ id: 'overview', label: '概览', icon: <DashboardOutlined /> }],
+  },
+  {
+    title: '我的',
+    items: [
+      { id: 'tasks', label: '任务管理', icon: <AppstoreOutlined /> },
+      { id: 'keys', label: '任务 Key', icon: <KeyOutlined /> },
+      { id: 'my-token', label: '用户 Key', icon: <SafetyCertificateOutlined /> },
+      { id: 'node-key', label: '节点 Key', icon: <ClusterOutlined /> },
+      { id: 'weixin', label: '微信', icon: <MessageOutlined /> },
+      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
+    ],
+  },
   {
     title: '本机',
     items: [
@@ -78,22 +101,8 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: '通用',
-    items: [
-      { id: 'overview', label: '概览', icon: <DashboardOutlined /> },
-      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
-      { id: 'keys', label: 'key', icon: <KeyOutlined /> },
-      { id: 'tasks', label: '任务管理', icon: <MessageOutlined /> },
-    ],
-  },
-  {
     title: '系统',
-    items: [
-      { id: 'my-token', label: '我的 Token', icon: <SafetyCertificateOutlined /> },
-      { id: 'channel-tokens', label: '渠道凭据', icon: <SafetyCertificateOutlined />, adminOnly: true },
-      { id: 'weixin', label: '微信登录', icon: <MessageOutlined /> },
-      { id: 'accounts', label: '真实用户', icon: <TeamOutlined />, adminOnly: true },
-    ],
+    items: [{ id: 'accounts', label: '用户管理', icon: <TeamOutlined />, adminOnly: true }],
   },
 ];
 
@@ -104,7 +113,13 @@ const LEGACY_TABS: Record<string, TabId> = {
   agents: 'local-agents',
   nodes: 'remote-nodes',
   settings: 'local-gateway',
+  'channel-tokens': 'my-token',
 };
+
+/** 侧栏 tab → 实际渲染页（保留扩展点） */
+export function resolveTabRoute(tab: TabId): TabId {
+  return tab;
+}
 
 export function resolveStoredTab(raw: string | null): TabId {
   if (!raw) return 'overview';

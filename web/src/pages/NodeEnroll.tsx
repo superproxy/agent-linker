@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, Col, Input, Popconfirm, Row, Segmented, Space, Steps, Table, Tag } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
-import { ApiError, OpsClient, type NodeEnrollInfo, type NodeTokenInfo } from '../api';
+import { Alert, Button, Checkbox, Col, Input, Row, Segmented, Space, Steps, Tag } from 'antd';
+import { OpsClient, type NodeEnrollInfo } from '../api';
 import { notify } from '../lib/notify';
 import type { AuthErrorHandler } from '../lib/hooks';
 import { formatNodeEnv, NODE_ENV_FLAVOR_OPTIONS, type NodeEnvFlavor } from '../lib/node-env';
+import { NodeKeyPanel } from '../components/node-key-panel';
 
 function guessGatewayUrl(port: number): string {
   if (typeof window === 'undefined') return `ws://GATEWAY_HOST:${port}`;
@@ -20,31 +20,20 @@ function copyEnvLabel(flavor: NodeEnvFlavor, copied: boolean): string {
   return '复制 env 文件';
 }
 
-export function NodeEnrollPanel(props: { base: string; token: string; onAuthError: AuthErrorHandler }) {
+export function NodeEnrollPanel(props: {
+  base: string;
+  token: string;
+  onAuthError: AuthErrorHandler;
+}) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const [info, setInfo] = useState<NodeEnrollInfo | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [name, setName] = useState('node-1');
-  const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
   const [agents, setAgents] = useState<Record<string, boolean>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [envFlavor, setEnvFlavor] = useState<NodeEnvFlavor>('dotenv');
-  const [mine, setMine] = useState<NodeTokenInfo[]>([]);
-  const [revealed, setRevealed] = useState<{ id: string; token: string } | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const refreshTokens = async () => {
-    try {
-      setMine(await ops.listNodeTokens());
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 401) {
-        setMine([]);
-        return;
-      }
-      throw e;
-    }
-  };
+  const [claimToken, setClaimToken] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -55,7 +44,12 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
         setInfo(i);
         setUrl(guessGatewayUrl(i.port));
         setAgents(Object.fromEntries(i.defaultAgents.map((a) => [a.id, true])));
-        await refreshTokens();
+        try {
+          const c = await ops.ensureNodeClaim();
+          if (alive) setClaimToken(c.claimToken);
+        } catch {
+          /* 未登录会话时跳过 */
+        }
       } catch (e) {
         if (!alive) return;
         if (!props.onAuthError(e)) setLoadErr(e instanceof Error ? e.message : String(e));
@@ -75,21 +69,6 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
     });
   };
 
-  const issue = async () => {
-    setBusy('issue');
-    try {
-      const r = await ops.issueNodeToken(label || name);
-      setRevealed({ id: r.id, token: r.token });
-      setLabel('');
-      await refreshTokens();
-      notify.success('已颁发机器凭证，请复制到节点 env');
-    } catch (e) {
-      if (!props.onAuthError(e)) notify.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   if (loadErr) return <Alert type="error" showIcon message={loadErr} />;
   if (!info) return <Alert type="info" showIcon message="正在加载接入信息…" />;
 
@@ -100,8 +79,10 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
   const startCmd = `pnpm node:start ${instName}`;
   const envFields = { gatewayUrl: url, agents: agentsLine };
   const envDirect = formatNodeEnv({ ...envFields, token: info.token || undefined }, envFlavor);
-  const envApproval = formatNodeEnv(envFields, envFlavor);
-  const envMine = revealed ? formatNodeEnv({ ...envFields, token: revealed.token }, envFlavor) : '';
+  const envApproval = formatNodeEnv(
+    { ...envFields, ...(claimToken ? { claimToken } : {}) },
+    envFlavor,
+  );
   const envHint =
     envFlavor === 'dotenv'
       ? `写入项目根目录 ${envPath}（启动脚本会自动加载）。`
@@ -118,87 +99,19 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
     }
   })();
 
-  const tokenCols: ColumnsType<NodeTokenInfo> = [
-    {
-      title: '凭证',
-      key: 'p',
-      render: (_, t) => (
-        <div>
-          <code className="code-cell">{t.tokenPreview}</code>
-          {t.label ? <div className="sub-muted">{t.label}</div> : null}
-        </div>
-      ),
-    },
-    {
-      title: '绑定机器',
-      key: 'n',
-      render: (_, t) => (t.nodeId ? <code className="code-cell">{t.nodeId}</code> : <span className="sub-muted">未连接</span>),
-    },
-    {
-      title: '操作',
-      key: 'ops',
-      width: 160,
-      render: (_, t) => (
-        <Space size={6}>
-          <Button
-            size="small"
-            disabled={busy === t.id}
-            onClick={() =>
-              void (async () => {
-                setBusy(t.id);
-                try {
-                  const r = await ops.rotateNodeToken(t.id);
-                  setRevealed({ id: r.id, token: r.token });
-                  await refreshTokens();
-                  notify.success('已轮换，请更新节点 env');
-                } catch (e) {
-                  if (!props.onAuthError(e)) notify.error(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setBusy(null);
-                }
-              })()
-            }
-          >
-            轮换
-          </Button>
-          <Popconfirm
-            title="吊销这枚机器凭证？"
-            okText="吊销"
-            okButtonProps={{ danger: true }}
-            onConfirm={() =>
-              void (async () => {
-                setBusy(t.id);
-                try {
-                  await ops.revokeNodeToken(t.id);
-                  if (revealed?.id === t.id) setRevealed(null);
-                  await refreshTokens();
-                  notify.success('已吊销');
-                } catch (e) {
-                  if (!props.onAuthError(e)) notify.error(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setBusy(null);
-                }
-              })()
-            }
-          >
-            <Button size="small" danger disabled={busy === t.id}>
-              吊销
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Row gutter={12}>
         <Col xs={24} sm={8}>
-          <div className="sub-muted" style={{ marginBottom: 4 }}>节点实例名</div>
+          <div className="sub-muted" style={{ marginBottom: 4 }}>
+            节点实例名
+          </div>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="node-1" />
         </Col>
         <Col xs={24} sm={16}>
-          <div className="sub-muted" style={{ marginBottom: 4 }}>网关地址（节点机可达）</div>
+          <div className="sub-muted" style={{ marginBottom: 4 }}>
+            网关地址（节点机可达）
+          </div>
           <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="wss://gw.example.com" />
         </Col>
       </Row>
@@ -216,7 +129,9 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
         ))}
       </div>
 
-      {isLoopback ? <Tag color="default">当前地址指向回环地址，仅适用于节点与网关同机；跨机请改成网关机 IP 或域名。</Tag> : null}
+      {isLoopback ? (
+        <Tag color="default">当前地址指向回环地址，仅适用于节点与网关同机；跨机请改成网关机 IP 或域名。</Tag>
+      ) : null}
 
       <Steps
         size="small"
@@ -225,12 +140,14 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
         items={[
           { title: '准备运行环境', description: '执行机安装 Node ≥ 22.13、pnpm，以及代码/发布包和所需 agent CLI。' },
           {
-            title: '颁发机器凭证并配置环境变量',
+            title: '颁发节点 Key 并配置环境变量',
             description:
               envFlavor === 'dotenv' ? (
-                <>在项目根目录创建 <code>{envPath}</code>。</>
+                <>
+                  在「我的 · 节点 Key」颁发 nt_，并在项目根目录创建 <code>{envPath}</code>。
+                </>
               ) : (
-                <>在节点机终端粘贴下方 {envFlavor === 'bash' ? 'Bash' : 'PowerShell'} 片段。</>
+                <>在「我的 · 节点 Key」颁发 nt_，在节点机终端粘贴下方 {envFlavor === 'bash' ? 'Bash' : 'PowerShell'} 片段。</>
               ),
           },
           { title: '启动节点', description: <><code>{startCmd}</code>（前台调试可用 <code>pnpm node:dev {instName}</code>）。</> },
@@ -238,36 +155,23 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
       />
 
       <div>
-        <div className="sub-muted" style={{ marginBottom: 8 }}>环境变量格式</div>
-        <Segmented
-          value={envFlavor}
-          options={NODE_ENV_FLAVOR_OPTIONS}
-          onChange={(v) => setEnvFlavor(v as NodeEnvFlavor)}
-        />
-        <div className="sub-muted" style={{ marginTop: 8 }}>{envHint}</div>
+        <div className="sub-muted" style={{ marginBottom: 8 }}>
+          环境变量格式（颁发 nt_ 后下方生成对应片段）
+        </div>
+        <Segmented value={envFlavor} options={NODE_ENV_FLAVOR_OPTIONS} onChange={(v) => setEnvFlavor(v as NodeEnvFlavor)} />
+        <div className="sub-muted" style={{ marginTop: 8 }}>
+          {envHint}
+        </div>
       </div>
 
-      <div className="enroll-block">
-        <div>
-          <strong>我的机器凭证</strong>
-          <div className="sub-muted" style={{ marginTop: 2 }}>每台机器一枚，连上即归你所有；与网关 token 均可使用</div>
-        </div>
-        <Space.Compact style={{ width: '100%', maxWidth: 480, margin: '8px 0' }}>
-          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="备注，例如家里的 PC" />
-          <Button type="primary" loading={busy === 'issue'} onClick={() => void issue()}>
-            颁发
-          </Button>
-        </Space.Compact>
-        {revealed ? (
-          <>
-            <pre className="enroll-pre">{envMine}</pre>
-            <Button size="small" onClick={() => copy('mine', envMine)}>
-              {copyEnvLabel(envFlavor, copied === 'mine')}
-            </Button>
-          </>
-        ) : null}
-        <Table rowKey="id" size="small" pagination={false} columns={tokenCols} dataSource={mine} style={{ marginTop: 10 }} />
-      </div>
+      <NodeKeyPanel
+        base={props.base}
+        token={props.token}
+        onAuthError={props.onAuthError}
+        embedded
+        envContext={{ gatewayUrl: url, agents: agentsLine }}
+        envFlavor={envFlavor}
+      />
 
       <Row gutter={[14, 14]}>
         {info.token || !info.authEnabled ? (
@@ -275,7 +179,9 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
             <div className="enroll-block">
               <div>
                 <strong>网关令牌直连</strong>
-                <div className="sub-muted" style={{ marginTop: 2 }}>管理员/本机可用网关 token，连上即上线</div>
+                <div className="sub-muted" style={{ marginTop: 2 }}>
+                  管理员/本机可用网关 token，连上即上线
+                </div>
               </div>
               {!info.authEnabled ? <span className="sub-muted">网关当前未开启鉴权，无需令牌。</span> : null}
               <pre className="enroll-pre">{envDirect}</pre>
@@ -289,7 +195,9 @@ export function NodeEnrollPanel(props: { base: string; token: string; onAuthErro
           <div className="enroll-block">
             <div>
               <strong>申请审批</strong>
-              <div className="sub-muted" style={{ marginTop: 2 }}>不含令牌；启动后由管理员批准</div>
+              <div className="sub-muted" style={{ marginTop: 2 }}>
+                不含网关 token；含 <code>LINKAGENT_NODE_CLAIM</code>（nu_）标明你的登录账号，管理员可见属主
+              </div>
             </div>
             <pre className="enroll-pre">{envApproval}</pre>
             <Button size="small" onClick={() => copy('approval', envApproval)}>

@@ -6,7 +6,7 @@ import { OpsClient, type NodeInfo } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { notify } from '../lib/notify';
 import { EmptyHint, StateTag } from '../components/common';
-import { relTime } from '../lib/constants';
+import { relTime, type TabId } from '../lib/constants';
 import { NodeEnrollPanel } from './NodeEnroll';
 
 export function NodesPage(props: {
@@ -14,6 +14,8 @@ export function NodesPage(props: {
   token: string;
   onAuthError: AuthErrorHandler;
   scope: 'local' | 'remote';
+  isAdmin?: boolean;
+  onGoTab?: (tab: TabId) => void;
 }) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
