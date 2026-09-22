@@ -11,7 +11,7 @@
  * 节点包：
  *   server/node.mjs + server/ctl.mjs（启停）+ 精简运行时依赖（acpx / ws）
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -122,12 +122,23 @@ function copyPiSetup(destRoot) {
   cpSync(join(REPO, 'scripts', 'setup-pi.mjs'), join(destRoot, 'scripts', 'setup-pi.mjs'));
 }
 
+/** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */
+function runBin(cmd, args, cwd) {
+  const res = spawnSync(cmd, args, {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (res.error) throw res.error;
+  if ((res.status ?? 1) !== 0) process.exit(res.status ?? 1);
+}
+
 function npmInstall(dist) {
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   const res = spawnSync(
     npm,
     ['install', '--omit=dev', '--legacy-peer-deps', '--no-audit', '--no-fund', '--loglevel=error'],
-    { cwd: dist, stdio: 'inherit' },
+    { cwd: dist, stdio: 'inherit', shell: process.platform === 'win32' },
   );
   if (res.status !== 0) {
     console.error(`\n⚠️  npm install 失败。请在 ${dist} 下手动执行：`);
@@ -342,10 +353,7 @@ async function buildFull(dist, skipInstall) {
   });
 
   step('2/6 构建 web 管理端（vite）', () => {
-    execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@linkagent/web', 'build'], {
-      cwd: REPO,
-      stdio: 'inherit',
-    });
+    runBin(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@linkagent/web', 'build'], REPO);
   });
 
   step('3/6 esbuild 打包（gateway / weixin / node / pm 四入口）', async () => {
