@@ -11,7 +11,7 @@
 ## 多任务与按机器（节点）路由
 
 - **任务（Task）模型**：每个登录用户一份任务列表（文件 `username.web.username.json`），各自绑定「机器（节点）+ agent + 工作目录」，任务 key（`k_`）直连锁定路由。
-  - **每人独立任务空间**：任务按**登录账号**隔离，不按微信联系人拆分。微信连接器（`weixin:<用户名>`）只切换该用户的当前任务；微信 `/task` 与后台「激活」写入同一 `activeTaskId`。会话记忆仍按联系人隔离（`owner:weixin:wxid:task:id`）。后台任务页只显示当前登录账号自己的任务（管理员同样如此）。未归属的旧渠道文件仅管理员可见。**内建默认任务固定本机 `pi`**（旧数据加载时自动钉死），不能改绑 agent/节点；普通用户不能把其它任务绑到本机 agent，也不能读取本机 agent 目录/启停/安装。默认任务也可删除；删掉后可在后台点「创建默认任务」，或在微信发送 `/task new default` 重建（固定本机 `pi` 并激活）。后台支持全选与批量删除。列表为空时微信普通消息回落到全局兜底 agent。**仅默认任务**注入任务管理 skill：启动本机 pi 时带 `LINKAGENT_*`（`pat_`，用户级），cwd 只写 `.agents/skills/linkagent-tasks/SKILL.md`，不把 token 写进文件。
+  - **每人独立任务空间**：任务按**登录账号**隔离，不按微信联系人拆分。工作目录同样按登录用户：`<workspaceDir>/<用户名>/<taskId>`，不按微信联系人建目录。微信连接器（`weixin:<用户名>`）只切换该用户的当前任务；微信 `/task` 与后台「激活」写入同一 `activeTaskId`。会话记忆仍按联系人隔离（`owner:weixin:wxid:task:id`）。后台任务页只显示当前登录账号自己的任务（管理员同样如此）。未归属的旧渠道文件仅管理员可见。**内建默认任务固定本机 `pi`**（旧数据加载时自动钉死），不能改绑 agent/节点；普通用户不能把其它任务绑到本机 agent，也不能读取本机 agent 目录/启停/安装。默认任务也可删除；删掉后可在后台点「创建默认任务」，或在微信发送 `/task new default` 重建（固定本机 `pi` 并激活）。后台支持全选与批量删除。列表为空时微信普通消息回落到全局兜底 agent。**仅默认任务**注入任务管理 skill：启动本机 pi 时带 `LINKAGENT_*`（`pat_`，用户级），cwd 只写 `.agents/skills/linkagent-tasks/SKILL.md`，不把 token 写进文件。
 - **Agent 是「按机器开通」的，不是全局配置**：
   - **本机节点 `local`**：agent 来自 `config.yaml` 的 `gateway.agents`，由网关进程在本机拉起；后台可启停、切模型、设为新任务默认（`GET /api/agents/by-node` 返回完整可编辑运行态）。**启停状态写入 `agents[].enabled`，重启不丢失**；切模型仍为运行时热更新。pi 用 `pnpm setup:pi` 安装 CLI 并生成 `~/.pi/agent` 模型清单（见 [`docs/pi.md`](pi.md)）。
   - **Agent 工具权限策略（`permissionPolicy`）**：agent 定义可配 `permissionPolicy`（`autoApprove`/`autoDeny`/`escalate`/`defaultAction`，按工具名匹配，优先于 `permissionMode`）。策略挂在本机 agent 定义层，**微信/企微 bot、openclaw 插件任务与 `/v1` 共用同一策略**——渠道消息按路由「代入」agentId（微信侧判断激活任务/默认 agent），最终都汇聚到网关定义层执行，不会因渠道不同而绕过。
@@ -29,6 +29,7 @@
 - **个人微信 / 企业微信**：两种实现形态——插件运行时（openclaw 插件）或网关内嵌/独立进程的 botAgent（`channels/weixin-bot.ts`、`wecom-bot.ts`）。
 - `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起）。
 - **多账号**：每个**登录用户**绑定自己的微信（账号槽 = 用户名，进程 `weixin:<username>`）。流程是：**注册/登录账号 → 扫码绑定 → 重启该用户微信进程**。扫码成功后写入 `weixin.accounts` 并将 `weixin.mode` 设为 `external`、打开 `weixin.enabled`，由进程管理器为该用户单独拉起 bot（pid/日志/登录态隔离）。`pnpm restart:all` 只拉起**已绑定**的 `weixin:<用户名>`，未绑定不会空跑默认 `weixin`。管理员在「本机 · 进程」可见全部实例；普通用户只在「微信登录」页看自己的绑定与进程状态。yaml 里仍可用 `weixin.accounts` 预置账号。
+- 扫码登录复用微信 **bot** 插件（`ilink_appid=bot`）拿二维码和 token；消息收发是 `weixin-bot` 直连 ilink，不走 OpenClaw 插件运行时。插件若返回「已连接过此 OpenClaw」，表示该机器人已绑定且不再下发 token：本机已有登录态则沿用并拉起进程，没有则需先在微信里断开再扫。
 - 支持扫码登录与**取消绑定**（删除该用户登录态、从 `weixin.accounts` 移除并停止 `weixin:<用户名>`）；绑定成功后**重启**对应用户的微信进程，吊销 `ct_`、清掉 bot 本地 token 缓存（含插件生成的 `*-im-bot.user-tokens.json`），并**重签该用户任务 key（`k_`）**。后台「任务 / Key」页展示的是 `k_`，换绑后应变新。
 - **任务切换**：每个登录用户一份任务列表。微信里 `/task list|use|new|default` 由该用户的微信连接器解析并写入同一空间；后台「激活」写同一 `activeTaskId`，连接器短缓存后按新任务路由。不同联系人共用任务列表，对话上下文按联系人分开。
 

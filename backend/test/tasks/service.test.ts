@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createJsonStore } from '../../src/gateway/tasks/store.js';
@@ -304,55 +304,73 @@ test('旧数据（无 keyEnabled）load 时惰性补齐 true 并落盘，幂等'
   assert.equal(again.tasks[0].keyEnabled, false);
 });
 
-test('工作空间隔离：任务默认独立目录 <root>/<userId>/<taskId>，显式 cwd 优先', () => {
+test('工作空间按登录用户：<root>/<用户名>/<taskId>，显式 cwd 优先，微信联系人不建目录', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-ws-'));
   const root = join(dir, 'ws');
   const svc = new TaskService({ store: createJsonStore(dir), workspaceRoot: root });
-  const state = svc.load('weixin', 'wx_1');
-  // default 任务自动分配独立目录
+  const state = svc.ensureLoginSpace('alice');
   const def = state.tasks.find((t) => t.id === DEFAULT_TASK_ID)!;
-  assert.ok(def.cwd);
-  assert.ok(def.cwd!.includes(join('wx_1', DEFAULT_TASK_ID)));
-  // 新建任务自动分配独立目录，且目录真实创建
+  assert.equal(def.cwd, join(root, 'alice', DEFAULT_TASK_ID));
   const a = svc.createTask(state, '股票分析');
   const b = svc.createTask(state, '写周报');
-  assert.ok(a.cwd);
-  assert.ok(b.cwd);
-  assert.notEqual(a.cwd, b.cwd); // 两个任务目录互不相同 → 隔离
+  assert.ok(a.cwd?.startsWith(join(root, 'alice')));
+  assert.ok(b.cwd?.startsWith(join(root, 'alice')));
+  assert.notEqual(a.cwd, b.cwd);
   assert.ok(existsSync(a.cwd!));
-  // 显式 cwd 优先，不落入隔离目录
   const c = svc.createTask(state, '显式目录', undefined, undefined, '/tmp/explicit');
   assert.equal(c.cwd, '/tmp/explicit');
   assert.ok(!c.cwd!.startsWith(root));
+  // 只有微信联系人、没有登录用户时，不按 wxid 建工作目录
+  const peer = svc.load('weixin', 'wx_1');
+  assert.equal(peer.tasks[0]?.cwd, undefined);
+  assert.equal(existsSync(join(root, 'wx_1')), false);
+  // 带登录归属的微信终端，目录仍是用户名
+  const owned = svc.load('weixin', 'wx_9', 'alice');
+  assert.equal(owned.tasks[0]?.cwd, join(root, 'alice', DEFAULT_TASK_ID));
+  assert.equal(existsSync(join(root, 'wx_9')), false);
 });
 
-test('工作空间隔离：清除 cwd 回落自动隔离目录；旧数据无 cwd 惰性补齐', () => {
+test('工作空间：清除 cwd 回落用户目录；旧登录数据补用户目录；微信目录迁到用户名下', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-ws2-'));
   const root = join(dir, 'ws');
   const store = createJsonStore(dir);
   const svc = new TaskService({ store, workspaceRoot: root });
-  const state = svc.load('weixin', 'wx_1');
-  // 先设显式目录再清除 → 回落自动隔离目录（含任务 id）
+  const state = svc.ensureLoginSpace('alice');
   const t = svc.setTaskCwd(state, 'default', '/tmp/manual');
   assert.equal(t.cwd, '/tmp/manual');
   const cleared = svc.setTaskCwd(state, 'default', '');
-  assert.ok(cleared.cwd);
-  assert.ok(cleared.cwd!.includes(DEFAULT_TASK_ID));
-  // 旧数据（无 cwd）load 时惰性补齐并落盘
-  const svc2 = new TaskService({ store, workspaceRoot: root });
-  const legacy = svc2.load('weixin', 'wx_old3');
+  assert.equal(cleared.cwd, join(root, 'alice', DEFAULT_TASK_ID));
+  // 手填目录不因加载被改写成自动目录
+  svc.setTaskCwd(state, 'default', '/tmp/manual');
+  const kept = svc.ensureLoginSpace('alice');
+  assert.equal(kept.tasks[0]?.cwd, '/tmp/manual');
+
   store.write({
-    channel: 'weixin',
-    userId: 'wx_old3',
+    channel: 'web',
+    userId: 'bob',
+    ownerUsername: 'bob',
     activeTaskId: 'default',
     tasks: [{ id: 'default', key: 'k_old3', name: '默认', agentId: 'opencode', createdAt: Date.now() }],
   } as unknown as UserTasks);
-  const loaded = svc2.load('weixin', 'wx_old3');
-  assert.ok(loaded.tasks[0].cwd);
-  assert.ok(loaded.tasks[0].cwd!.includes(join('wx_old3', 'default')));
-  assert.ok(existsSync(loaded.tasks[0].cwd!));
-  assert.equal(loaded.tasks[0].agentId, 'pi');
-  assert.ok(legacy);
+  const loaded = svc.load('web', 'bob', 'bob');
+  assert.equal(loaded.tasks[0]?.cwd, join(root, 'bob', 'default'));
+  assert.equal(existsSync(loaded.tasks[0]!.cwd!), true);
+  assert.equal(loaded.tasks[0]?.agentId, 'pi');
+
+  const oldCwd = join(root, 'wx_9', 'default');
+  mkdirSync(oldCwd, { recursive: true });
+  writeFileSync(join(oldCwd, 'note.txt'), 'keep');
+  store.write({
+    channel: 'weixin',
+    userId: 'wx_9',
+    ownerUsername: 'carol',
+    activeTaskId: 'default',
+    tasks: [{ id: 'default', key: 'k_wx', name: '默认', agentId: 'pi', nodeId: 'local', cwd: oldCwd, createdAt: Date.now() }],
+  } as unknown as UserTasks);
+  const migrated = svc.ensureLoginSpace('carol');
+  assert.equal(migrated.tasks[0]?.cwd, join(root, 'carol', 'default'));
+  assert.equal(readFileSync(join(migrated.tasks[0]!.cwd!, 'note.txt'), 'utf8'), 'keep');
+  assert.equal(existsSync(oldCwd), false);
 });
 
 test('默认任务不能改 agent；/task agent default 被拒绝', () => {

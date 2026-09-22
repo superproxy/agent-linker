@@ -78,7 +78,7 @@ export const gatewaySectionSchema = z.object({
   tasks: z
     .object({
       defaultAgentId: z.string().default('pi'),
-      /** 任务工作空间根目录：配置后每个任务默认独立目录 <root>/<userId>/<taskId>（任务间隔离） */
+      /** 任务工作空间根目录：配置后每个任务默认独立目录 <root>/<登录用户名>/<taskId>（按用户，不按微信联系人） */
       workspaceDir: z.string().optional(),
     })
     .default({ defaultAgentId: 'pi' }),

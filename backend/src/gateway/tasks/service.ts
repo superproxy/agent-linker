@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { identityForLoginTask, taskSkillProcessEnv, writeTaskSkillMarkdown } from './skill-files.js';
 import type { TaskStore } from './store.js';
 import { LOCAL_NODE_ID } from '@linkagent/shared';
@@ -26,7 +26,8 @@ export interface TaskServiceOptions {
   defaultAgentId?: string;
   /**
    * 任务工作空间根目录（config.yaml tasks.workspaceDir）。
-   * 配置后每个任务默认拥有独立工作目录 <root>/<userId>/<taskId>（显式 cwd 优先），任务间文件系统隔离；
+   * 配置后每个任务默认独立目录 <root>/<登录用户名>/<taskId>（显式 cwd 优先）。
+   * 目录按登录用户，不按微信联系人；没有登录归属时不自动分配。
    * 不配置则不自动分配（任务回落到 agent 默认工作目录）。
    */
   workspaceRoot?: string;
@@ -82,13 +83,94 @@ export class TaskService {
     this.skill = options.skill;
   }
 
-  /** 任务独立工作目录 <root>/<userId>/<taskId>（自动创建）；未配 workspaceRoot 返回 undefined */
-  private taskWorkspaceDir(userId: string, taskId: string): string | undefined {
+  /**
+   * 工作目录归属的登录用户。
+   * ownerUsername 优先；登录空间（web）的 userId 就是用户名。
+   * 微信联系人 id 不是工作目录名。
+   */
+  private workspaceOwner(state: Pick<UserTasks, 'channel' | 'userId' | 'ownerUsername'>): string | undefined {
+    const owner = state.ownerUsername?.trim();
+    if (owner) return owner;
+    if (state.channel === LOGIN_TASK_CHANNEL) {
+      const id = state.userId.trim();
+      if (id) return id;
+    }
+    return undefined;
+  }
+
+  /** <root>/<登录用户名>/<taskId>；未配 workspaceRoot 返回 undefined（不创建目录） */
+  private taskWorkspacePath(owner: string, taskId: string): string | undefined {
     if (!this.workspaceRoot) return undefined;
     const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, '_');
-    const dir = join(this.workspaceRoot, safe(userId), taskId);
+    return join(this.workspaceRoot, safe(owner), taskId);
+  }
+
+  private ensureWorkspace(owner: string, taskId: string): string | undefined {
+    const dir = this.taskWorkspacePath(owner, taskId);
+    if (!dir) return undefined;
     mkdirSync(dir, { recursive: true });
     return dir;
+  }
+
+  /** 自动分配的目录恰好是 <root>/<某段>/<taskId>，用户手填的 cwd 不是这种形状 */
+  private isAutoWorkspace(cwd: string, taskId: string): boolean {
+    if (!this.workspaceRoot) return false;
+    const rel = relative(this.workspaceRoot, cwd);
+    if (!rel || rel.startsWith('..') || rel.includes(':')) return false;
+    const parts = rel.split(/[/\\]/).filter(Boolean);
+    return parts.length === 2 && parts[1] === taskId;
+  }
+
+  private dirIsEmpty(dir: string): boolean {
+    try {
+      return readdirSync(dir).length === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 把按微信联系人建的自动目录挪到登录用户名下；目标已有内容时只改指向 */
+  private relocateWorkspace(from: string, to: string): void {
+    if (relative(from, to) === '') return;
+    mkdirSync(dirname(to), { recursive: true });
+    const fromOk = existsSync(from);
+    const toOk = existsSync(to);
+    if (fromOk && toOk && this.dirIsEmpty(to)) rmSync(to, { recursive: true, force: true });
+    if (fromOk && !existsSync(to)) {
+      renameSync(from, to);
+      const parent = dirname(from);
+      if (this.workspaceRoot && parent !== this.workspaceRoot && this.dirIsEmpty(parent)) {
+        rmSync(parent, { recursive: true, force: true });
+      }
+      return;
+    }
+    mkdirSync(to, { recursive: true });
+  }
+
+  /**
+   * 补齐或纠正任务 cwd。
+   * 没有登录用户时不建目录（避免落成微信联系人文件夹）。
+   * 已有 cwd 若是自动目录且不在该用户名下，则迁过去；手填目录保持不动。
+   */
+  private alignTaskWorkspace(state: UserTasks, task: TaskItem): boolean {
+    const owner = this.workspaceOwner(state);
+    if (!owner) return false;
+    const next = this.taskWorkspacePath(owner, task.id);
+    if (!next) return false;
+    const current = task.cwd?.trim();
+    if (!current) {
+      mkdirSync(next, { recursive: true });
+      task.cwd = next;
+      return true;
+    }
+    if (relative(current, next) === '') {
+      mkdirSync(next, { recursive: true });
+      return false;
+    }
+    if (!this.isAutoWorkspace(current, task.id)) return false;
+    this.relocateWorkspace(current, next);
+    task.cwd = next;
+    return true;
   }
 
   /** 全局默认任务绑定的 agentId（config.yaml tasks.defaultAgentId 的运行时值） */
@@ -122,7 +204,7 @@ export class TaskService {
       userId,
       ...(ownerUsername ? { ownerUsername } : {}),
       activeTaskId: DEFAULT_TASK_ID,
-      tasks: [this.buildDefaultTask(userId)],
+      tasks: [this.buildDefaultTask({ channel, userId, ...(ownerUsername ? { ownerUsername } : {}) })],
     };
     this.store.write(fresh);
     return this.ensureKeys(fresh);
@@ -185,10 +267,7 @@ export class TaskService {
         t.nodeId = LOCAL_NODE_ID;
         changed = true;
       }
-      if (!t.cwd && this.workspaceRoot) {
-        t.cwd = this.taskWorkspaceDir(state.userId, t.id);
-        changed = true;
-      }
+      if (this.alignTaskWorkspace(state, t)) changed = true;
     }
     if (changed) this.store.write(state);
     this.syncSkillFiles(state);
@@ -235,8 +314,9 @@ export class TaskService {
   }
 
   /** 内建默认任务：id=default，固定本机 pi。首次建档与显式重建共用。 */
-  private buildDefaultTask(userId: string): TaskItem {
-    const workspace = this.taskWorkspaceDir(userId, DEFAULT_TASK_ID);
+  private buildDefaultTask(state: Pick<UserTasks, 'channel' | 'userId' | 'ownerUsername'>): TaskItem {
+    const owner = this.workspaceOwner(state);
+    const workspace = owner ? this.ensureWorkspace(owner, DEFAULT_TASK_ID) : undefined;
     return {
       id: DEFAULT_TASK_ID,
       key: newTaskKey(),
@@ -255,7 +335,7 @@ export class TaskService {
    */
   ensureDefaultTask(state: UserTasks): TaskItem {
     if (state.tasks.some((t) => isDefaultTaskId(t.id))) throw new Error('默认任务已存在');
-    const task = this.buildDefaultTask(state.userId);
+    const task = this.buildDefaultTask(state);
     state.tasks.unshift(task);
     state.activeTaskId = task.id;
     this.store.write(state);
@@ -277,7 +357,8 @@ export class TaskService {
   ): TaskItem {
     const id = newTaskId();
     const explicit = cwd?.trim();
-    const workspace = explicit ? explicit : this.taskWorkspaceDir(state.userId, id);
+    const owner = this.workspaceOwner(state);
+    const workspace = explicit ? explicit : owner ? this.ensureWorkspace(owner, id) : undefined;
     const task: TaskItem = {
       id,
       key: this.keyFor(customKey),
@@ -448,8 +529,12 @@ export class TaskService {
     if (!task) throw new Error(`任务不存在: ${id}`);
     const trimmed = cwd?.trim();
     if (trimmed) task.cwd = trimmed;
-    else if (this.workspaceRoot) task.cwd = this.taskWorkspaceDir(state.userId, task.id);
-    else delete task.cwd;
+    else {
+      const owner = this.workspaceOwner(state);
+      const fallback = owner ? this.ensureWorkspace(owner, task.id) : undefined;
+      if (fallback) task.cwd = fallback;
+      else delete task.cwd;
+    }
     this.store.write(state);
     this.syncSkillFiles(state);
     return task;

@@ -53,8 +53,99 @@ export type AuthCheck = (request: { headers: Record<string, string | string[] | 
 /** 扫码状态（前端轮询） */
 export interface QrWaitResult {
   connected: boolean;
+  /**
+   * 微信 bot 已绑定（binded_redirect）且本机已有 token。
+   * 插件文案写成 OpenClaw，实际是 ilink bot，收发走 weixin-bot，不经过 OpenClaw。
+   */
+  alreadyBound?: boolean;
   accountId?: string;
   message?: string;
+}
+
+/** 插件把 binded_redirect 写成「已连接过此 OpenClaw」。那是 bot 已绑定、不再下发 token，不是 OpenClaw 渠道。 */
+export function isWeixinBotAlreadyBoundMessage(message?: string): boolean {
+  return /无需重复连接|已连接过|binded_redirect/.test(message ?? '');
+}
+
+/**
+ * 插件 connected=false 时的两种结果：
+ * - 本机已有该账号槽的 bot token：沿用登录态，拉起 weixin-bot；
+ * - 本机没有 token：不能当成绑定成功，需要先在微信里断开该机器人再扫。
+ */
+export function normalizeQrWait(
+  wait: {
+    connected?: boolean;
+    accountId?: string;
+    message?: string;
+  },
+  opts?: { hasLocalToken?: boolean },
+): QrWaitResult {
+  const reuse = wait.connected !== true && isWeixinBotAlreadyBoundMessage(wait.message);
+  if (reuse && opts?.hasLocalToken) {
+    return {
+      connected: true,
+      alreadyBound: true,
+      ...(wait.accountId ? { accountId: wait.accountId } : {}),
+      message: '这个微信机器人已经绑定过，沿用本机登录态。收发由 weixin-bot 直连，不经过 OpenClaw。',
+    };
+  }
+  if (reuse) {
+    return {
+      connected: false,
+      ...(wait.accountId ? { accountId: wait.accountId } : {}),
+      message:
+        '微信侧该机器人已绑定，但没有下发新的登录态，本机也没有 token。请先在手机微信里断开该机器人后再扫码。当前渠道是 weixin-bot，不走 OpenClaw。',
+    };
+  }
+  return {
+    connected: wait.connected === true,
+    ...(wait.accountId ? { accountId: wait.accountId } : {}),
+    message: wait.message,
+  };
+}
+
+const qrRefreshListeners = new Set<(text: string) => void>();
+let stdoutTapInstalled = false;
+
+/** 从插件 stdout 里取出刷新后的二维码链接。armed 跨多次 write 保持，直到看到 URL。 */
+export function takeRefreshedQrUrl(text: string, state: { armed: boolean }): string | undefined {
+  if (text.includes('二维码已更新') || text.includes('请重新扫描')) state.armed = true;
+  if (!state.armed) return undefined;
+  const matched = text.match(/https?:\/\/\S+/);
+  const url = matched?.[0]?.replace(/[)\].,]+$/, '');
+  if (!url) return undefined;
+  state.armed = false;
+  return url;
+}
+
+/** 插件刷新二维码时把新链接写到 stdout，这里摘出来给页面换图 */
+function ensureQrStdoutTap(): void {
+  if (stdoutTapInstalled) return;
+  const orig = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array, encoding?: BufferEncoding | ((err?: Error | null) => void), cb?: (err?: Error | null) => void) => {
+    const text = typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
+    if (text) {
+      for (const fn of qrRefreshListeners) fn(text);
+    }
+    if (typeof encoding === 'function') return orig(chunk, encoding);
+    if (cb) return orig(chunk, encoding, cb);
+    if (encoding) return orig(chunk, encoding);
+    return orig(chunk);
+  }) as typeof process.stdout.write;
+  stdoutTapInstalled = true;
+}
+
+function watchQrRefresh(onUrl: (url: string) => void): () => void {
+  ensureQrStdoutTap();
+  const state = { armed: false };
+  const onText = (text: string) => {
+    const url = takeRefreshedQrUrl(text, state);
+    if (url) onUrl(url);
+  };
+  qrRefreshListeners.add(onText);
+  return () => {
+    qrRefreshListeners.delete(onText);
+  };
 }
 
 export interface WeixinLoginDeps {
@@ -78,6 +169,8 @@ export class WeixinLoginService {
   private readonly stateDir: string;
   private readonly log: (...args: unknown[]) => void;
   private channelHandle: WeixinChannelPlugin | null = null;
+  /** 等待扫码期间插件刷新出来的新二维码内容（sessionKey → url） */
+  private readonly liveQr = new Map<string, string>();
 
   constructor(deps: { stateDir?: string; log?: (...args: unknown[]) => void } = {}) {
     this.stateDir = deps.stateDir ?? getLayout().pluginsState;
@@ -109,6 +202,13 @@ export class WeixinLoginService {
       /* 无可用账号 */
     }
     return { configured: accounts.length > 0, accounts, activeAccountId };
+  }
+
+  /** 该登录账号槽是否已有 bot token（binded_redirect 不再下发新 token 时才能沿用） */
+  hasToken(accountId: string): boolean {
+    const id = accountId.trim();
+    if (!id) return false;
+    return this.status().accounts.some((a) => a.id === id);
   }
 
   /**
@@ -221,16 +321,30 @@ export class WeixinLoginService {
   /** 轮询扫码结果（阻塞到确认或超时）；accountId 需与 startQr 一致，确保回写目标账号 */
   async waitQr(sessionKey?: string, timeoutMs = 8_000, accountId?: string): Promise<QrWaitResult> {
     const h = await this.handle();
-    const wait = await h.gateway.loginWithQrWait({
-      sessionKey,
-      timeoutMs,
-      ...(accountId ? { accountId } : {}),
-    });
-    return {
-      connected: wait.connected === true,
-      accountId: wait.accountId,
-      message: wait.message,
-    };
+    const stopWatch = sessionKey
+      ? watchQrRefresh((url) => {
+          this.liveQr.set(sessionKey, url);
+        })
+      : undefined;
+    try {
+      const wait = await h.gateway.loginWithQrWait({
+        sessionKey,
+        timeoutMs,
+        ...(accountId ? { accountId } : {}),
+      });
+      return {
+        connected: wait.connected === true,
+        accountId: wait.accountId,
+        message: wait.message,
+      };
+    } finally {
+      stopWatch?.();
+    }
+  }
+
+  /** 插件在二维码过期时会换新链接并写到 stdout，页面据此换成新图 */
+  peekLiveQr(sessionKey: string): string | undefined {
+    return this.liveQr.get(sessionKey);
   }
 }
 
@@ -336,7 +450,8 @@ export function registerWeixinApi(
     if (accountId === null) return reply.code(403).send({ error: 'forbidden' });
     try {
       const timeoutMs = Math.min(Number(q.timeoutMs) || 8_000, 180_000);
-      const wait = await service.waitQr(q.sessionKey, timeoutMs, accountId);
+      const raw = await service.waitQr(q.sessionKey, timeoutMs, accountId);
+      const wait = normalizeQrWait(raw, { hasLocalToken: accountId ? service.hasToken(accountId) : false });
       if (wait.connected) {
         // 插件可能回自己的 *-im-bot id；进程/缓存/任务 key 必须以登录账号槽为准
         const boundId = accountId || wait.accountId;
@@ -361,6 +476,22 @@ export function registerWeixinApi(
       // 轮询失败不要 500：前端会当成扫码中断；未确认时继续等下一次
       return { connected: false, message };
     }
+  });
+
+  app.get('/api/weixin/qr/current', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!requireAuth(request, reply)) return;
+    const q = request.query as { sessionKey?: string };
+    const sessionKey = q.sessionKey?.trim();
+    if (!sessionKey) return { qrContent: null };
+    const qrContent = service.peekLiveQr(sessionKey);
+    if (!qrContent) return { qrContent: null };
+    let qrDataUrl: string | undefined;
+    try {
+      qrDataUrl = await qrDataUrlOf(qrContent);
+    } catch {
+      /* 无 qrcode 包时只回链接 */
+    }
+    return { qrContent, ...(qrDataUrl ? { qrDataUrl } : {}) };
   });
 
   app.post('/api/weixin/reload', async (request: FastifyRequest, reply: FastifyReply) => {

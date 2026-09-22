@@ -10,7 +10,7 @@ import Fastify from 'fastify';
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { registerWeixinApi, WeixinLoginService } from '../../src/gateway/weixin-login.js';
+import { registerWeixinApi, WeixinLoginService, normalizeQrWait, takeRefreshedQrUrl } from '../../src/gateway/weixin-login.js';
 
 interface StartCall {
   force: boolean | undefined;
@@ -36,6 +36,7 @@ function buildStub() {
       // 模拟插件回写 *-im-bot，与登录账号槽不一致
       return { connected: true, accountId: '51d9f31fb43e-im-bot' };
     },
+    hasToken: () => false,
     adoptPluginAccount() {},
   } as unknown as WeixinLoginService;
   return { service, calls };
@@ -48,7 +49,100 @@ async function appOf() {
   return { app, calls };
 }
 
-test('POST /api/weixin/qr 带 accountId → startQr 收到定向账号', async () => {
+test('takeRefreshedQrUrl：刷新提示和链接分两次写出时仍能拿到新链接', () => {
+  const state = { armed: false };
+  assert.equal(takeRefreshedQrUrl('普通日志 https://example.com/old\n', state), undefined);
+  assert.equal(takeRefreshedQrUrl('🔄 二维码已更新，请重新扫描。\n\n', state), undefined);
+  assert.equal(state.armed, true);
+  assert.equal(
+    takeRefreshedQrUrl('若二维码未能显示，你可以访问以下链接以继续：\nhttps://liteapp.weixin.qq.com/q/abc.\n', state),
+    'https://liteapp.weixin.qq.com/q/abc',
+  );
+  assert.equal(state.armed, false);
+});
+
+test('normalizeQrWait：OpenClaw 文案是 bot 已绑定；没有本机 token 不能当成成功', () => {
+  const missing = normalizeQrWait({
+    connected: false,
+    message: '已连接过此 OpenClaw，无需重复连接。',
+  });
+  assert.equal(missing.connected, false);
+  assert.equal(missing.alreadyBound, undefined);
+  assert.match(missing.message ?? '', /weixin-bot/);
+  assert.match(missing.message ?? '', /没有 token/);
+
+  const reuse = normalizeQrWait(
+    { connected: false, message: '已连接过此 OpenClaw，无需重复连接。' },
+    { hasLocalToken: true },
+  );
+  assert.equal(reuse.connected, true);
+  assert.equal(reuse.alreadyBound, true);
+  assert.match(reuse.message ?? '', /沿用本机登录态/);
+  assert.doesNotMatch(reuse.message ?? '', /OpenClaw 渠道/);
+});
+
+test('GET /api/weixin/qr/status 机器人已绑定但本机无 token → 不拉起进程', async () => {
+  const { service, calls } = buildStub();
+  (service as { waitQr: typeof service.waitQr }).waitQr = async (sessionKey, timeoutMs, accountId) => {
+    calls.wait.push({ sessionKey, timeoutMs, accountId });
+    return { connected: false, message: '已连接过此 OpenClaw，无需重复连接。' };
+  };
+  (service as { hasToken: (id: string) => boolean }).hasToken = () => false;
+  const bound: string[] = [];
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, {
+    onBound: async (id) => {
+      bound.push(id);
+    },
+  });
+  try {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=alice',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { connected: boolean; alreadyBound?: boolean; message?: string };
+    assert.equal(body.connected, false);
+    assert.equal(body.alreadyBound, undefined);
+    assert.match(body.message ?? '', /不走 OpenClaw/);
+    assert.deepEqual(bound, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /api/weixin/qr/status 机器人已绑定且本机有 token → 沿用并拉起进程', async () => {
+  const { service, calls } = buildStub();
+  (service as { waitQr: typeof service.waitQr }).waitQr = async (sessionKey, timeoutMs, accountId) => {
+    calls.wait.push({ sessionKey, timeoutMs, accountId });
+    return { connected: false, message: '已连接过此 OpenClaw，无需重复连接。' };
+  };
+  (service as { hasToken: (id: string) => boolean }).hasToken = (id) => id === 'alice';
+  const bound: string[] = [];
+  const app = Fastify();
+  registerWeixinApi(app, service, () => true, {
+    onBound: async (id) => {
+      bound.push(id);
+    },
+  });
+  try {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=alice',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { connected: boolean; alreadyBound?: boolean; accountId?: string; message?: string };
+    assert.equal(body.connected, true);
+    assert.equal(body.alreadyBound, true);
+    assert.equal(body.accountId, 'alice');
+    assert.match(body.message ?? '', /weixin-bot/);
+    assert.deepEqual(bound, ['alice']);
+  } finally {
+    await app.close();
+  }
+});
+
+test('POST /api/weixin/qr 带 accountId → startQr 收到该账号', async () => {
   const { app, calls } = await appOf();
   try {
     const res = await app.inject({

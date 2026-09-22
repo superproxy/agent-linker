@@ -219,7 +219,7 @@ export async function buildServer(options?: {
   const taskService = new TaskService({
     store: createJsonStore(taskStateDir),
     defaultAgentId: gw.tasks?.defaultAgentId,
-    // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 gateway.tasks.workspaceDir 配置
+    // 任务工作空间隔离：每个任务默认独立目录 <root>/<登录用户名>/<taskId>，可经 gateway.tasks.workspaceDir 配置
     workspaceRoot: gw.tasks?.workspaceDir ?? layout.tasksWorkspace,
     ...(skillMarkdown
       ? {

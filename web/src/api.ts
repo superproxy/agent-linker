@@ -201,6 +201,7 @@ export interface WeixinQrResult {
 
 export interface WeixinQrStatus {
   connected: boolean;
+  alreadyBound?: boolean;
   accountId?: string;
   message?: string;
   boundWarning?: string;
@@ -254,6 +255,13 @@ export class WeixinClient {
     const data = (await res.json().catch(() => ({}))) as WeixinQrStatus & { error?: string };
     if (!res.ok) throw new Error(data.error || data.message || `weixin qr status ${res.status}`);
     return data;
+  }
+
+  async qrCurrent(sessionKey: string, signal?: AbortSignal): Promise<{ qrContent?: string | null; qrDataUrl?: string }> {
+    const q = new URLSearchParams({ sessionKey });
+    const res = await fetch(this.url(`/api/weixin/qr/current?${q}`), { headers: this.authHeaders(), signal });
+    if (!res.ok) return { qrContent: null };
+    return (await res.json()) as { qrContent?: string | null; qrDataUrl?: string };
   }
 
   async reload(accountId?: string): Promise<void> {

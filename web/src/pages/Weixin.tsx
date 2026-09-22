@@ -59,6 +59,16 @@ export function WeixinPage(props: {
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
+      let shown = r.qrContent;
+      const poll = window.setInterval(() => {
+        if (!r.sessionKey || ac.signal.aborted) return;
+        void wx.qrCurrent(r.sessionKey, ac.signal).then((cur) => {
+          if (ac.signal.aborted || !cur.qrDataUrl || !cur.qrContent || cur.qrContent === shown) return;
+          shown = cur.qrContent;
+          setQr(cur.qrDataUrl);
+          setMsg({ type: 'info', text: '二维码已更新，请扫描页面上这一张，不要扫旧的。' });
+        }).catch(() => {});
+      }, 2000);
       try {
         const st = await wx.qrStatus(r.sessionKey, 120_000, slot, ac.signal);
         if (ac.signal.aborted) return;
@@ -68,7 +78,9 @@ export function WeixinPage(props: {
             type: st.boundWarning ? 'info' : 'success',
             text: st.boundWarning
               ? `已扫码（账号 ${st.accountId ?? slot ?? ''}）。${st.boundWarning}`
-              : `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试拉起进程 weixin:${st.accountId ?? slot ?? ''}。`,
+              : st.alreadyBound
+                ? st.message || '这个微信机器人已经绑定过，沿用本机登录态。'
+                : `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试拉起进程 weixin:${st.accountId ?? slot ?? ''}。`,
           });
           await refresh();
         } else {
@@ -78,6 +90,8 @@ export function WeixinPage(props: {
         if (ac.signal.aborted) return;
         setScanning(false);
         setMsg({ type: 'error', text: `扫码状态查询失败：${e instanceof Error ? e.message : String(e)}` });
+      } finally {
+        window.clearInterval(poll);
       }
     } catch (e) {
       setScanning(false);
