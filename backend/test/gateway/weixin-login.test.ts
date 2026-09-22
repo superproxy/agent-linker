@@ -71,7 +71,8 @@ test('normalizeQrWait：OpenClaw 文案是 bot 已绑定；没有本机 token �
   assert.equal(missing.connected, false);
   assert.equal(missing.alreadyBound, undefined);
   assert.match(missing.message ?? '', /weixin-bot/);
-  assert.match(missing.message ?? '', /没有可绑/);
+  assert.match(missing.message ?? '', /weixin-bot/);
+  assert.match(missing.message ?? '', /bindings|绑定/);
 
   const reuse = normalizeQrWait(
     { connected: false, message: '已连接过此 OpenClaw，无需重复连接。' },
@@ -108,6 +109,43 @@ test('GET /api/weixin/qr/status 机器人已绑定但本机无 token → 不拉�
     assert.equal(body.alreadyBound, undefined);
     assert.match(body.message ?? '', /weixin-bot/);
     assert.deepEqual(bound, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('GET /api/weixin/qr/status binded_redirect 带回 accountId → claimBinding 后成功', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'linkagent-wx-redirect-'));
+  const dir = join(stateDir, 'openclaw-weixin', 'accounts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'aa1111111111-im-bot.json'),
+    JSON.stringify({ token: 'tok-x', userId: 'wx', savedAt: '2026-09-22T00:00:00.000Z' }),
+  );
+  const svc = new WeixinLoginService({ stateDir });
+  (svc as { waitQr: typeof svc.waitQr }).waitQr = async () => ({
+    connected: false,
+    message: '已连接过此 OpenClaw，无需重复连接。',
+    accountId: 'aa1111111111@im.bot',
+  });
+  const bound: string[] = [];
+  const app = Fastify();
+  registerWeixinApi(app, svc, () => true, {
+    onBound: async (id) => {
+      bound.push(id);
+    },
+  });
+  try {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/weixin/qr/status?sessionKey=sk-1&accountId=admin',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { connected: boolean; accountId?: string };
+    assert.equal(body.connected, true);
+    assert.equal(body.accountId, 'admin');
+    assert.deepEqual(bound, ['admin']);
+    assert.equal(svc.hasToken('admin'), true);
   } finally {
     await app.close();
   }

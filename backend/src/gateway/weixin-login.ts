@@ -107,7 +107,7 @@ export function normalizeQrWait(
       connected: false,
       ...(wait.accountId ? { accountId: wait.accountId } : {}),
       message:
-        '微信没有下发新登录态，本机也没有可绑到该账号的机器人登录文件。当前渠道是 weixin-bot。若手机里仍显示已连接，需要先退出该机器人再扫。',
+        '微信侧该机器人已绑定，未下发新 token。本机没有可用的 *-im-bot 登录文件，或尚未写入 bindings 绑定。请先在后台「清空登录态」后重扫；若 accounts/ 里已有 *-im-bot.json 仍失败，请确认网关已更新并重启 gateway（非仅 weixin 进程）。当前渠道是 weixin-bot。',
     };
   }
   return {
@@ -514,7 +514,12 @@ export function registerWeixinApi(
       const raw = await service.waitQr(q.sessionKey, timeoutMs, accountId);
       let hasLocalToken = accountId ? service.hasToken(accountId) : false;
       if (!hasLocalToken && accountId && isWeixinBotAlreadyBoundMessage(raw.message)) {
-        hasLocalToken = service.bindNewestUnclaimed(accountId);
+        // 已连接过：插件常不再写盘，但会带回 ilink_bot_id；优先绑到该机器人文件
+        if (raw.accountId && service.claimBinding(accountId, raw.accountId) === 'ok') {
+          hasLocalToken = true;
+        } else {
+          hasLocalToken = service.bindNewestUnclaimed(accountId);
+        }
       }
       const wait = normalizeQrWait(raw, { hasLocalToken });
       if (wait.connected && accountId) {
