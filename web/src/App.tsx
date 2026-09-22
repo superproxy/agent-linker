@@ -245,9 +245,30 @@ function PageRouter(props: {
     case 'keys':
       return <KeysPage base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'my-token':
-      return props.auth.status === 'ready' ? (
-        <MyTokenPage base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />
-      ) : null;
+      if (props.auth.status === 'ready') {
+        const u = props.auth.user;
+        return (
+          <MyTokenPage
+            base={base}
+            token={token}
+            onAuthError={onAuthError}
+            isAdmin={isAdmin}
+            showPat={u.username !== 'local'}
+          />
+        );
+      }
+      if (props.auth.status === 'token') {
+        return (
+          <MyTokenPage
+            base={base}
+            token={token}
+            onAuthError={onAuthError}
+            isAdmin
+            showPat={false}
+          />
+        );
+      }
+      return null;
     case 'node-key':
       return props.auth.status === 'ready' ? (
         <NodeKeyPage base={base} token={token} onAuthError={onAuthError} />

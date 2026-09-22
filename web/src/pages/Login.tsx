@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Button, Form, Input } from 'antd';
 import { ApiOutlined, LockOutlined, UserOutlined } from '@ant-design/icons';
+import { BRAND_LOGIN_DESC, BRAND_NAME, BRAND_TAGLINE } from '../lib/brand';
 
 export function LoginPage(props: {
   base: string;
@@ -38,8 +39,9 @@ export function LoginPage(props: {
       <div className="login-card">
         <div className="login-brand">
           <div className="brand-logo">◆</div>
-          <h1>linkagent 后台</h1>
-          <p>多渠道 Agent 网关运维控制台</p>
+          <h1>{BRAND_NAME}</h1>
+          <p style={{ margin: '4px 0 0', color: 'rgba(229,233,240,0.55)', fontSize: 14 }}>{BRAND_TAGLINE}</p>
+          <p style={{ marginTop: 12 }}>{BRAND_LOGIN_DESC}</p>
         </div>
 
         <Form layout="vertical" onFinish={() => void submit()} requiredMark={false}>

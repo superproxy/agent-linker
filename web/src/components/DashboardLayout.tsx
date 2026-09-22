@@ -12,6 +12,7 @@ import {
   SafetyCertificateOutlined,
   UserOutlined,
 } from '@ant-design/icons';
+import { BRAND_CONSOLE, BRAND_HEADER_SUB, BRAND_NAME, BRAND_TAGLINE } from '../lib/brand';
 import { ALL_TABS, LS_SIDER_COLLAPSED_KEY, NAV_GROUPS, navGroupTitle, type TabId } from '../lib/constants';
 import { GatewayClient, OpsClient, type UserPublic } from '../api';
 
@@ -20,7 +21,7 @@ const { Sider, Header, Content } = Layout;
 function SiderMenu(props: {
   active: TabId;
   canAdmin: boolean;
-  showMyToken: boolean;
+  showUserKey: boolean;
   collapsed: boolean;
   onSelect: (t: TabId) => void;
 }) {
@@ -31,14 +32,14 @@ function SiderMenu(props: {
       label: g.title,
       children: g.items
         .filter((it) => {
-          if (it.id === 'my-token') return props.showMyToken;
+          if (it.id === 'my-token') return props.showUserKey;
           return !it.adminOnly || props.canAdmin;
         })
         .map((it) => ({ key: it.id, icon: it.icon, label: it.label })),
     })).filter((g) => (g.children?.length ?? 0) > 0);
     if (!props.collapsed) return groups;
     return groups.flatMap((g) => g.children ?? []);
-  }, [props.canAdmin, props.showMyToken, props.collapsed]);
+  }, [props.canAdmin, props.showUserKey, props.collapsed]);
 
   return (
     <Menu
@@ -87,7 +88,8 @@ export function DashboardLayout(props: {
   const siderWidth = collapsed ? 64 : 224;
   const isAdmin = props.currentUser?.role === 'admin';
   const canAdmin = props.authMode !== 'ready' || isAdmin;
-  const showMyToken = props.authMode === 'ready' && props.currentUser?.username !== 'local';
+  /** 账号登录、本机 local 用户、或持网关 token 的管理员均可见 */
+  const showUserKey = props.authMode === 'ready' || props.authMode === 'token';
   const activeMeta = ALL_TABS.find((t) => t.id === props.active);
   const groupTitle = navGroupTitle(props.active);
 
@@ -187,19 +189,19 @@ export function DashboardLayout(props: {
         <div className="brand">
           <div className="brand-logo">◆</div>
           <div className="brand-text">
-            <div className="brand-name">linkagent</div>
-            <div className="brand-sub">Agent 网关控制台</div>
+            <div className="brand-name">{BRAND_NAME}</div>
+            <div className="brand-sub">{BRAND_TAGLINE}</div>
           </div>
         </div>
         <SiderMenu
           active={props.active}
           canAdmin={canAdmin}
-          showMyToken={showMyToken}
+          showUserKey={showUserKey}
           collapsed={collapsed}
           onSelect={selectTab}
         />
         <div className="sider-foot">
-          多渠道 Agent 网关
+          {BRAND_CONSOLE}
           <br />
           OpenAI 兼容 · 流式推理
         </div>
@@ -214,12 +216,12 @@ export function DashboardLayout(props: {
       >
         <div className="brand" style={{ borderBottom: '1px solid #1b212b' }}>
           <div className="brand-logo">◆</div>
-          <div className="brand-name">linkagent</div>
+          <div className="brand-name">{BRAND_NAME}</div>
         </div>
         <SiderMenu
           active={props.active}
           canAdmin={canAdmin}
-          showMyToken={showMyToken}
+          showUserKey={showUserKey}
           collapsed={false}
           onSelect={selectTab}
         />
@@ -243,7 +245,7 @@ export function DashboardLayout(props: {
           />
           <div className="header-title">
             <h2>{groupTitle && activeMeta ? `${groupTitle} · ${activeMeta.label}` : (activeMeta?.label ?? '')}</h2>
-            <span className="sub">linkagent gateway</span>
+            <span className="sub">{BRAND_HEADER_SUB}</span>
           </div>
           <span className="header-spacer" />
 
