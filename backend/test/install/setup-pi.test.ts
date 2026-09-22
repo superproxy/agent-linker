@@ -5,7 +5,11 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findRepoRoot } from '../../src/install/layout.js';
-import { applyPiAgentConfig, mergePiSettings, parseSetupPiArgs } from '../../../scripts/setup-pi.mjs';
+import { applyPiAgentConfig, mergePiSettings, parseSetupPiArgs, PI_ACP_PACKAGE } from '../../../scripts/setup-pi.mjs';
+
+test('执行机安装钉死 pi-acp@0.0.33，不是未钉版本的 latest', () => {
+  assert.equal(PI_ACP_PACKAGE, 'pi-acp@0.0.33');
+});
 
 test('parseSetupPiArgs：开关与路径', () => {
   const a = parseSetupPiArgs(['--skip-install', '--force', '--sandbox', '--home=/tmp/x', '--templates=/t']);

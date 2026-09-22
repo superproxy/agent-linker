@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { identityForLoginTask, taskSkillProcessEnv, writeTaskSkillMarkdown } from './skill-files.js';
 import type { TaskStore } from './store.js';
 import { LOCAL_NODE_ID } from '@linkagent/shared';
 import {
@@ -29,6 +30,12 @@ export interface TaskServiceOptions {
    * 不配置则不自动分配（任务回落到 agent 默认工作目录）。
    */
   workspaceRoot?: string;
+  /** 登录用户任务 cwd 注入 skill；未配置则不写文件（单测默认关闭） */
+  skill?: {
+    markdown: string;
+    baseUrl: string;
+    personalTokenFor: (username: string) => string | undefined;
+  };
 }
 
 /** 短随机任务 id：t_<8 hex> */
@@ -66,11 +73,13 @@ export class TaskService {
   /** 任务全空时的路由兜底；内建 default 任务始终钉死本机 pi */
   private defaultAgentId: string;
   private readonly workspaceRoot?: string;
+  private readonly skill?: TaskServiceOptions['skill'];
 
   constructor(options: TaskServiceOptions) {
     this.store = options.store;
     this.defaultAgentId = options.defaultAgentId ?? DEFAULT_AGENT_ID;
     this.workspaceRoot = options.workspaceRoot?.trim() || undefined;
+    this.skill = options.skill;
   }
 
   /** 任务独立工作目录 <root>/<userId>/<taskId>（自动创建）；未配 workspaceRoot 返回 undefined */
@@ -128,7 +137,7 @@ export class TaskService {
       ],
     };
     this.store.write(fresh);
-    return fresh;
+    return this.ensureKeys(fresh);
   }
 
   /** 登录用户任务空间（web/<username>）。若尚无文件，则从该用户最近的微信终端任务迁入一次。 */
@@ -194,7 +203,47 @@ export class TaskService {
       }
     }
     if (changed) this.store.write(state);
+    this.syncSkillFiles(state);
     return state;
+  }
+
+  /**
+   * 仅默认任务（任务管理器）：cwd 写入 SKILL.md，凭据不落盘。
+   * 启动本机 pi 时经 skillEnvForTask 注入 LINKAGENT_*。
+   */
+  private syncSkillFiles(state: UserTasks): void {
+    const cfg = this.skill;
+    if (!cfg?.markdown.trim()) return;
+    const username = (state.ownerUsername || (state.channel === LOGIN_TASK_CHANNEL ? state.userId : '')).trim();
+    if (!username) return;
+    const token = cfg.personalTokenFor(username)?.trim();
+    if (!token) return;
+    const task = state.tasks.find((t) => isDefaultTaskId(t.id));
+    const cwd = task?.cwd?.trim();
+    if (!cwd) return;
+    writeTaskSkillMarkdown(cwd, cfg.markdown);
+  }
+
+  /** 默认任务对话启动 pi 时的 env；其它任务不注入，避免把 pat_ 带进用户自己的执行任务 */
+  skillEnvForTask(state: UserTasks, taskId: string): Record<string, string> | undefined {
+    if (!isDefaultTaskId(taskId)) return undefined;
+    const cfg = this.skill;
+    if (!cfg?.markdown.trim()) return undefined;
+    const username = (state.ownerUsername || (state.channel === LOGIN_TASK_CHANNEL ? state.userId : '')).trim();
+    if (!username) return undefined;
+    const token = cfg.personalTokenFor(username)?.trim();
+    if (!token) return undefined;
+    const task = state.tasks.find((t) => isDefaultTaskId(t.id));
+    if (!task?.key) return undefined;
+    return taskSkillProcessEnv(
+      identityForLoginTask({
+        baseUrl: cfg.baseUrl,
+        username,
+        taskId: task.id,
+        taskKey: task.key,
+        token,
+      }),
+    );
   }
 
   /**
@@ -225,6 +274,7 @@ export class TaskService {
     state.tasks.push(task);
     state.activeTaskId = task.id; // 新建即激活
     this.store.write(state);
+    this.syncSkillFiles(state);
     return task;
   }
 
@@ -320,6 +370,7 @@ export class TaskService {
   private reissueKeys(state: UserTasks): void {
     for (const t of state.tasks) t.key = newTaskKey();
     this.store.write(state);
+    this.syncSkillFiles(state);
   }
 
   activateTask(state: UserTasks, id: string): TaskItem {
@@ -383,6 +434,7 @@ export class TaskService {
     else if (this.workspaceRoot) task.cwd = this.taskWorkspaceDir(state.userId, task.id);
     else delete task.cwd;
     this.store.write(state);
+    this.syncSkillFiles(state);
     return task;
   }
 

@@ -1,80 +1,136 @@
 ---
 name: linkagent-tasks
-description: linkagent 任务管理智能体。用于创建任务、切换激活任务、列出任务、重命名和删除任务。任务按「渠道用户」隔离，每条任务绑定一个 agent（pi/opencode）并拥有独立持久会话。当用户说"新建任务/创建任务/切换任务/切到任务/任务列表/重命名任务/删除任务/激活任务"或要求管理 linkagent 的 task 时使用。底层通过网关 `/api/tasks` API（Fastify）驱动，单一事实源是网关落盘的 `.runtime-state/tasks/`。
+description: >
+  linkagent 任务管理。用于列出、创建、激活、重命名、改绑、删除当前登录用户的任务。
+  身份是登录账号级（web/<username> + pat_），不要用微信联系人 id 或任务 key k_。
+  当用户说新建任务、创建任务、切换任务、任务列表、重命名、删除、激活任务时使用。
 metadata:
-  version: 1.0.0
+  version: 2.1.0
 ---
 
-# linkagent 任务管理智能体
+# linkagent 任务管理
 
-## 目标
-作为 linkagent 网关的任务管理智能体，通过 `/api/tasks` HTTP API 对指定渠道用户的**任务**做创建、切换、列出、重命名、删除，保持网关为单一事实源。
+通过网关 `/api/tasks` 管理**当前登录用户**的任务。网关是唯一事实源。
 
-## 前置：服务与身份
-- 网关运行在 `http://localhost:8787`（仓库根 `backend/config/config.yaml` 的 `server.port`，auth.enabled=false 时免鉴权）。
-- 每个用户身份由 `channel` + `userId` 唯一确定。示例身份（微信单聊）：
-  - `channel=weixin`
-  - `userId=o9cq806l8TCt_qAKvyMjvJa5yq7k@im.wechat`（URL 中 `@` 建议用 `%40`）
-- 目标端口 / 用户身份若不明确，先查 `lsof -iTCP:<port> -sTCP:LISTEN` 与 `ls .runtime-state/tasks/` 确认，或向用户确认。
+本 skill 只挂在**默认任务**（本机 `pi`）。其它任务不注入凭据。
 
-## 关键约束（必须遵守）
-1. **默认任务 `default` 可以删除**；全部删光后任务列表为空，微信消息回落到全局默认 agent。
-2. **新建即激活**：`POST /api/tasks` 成功后，新任务自动成为激活任务。
-3. **切换激活**：用 `PATCH /api/tasks/:taskId/activate`。
-4. 未知 `taskId` 操作返回 404——把错误信息原样回给用户。
-5. `channel` 与 `userId` 为必填，缺失返回 400。
+## 参数从哪来（用户级，禁止猜）
 
-## API 命令表
-| 动作 | 方法 + 路径 | Body / Query |
+优先读**进程环境变量**（网关启动本机 pi 时注入，不要手写 token）：
+
+| 环境变量 | 用途 |
+|---|---|
+| `LINKAGENT_BASE_URL` | 网关根，如 `http://127.0.0.1:8787` |
+| `LINKAGENT_CHANNEL` | 固定 `web`（登录任务空间，不是 weixin） |
+| `LINKAGENT_USER_ID` | 登录用户名 |
+| `LINKAGENT_OWNER` | 同上 |
+| `LINKAGENT_TOKEN` | `pat_…` 个人 API token，**用户级**，可管该账号下全部任务 |
+| `LINKAGENT_TOKEN_KIND` | 应为 `personal` |
+| `LINKAGENT_TASK_ID` | 当前默认任务 id（`default`） |
+
+若环境变量缺失，才可读工作目录 `.linkagent/identity.json`（同名字段）。不要把 `k_` 当 API token。
+
+每次请求：
+
+```
+Authorization: Bearer $LINKAGENT_TOKEN
+X-LinkAgent-Skill: 1
+Content-Type: application/json
+```
+
+`X-LinkAgent-Skill: 1` 表示用户视角。带此头时只用 `pat_` / 登录会话 / `ct_`；`k_`、网关静态 token 会 403。
+
+创建/列表的 `channel`、`userId` **必须**抄环境变量，不要问用户微信 openid，也不要编。
+
+优先 `GET /api/tasks/all`（凭 pat_ 只返回本人空间，不必再拼 query）。写接口仍带 body 里的 `channel` + `userId`。
+
+## 约束
+
+1. 默认任务 `default` **可以删**；删光后列表为空，微信普通消息回落到全局兜底 agent。
+2. 默认任务固定本机 `pi`，不能改 `agent`/`node`。
+3. 普通用户**不能**把新任务绑到本机 `local`；须用自己的远程 `nodeId`。管理员可以把任务绑到 `local`。
+4. `POST /api/tasks` 成功后新任务自动成为激活任务。
+5. 未知 `taskId` → 404，把错误原文告诉用户。
+6. 改完再 `GET /api/tasks/all` 核对 `activeTaskId` 再汇报。
+
+## API
+
+| 动作 | 方法 | 用户级参数 |
 |---|---|---|
-| 列出 | `GET /api/tasks?channel=&userId=` | query: channel, userId |
-| 新建 | `POST /api/tasks` | body: `{ channel, userId, name, agentId? }` |
-| 重命名 | `PATCH /api/tasks/:taskId` | body: `{ channel, userId, name }` |
-| 激活/切换 | `PATCH /api/tasks/:taskId/activate` | body: `{ channel, userId }` |
-| 删除 | `DELETE /api/tasks/:taskId?channel=&userId=` | query: channel, userId |
-| 用户列表 | `GET /api/users` | — |
-| 删用户 | `DELETE /api/users/:channel/:userId` | — |
+| 列出本人全部 | `GET /api/tasks/all` | 仅 Header（pat_） |
+| 列出（兼容） | `GET /api/tasks?channel=&userId=` | query 用 env 的 channel/userId |
+| 新建 | `POST /api/tasks` | body: `{ channel, userId, name, agentId?, nodeId?, cwd?, key? }` |
+| 重命名 / cwd / key 开关 | `PATCH /api/tasks/:taskId` | body: `{ channel, userId, name?, cwd?, keyEnabled? }` |
+| 改绑节点+agent | `PATCH /api/tasks/:taskId/agent` | body: `{ channel, userId, agentId, nodeId? }` |
+| 激活 | `PATCH /api/tasks/:taskId/activate` | body: `{ channel, userId }` |
+| 删除 | `DELETE /api/tasks/:taskId?channel=&userId=` | query 用 env |
 
-## 标准操作流程
+`ownerUsername` 普通用户可省略（网关强制本人空间）；管理员操作他人空间时才加。
 
-### 列出任务
+## curl（占位全部来自环境变量）
+
 ```bash
-curl -s "http://localhost:8787/api/tasks?channel=weixin&userId=<userId>"
+BASE="$LINKAGENT_BASE_URL"
+CH="$LINKAGENT_CHANNEL"
+UID="$LINKAGENT_USER_ID"
+TOK="$LINKAGENT_TOKEN"
 ```
-输出含 `activeTaskId`（当前激活）与 `tasks[]`。用 `← 激活` 标注当前激活任务呈现给用户。
 
-### 创建任务
+### 列出
+
 ```bash
-curl -s -X POST http://localhost:8787/api/tasks \
+curl -s "$BASE/api/tasks/all" \
+  -H "Authorization: Bearer $TOK" \
+  -H "X-LinkAgent-Skill: 1"
+```
+
+用 `activeTaskId` 与 `tasks[]` 回复用户，当前激活标 `← 激活`。
+
+### 创建
+
+```bash
+curl -s -X POST "$BASE/api/tasks" \
+  -H "Authorization: Bearer $TOK" \
+  -H "X-LinkAgent-Skill: 1" \
   -H "Content-Type: application/json" \
-  -d '{"channel":"weixin","userId":"<userId>","name":"<任务名>","agentId":"opencode"}'
+  -d "{\"channel\":\"$CH\",\"userId\":\"$UID\",\"name\":\"<任务名>\",\"agentId\":\"<远程agentId>\",\"nodeId\":\"<远程节点id>\"}"
 ```
-- `agentId` 可选，缺省继承当前激活任务的 agent；可用 `pi` / `opencode`。
-- 成功后回执：`✅ 已新建任务 [<name>] → <agentId>（已激活）`。
 
-### 切换任务
+- `agentId` / `nodeId` 可选；缺省继承当前激活任务。普通用户不要传 `nodeId: local`。
+- 成功：`已新建任务 [<name>] → <agentId>@<nodeId>（已激活）`。
+
+### 激活
+
 ```bash
-curl -s -X PATCH http://localhost:8787/api/tasks/<taskId>/activate \
+curl -s -X PATCH "$BASE/api/tasks/<taskId>/activate" \
+  -H "Authorization: Bearer $TOK" \
+  -H "X-LinkAgent-Skill: 1" \
   -H "Content-Type: application/json" \
-  -d '{"channel":"weixin","userId":"<userId>"}'
+  -d "{\"channel\":\"$CH\",\"userId\":\"$UID\"}"
 ```
-- 成功回执：`🔀 已切换到 [<name>] → <agentId>`。
-- `taskId` 可从列表里取（如 `t_fbcdae18`）或用任务名在 tasks 里查找。
 
-### 重命名任务
+`taskId` 来自列表（如 `t_fbcdae18`）或按名称查找。
+
+### 重命名
+
 ```bash
-curl -s -X PATCH http://localhost:8787/api/tasks/<taskId> \
+curl -s -X PATCH "$BASE/api/tasks/<taskId>" \
+  -H "Authorization: Bearer $TOK" \
+  -H "X-LinkAgent-Skill: 1" \
   -H "Content-Type: application/json" \
-  -d '{"channel":"weixin","userId":"<userId>","name":"<新名>"}'
+  -d "{\"channel\":\"$CH\",\"userId\":\"$UID\",\"name\":\"<新名>\"}"
 ```
 
-### 删除任务
+### 删除
+
 ```bash
-curl -s -X DELETE "http://localhost:8787/api/tasks/<taskId>?channel=weixin&userId=<userId>"
+curl -s -X DELETE "$BASE/api/tasks/<taskId>?channel=$CH&userId=$UID" \
+  -H "Authorization: Bearer $TOK" \
+  -H "X-LinkAgent-Skill: 1"
 ```
-- default 不可删（400）。
 
-## 规则
-- 无论新增/切换/删除，操作后**主动回读一次** `GET /api/tasks` 确认 `activeTaskId` 与结果一致再汇报。
-- 使用 curl 直连即可，无需引入额外依赖。
-- 用户说"开始吧/继续"时，先汇报当前激活任务与任务列表，再等待明确的新建或切换指令。
+## 不要做的事
+
+- 不要把 `k_` 放进 `Authorization` 去调 `/api/tasks`。
+- 不要用 `channel=weixin` + 微信 peer 当任务空间（任务按登录账号，不按联系人）。
+- 不要编造 token，不要把 token 写进工作目录或提交到 git。

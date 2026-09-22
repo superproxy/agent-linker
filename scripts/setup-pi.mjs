@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * 安装 pi / pi-acp，并生成 ~/.pi/agent 模型配置（不写明文密钥）。
+ * 安装 pi 与执行机 ACP 桥 pi-acp@0.0.33，并生成 ~/.pi/agent 模型配置（不写明文密钥）。
+ * 网关不需要装 pi-acp。
  *
  *   pnpm setup:pi
  *   node scripts/setup-pi.mjs --skip-install --home <dir>/.pi
@@ -13,6 +14,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const PI_CODING_AGENT = '@earendil-works/pi-coding-agent';
+/** 执行机 ACP 桥；钉版本，避免 npx 拉到不兼容的 latest。网关不需要装。 */
+export const PI_ACP_PACKAGE = 'pi-acp@0.0.33';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO = join(SCRIPT_DIR, '..');
@@ -107,10 +112,10 @@ function which(cmd) {
 }
 
 function installCli() {
-  console.log('→ 安装 @earendil-works/pi-coding-agent');
-  runNpm(['i', '-g', '--ignore-scripts', '@earendil-works/pi-coding-agent']);
-  console.log('→ 安装 pi-acp');
-  runNpm(['i', '-g', 'pi-acp']);
+  console.log(`→ 安装 ${PI_CODING_AGENT}`);
+  runNpm(['i', '-g', '--ignore-scripts', PI_CODING_AGENT]);
+  console.log(`→ 安装 ${PI_ACP_PACKAGE}（执行机 ACP 桥）`);
+  runNpm(['i', '-g', PI_ACP_PACKAGE]);
 }
 
 function installSandbox() {

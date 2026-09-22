@@ -239,6 +239,8 @@ export interface RunTurnOptions {
   cwd?: string;
   /** 会话模型（经 ACP set_config_option 下发） */
   model?: string;
+  /** 叠加到本次 spawn 的 env（默认任务 skill）；与 definition.env 合并，按用户隔离 runtime */
+  env?: Record<string, string>;
   signal?: AbortSignal;
   onEvent?: (ev: EngineTurnEvent) => void;
 }
@@ -260,10 +262,10 @@ export class AcpEngine {
   readonly id: string;
   readonly agentName: AcpAgentKind;
   private readonly options: Required<Pick<AcpEngineOptions, 'stateDir'>> & AcpEngineOptions;
-  private runtime: AcpxRuntime | null = null;
-  private runtimeReady: Promise<AcpxRuntime> | null = null;
+  private readonly runtimes = new Map<string, AcpxRuntime>();
+  private readonly runtimeReady = new Map<string, Promise<AcpxRuntime>>();
   /** persistent 会话空闲定时器：sessionKey → 最近一次 handle + 倒计时 */
-  private readonly persistentIdle = new Map<string, { handle: SessionHandle; timer: NodeJS.Timeout }>();
+  private readonly persistentIdle = new Map<string, { handle: SessionHandle; timer: NodeJS.Timeout; runtime: AcpxRuntime }>();
 
   constructor(options: AcpEngineOptions) {
     this.options = options;
@@ -295,24 +297,33 @@ export class AcpEngine {
     return fallback ? resolveCwd(fallback) : process.cwd();
   }
 
-  private getRuntime(): Promise<AcpxRuntime> {
-    if (this.runtime) return Promise.resolve(this.runtime);
-    if (!this.runtimeReady) {
-      this.runtimeReady = this.initRuntime().then((rt) => {
-        this.runtime = rt;
-        this.runtimeReady = null;
-        return rt;
-      });
-    }
-    return this.runtimeReady;
+  private runtimeSlot(extraEnv?: Record<string, string>): string {
+    const user = extraEnv?.LINKAGENT_USER_ID?.trim();
+    return user ? `skill:${user}` : '';
   }
 
-  private async initRuntime(): Promise<AcpxRuntime> {
+  private getRuntime(extraEnv?: Record<string, string>): Promise<AcpxRuntime> {
+    const slot = this.runtimeSlot(extraEnv);
+    const existing = this.runtimes.get(slot);
+    if (existing) return Promise.resolve(existing);
+    let pending = this.runtimeReady.get(slot);
+    if (!pending) {
+      pending = this.initRuntime(extraEnv).then((rt) => {
+        this.runtimes.set(slot, rt);
+        this.runtimeReady.delete(slot);
+        return rt;
+      });
+      this.runtimeReady.set(slot, pending);
+    }
+    return pending;
+  }
+
+  private async initRuntime(extraEnv?: Record<string, string>): Promise<AcpxRuntime> {
     const cwd = this.baseCwd();
     mkdirSync(this.options.stateDir, { recursive: true });
     const runtime = createAcpRuntime({
       cwd,
-      agentProcessEnv: this.options.env,
+      agentProcessEnv: { ...this.options.env, ...extraEnv },
       sessionStore: createRuntimeStore({ stateDir: this.options.stateDir }),
       agentRegistry: createAgentRegistry({ overrides: { [this.agentName]: this.command() } }),
       permissionMode: this.options.permissionMode ?? 'approve-reads',
@@ -331,7 +342,7 @@ export class AcpEngine {
    * - 无 sessionKey → oneshot（每轮独立会话，用完即弃，避免记忆跨请求串扰）。
    */
   async runTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
-    const runtime = await this.getRuntime();
+    const runtime = await this.getRuntime(opts.env);
     const requestId = randomUUID();
     const persistent = Boolean(opts.sessionKey?.trim());
     const sessionKey = persistent ? opts.sessionKey!.trim() : `gw-${this.id}-${requestId}`;
@@ -430,6 +441,7 @@ export class AcpEngine {
       onSessionId?(sessionId: string): void;
     },
     signal?: AbortSignal,
+    env?: Record<string, string>,
   ): Promise<{ sessionId?: string }> {
     const text = lastUserText(messages) ?? '';
     if (!text) throw new Error('请求中没有可发送的 user 文本（网关一期仅支持文本）');
@@ -438,6 +450,7 @@ export class AcpEngine {
       sessionKey,
       cwd,
       model,
+      ...(env ? { env } : {}),
       signal,
       onEvent: (ev) => {
         if (ev.kind === 'text') cb.onText(ev.text);
@@ -486,15 +499,16 @@ export class AcpEngine {
       void runtime.close({ handle, reason: 'idle-timeout', discardPersistentState: false }).catch(() => {});
     }, this.options.persistentIdleTimeoutMs ?? DEFAULT_PERSISTENT_IDLE_TIMEOUT_MS);
     timer.unref?.();
-    this.persistentIdle.set(key, { handle, timer });
+    this.persistentIdle.set(key, { handle, timer, runtime });
   }
 
   async dispose(): Promise<void> {
-    for (const { handle, timer } of this.persistentIdle.values()) {
+    for (const { handle, timer, runtime } of this.persistentIdle.values()) {
       clearTimeout(timer);
-      await this.runtime?.close({ handle, reason: 'dispose', discardPersistentState: false }).catch(() => {});
+      await runtime.close({ handle, reason: 'dispose', discardPersistentState: false }).catch(() => {});
     }
     this.persistentIdle.clear();
-    this.runtime = null;
+    this.runtimes.clear();
+    this.runtimeReady.clear();
   }
 }

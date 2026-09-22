@@ -55,7 +55,7 @@ pnpm --filter @linkagent/backend test
 
 ## Pi 安装与模型配置
 
-云机/新机：`pnpm setup:pi`（安装 pi CLI、pi-acp，生成 `~/.pi/agent/models.json`）。说明见 [`docs/pi.md`](pi.md)。
+云机/新机（**执行机**）：`pnpm setup:pi` 或独立节点包 `npm run setup:pi`（安装 pi CLI、`pi-acp@0.0.33`，生成 `~/.pi/agent/models.json`）。网关不必装 pi-acp。说明见 [`docs/pi.md`](pi.md)。
 
 ## Pi 沙箱报缺 ripgrep / socat
 

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { isTaskCommand, type TaskService } from './service.js';
 import { LOGIN_TASK_CHANNEL, isDefaultTaskId, normalizeNodeId, type TaskItem, type UserTasks } from './types.js';
+import { isSkillRequest } from './skill-files.js';
 
 /** 有登录归属时读写该用户唯一任务空间；无归属时沿用渠道终端文件（旧数据 / 单测） */
 function loadTaskSpace(service: TaskService, channel: string, userId: string, owner?: string): UserTasks {
@@ -40,11 +41,25 @@ export interface TaskApiDeps {
   /** 管理接口（全量列表 / 改他人任务）；缺省等同 checkAuth（单测不鉴权时仍放行） */
   isAdmin?: AuthCheck;
   sessionUser?: (request: { headers: Record<string, string | string[] | undefined> }) => { username: string } | null;
+  /**
+   * X-LinkAgent-Skill 请求：只允许登录用户视角（pat_ / 会话 / ct_）。
+   * 未提供则忽略该头（单测）。返回 forbidden/unauth 时接口直接结束。
+   */
+  skillAuth?: (request: { headers: Record<string, string | string[] | undefined> }) => 'ok' | 'unauth' | 'forbidden';
 }
 
 function sessionKeyOf(channel: string, userId: string, taskId: string, ownerUsername?: string): string {
   const base = `${channel}:${userId}:task:${taskId}`;
   return ownerUsername ? `${ownerUsername}:${base}` : base;
+}
+
+function withSkillEnv(
+  service: TaskService,
+  state: UserTasks,
+  decision: Extract<TaskRoutingDecision, { kind: 'chat' }>,
+): Extract<TaskRoutingDecision, { kind: 'chat' }> {
+  const env = service.skillEnvForTask(state, decision.taskId);
+  return env ? { ...decision, env } : decision;
 }
 
 /** 挂载 /api/tasks（鉴权与现有 /api/* 一致：checkAuth 闭包传入） */
@@ -90,9 +105,21 @@ export function registerTaskApi(
     return { ok: false, status: 403 };
   };
 
+  const blockSkill = (
+    request: { headers: Record<string, string | string[] | undefined> },
+    reply: { code(code: number): unknown },
+  ): boolean => {
+    if (!isSkillRequest(request.headers) || !deps.skillAuth) return false;
+    const v = deps.skillAuth(request);
+    if (v === 'ok') return false;
+    reply.code(v === 'unauth' ? 401 : 403);
+    return true;
+  };
+
   // GET /api/tasks?channel=&userId=&owner=
   // 渠道用户级凭据（ct_ token）可读，但只能读自己（channel/userId 必须与凭据作用域一致）
   app.get('/api/tasks', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     const channel = (request.query as { channel?: string; userId?: string; owner?: string }).channel ?? '';
     const userId = (request.query as { channel?: string; userId?: string; owner?: string }).userId ?? '';
     const ownerQ = (request.query as { owner?: string }).owner;
@@ -132,6 +159,7 @@ export function registerTaskApi(
   // GET /api/tasks/all —— 登录用户任务空间（管理后台「任务」页）
   // 普通用户打开时确保自己的 web/<username> 存在；管理员只列出已落盘的登录空间。
   app.get('/api/tasks/all', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const admin = isAdmin(request);
     const username = deps.sessionUser?.(request)?.username;
@@ -187,6 +215,7 @@ export function registerTaskApi(
 
   // POST /api/tasks { channel, userId, name, agentId?, nodeId?, key? } —— key 可选自定义（缺省自动生成）
   app.post('/api/tasks', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     const body = request.body as {
       channel?: string;
       userId?: string;
@@ -222,6 +251,7 @@ export function registerTaskApi(
 
   // PATCH /api/tasks/:taskId { channel, userId, name?, keyEnabled?, cwd? } —— 重命名 / 停用启用任务 key / 设置工作目录
   app.patch('/api/tasks/:taskId', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     const params = request.params as { taskId: string };
     const body = request.body as {
       channel?: string;
@@ -258,6 +288,7 @@ export function registerTaskApi(
 
   // PATCH /api/tasks/:taskId/agent { channel, userId, agentId, nodeId? } —— 修改任务绑定节点+agent
   app.patch('/api/tasks/:taskId/agent', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     const params = request.params as { taskId: string };
     const body = request.body as { channel?: string; userId?: string; agentId?: string; nodeId?: string; ownerUsername?: string };
     const space = spaceOf(request, body.ownerUsername);
@@ -294,6 +325,7 @@ export function registerTaskApi(
 
   // PATCH /api/tasks/:taskId/activate { channel, userId }
   app.patch('/api/tasks/:taskId/activate', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     const params = request.params as { taskId: string };
     const body = request.body as { channel?: string; userId?: string; ownerUsername?: string };
     const space = spaceOf(request, body.ownerUsername);
@@ -312,6 +344,7 @@ export function registerTaskApi(
   // DELETE /api/tasks/:taskId?channel=&userId=
   // 管理凭据可删任意任务；渠道用户级凭据（ct_ token）只能删自己的（scope 校验）
   app.delete('/api/tasks/:taskId', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
     const params = request.params as { taskId: string };
     const query = request.query as { channel?: string; userId?: string; owner?: string };
     if (!query.channel || !query.userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
@@ -379,7 +412,7 @@ export type TaskRoutingDecision =
   | { kind: 'notfound' } // taskKey 全局反查失败（任务不存在/已被删除）
   | { kind: 'disabled' } // taskKey 存在但已被管理后台停用（吊销直连，任务本体不受影响）
   | { kind: 'command'; text: string; activeTaskId?: string; activeAgentId?: string }
-  | { kind: 'chat'; nodeId: string; agentId: string; taskId: string; sessionKey: string; cwd?: string };
+  | { kind: 'chat'; nodeId: string; agentId: string; taskId: string; sessionKey: string; cwd?: string; env?: Record<string, string> };
 
 /**
  * /v1/chat/completions 的任务路由决策（handler 内一个分支，无独立拦截层）：
@@ -414,14 +447,14 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
     }
     const route = service.resolveRoute(state, lt.taskId);
     // 锁定任务：agent 只取任务绑定，忽略 body.agent / body.model（持单任务 key 不得切换 agent）
-    return {
+    return withSkillEnv(service, state, {
       kind: 'chat',
       nodeId: route.nodeId,
       agentId: route.agentId,
       taskId: route.taskId,
       sessionKey: sessionKeyOf(lt.channel, lt.userId, route.taskId, state.ownerUsername),
       cwd: route.cwd,
-    };
+    });
   }
 
   // taskKey 单 key 直连路由：全局反查任务，channel/userId 由 key 决定
@@ -442,14 +475,14 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
     }
     const route = service.resolveRoute(state, ref.task.id);
     const agentId = input.agent?.trim() || agentFromModel(input.model) || route.agentId;
-    return {
+    return withSkillEnv(service, state, {
       kind: 'chat',
       nodeId: route.nodeId,
       agentId,
       taskId: route.taskId,
       sessionKey: sessionKeyOf(ref.channel, ref.userId, route.taskId, state.ownerUsername),
       cwd: route.cwd,
-    };
+    });
   }
 
   // 无 taskKey、无 channel，或渠道不在任务白名单（wecom 等无任务机制）→ 原 model+sessionKey 路径
@@ -470,12 +503,12 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
   // 或 input.agent 显式覆盖；model（weixin.model 写死 agent:pi）不参与，
   // 保证 default 任务权威绑定 tasks.defaultAgentId，避免配置分叉时误路由。
   const agentId = input.agent?.trim() || route.agentId;
-  return {
+  return withSkillEnv(service, state, {
     kind: 'chat',
     nodeId: route.nodeId,
     agentId,
     taskId: route.taskId,
     sessionKey: sessionKeyOf(channel, userId, route.taskId, state.ownerUsername),
     cwd: route.cwd,
-  };
+  });
 }

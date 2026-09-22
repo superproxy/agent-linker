@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadSharedConfig, persistDefaultTaskAgentId, persistAgentEnabled, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth } from './config.js';
+import { loadSharedConfig, persistDefaultTaskAgentId, persistAgentEnabled, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth, deriveGatewayBase } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
@@ -14,6 +14,7 @@ import { collectModelCandidates } from './modelcandidates.js';
 import { PluginManager } from './plugins/manager.js';
 import { createJsonStore } from './tasks/store.js';
 import { TaskService } from './tasks/service.js';
+import { readTaskSkillMarkdown } from './tasks/skill-files.js';
 import { decideTaskRouting, registerTaskApi } from './tasks/api.js';
 import { NodeManager } from './nodes/manager.js';
 import { createNodeRegistry } from './nodes/store.js';
@@ -214,11 +215,21 @@ export async function buildServer(options?: {
   // ── 任务公共能力（多渠道共享；state 落在 .runtime-state/tasks/）──
   // 先于 AuthGuard 创建：任务 key 直连鉴权需用 taskService 反查 key → 任务
   const taskStateDir = layout.tasksState;
+  const skillMarkdown = readTaskSkillMarkdown(layout.root);
   const taskService = new TaskService({
     store: createJsonStore(taskStateDir),
     defaultAgentId: gw.tasks?.defaultAgentId,
     // 任务工作空间隔离：每个任务默认独立目录 <root>/<userId>/<taskId>，可经 gateway.tasks.workspaceDir 配置
     workspaceRoot: gw.tasks?.workspaceDir ?? layout.tasksWorkspace,
+    ...(skillMarkdown
+      ? {
+          skill: {
+            markdown: skillMarkdown,
+            baseUrl: deriveGatewayBase(config),
+            personalTokenFor: (username) => personalTokenStore.ensure(username).token,
+          },
+        }
+      : {}),
   });
 
   const authGuard = new AuthGuard(userStore, {
@@ -273,6 +284,12 @@ export async function buildServer(options?: {
       sessionUser: (req) => {
         const u = authGuard.sessionUser(req as FastifyRequest);
         return u ? { username: u.username } : null;
+      },
+      skillAuth: (req) => {
+        const s = authGuard.resolve(req as FastifyRequest);
+        if (s.status === 'personal' || s.status === 'session' || s.status === 'channelUser') return 'ok';
+        if (s.status === 'none') return 'unauth';
+        return 'forbidden';
       },
     },
     // 渠道用户级凭据：ct_ token 只读自己的 GET /api/tasks（微信 bot 查激活任务用）
@@ -501,6 +518,7 @@ export async function buildServer(options?: {
       messages: [{ role: 'user' as const, content: prompt }],
       ...(sessionKeyForChat ? { sessionKey: sessionKeyForChat } : {}),
       ...(routing.kind === 'chat' && routing.cwd ? { cwd: routing.cwd } : {}),
+      ...(routing.kind === 'chat' && routing.env ? { env: routing.env } : {}),
     };
     const meta = newMeta(modelForChat);
 

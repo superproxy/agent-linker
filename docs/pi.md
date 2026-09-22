@@ -33,7 +33,7 @@ export ARK_API_KEY=你的火山方舟密钥
 脚本会：
 
 1. `npm i -g --ignore-scripts @earendil-works/pi-coding-agent`
-2. `npm i -g pi-acp`
+2. `npm i -g pi-acp@0.0.33`（执行机 ACP 桥；网关不需要装）
 3. 若 `~/.pi/agent/models.json` 不存在，从 `backend/config/pi-agent/models.json.template` 生成（`apiKey` 为 `${ARK_API_KEY}`）
 4. 合并 `settings.json` 的 `defaultProvider=my` / `defaultModel=doubao-seed-2-0-pro-260215`（不覆盖主题、已装包）
 

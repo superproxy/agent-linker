@@ -93,7 +93,15 @@ export class AcpWrapper implements AgentAdapter {
   }
 
   async chat(req: ChatRequest, cb: StreamCallbacks, signal?: AbortSignal): Promise<ChatResult> {
-    return this.engine.chatMessages(req.messages, req.sessionKey?.trim() || undefined, req.cwd, this.model, cb, signal);
+    return this.engine.chatMessages(
+      req.messages,
+      req.sessionKey?.trim() || undefined,
+      req.cwd,
+      this.model,
+      cb,
+      signal,
+      req.env,
+    );
   }
 
   async dispose(): Promise<void> {

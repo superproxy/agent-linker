@@ -365,6 +365,7 @@ async function buildFull(dist, skipInstall) {
   step('4/6 复制运行资源', () => {
     copyConfigYaml(join(dist, 'server', 'config', 'config.yaml'));
     copyPiSetup(dist);
+    cpSync(join(REPO, 'skills'), join(dist, 'skills'), { recursive: true });
     mkdirSync(join(dist, 'dev'), { recursive: true });
     cpSync(join(REPO, 'backend', 'src', 'dev', 'chat.html'), join(dist, 'dev', 'chat.html'));
     cpSync(join(REPO, 'web', 'dist'), join(dist, 'web'), { recursive: true });

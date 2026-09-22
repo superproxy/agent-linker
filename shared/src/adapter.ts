@@ -148,6 +148,11 @@ export interface ChatRequest {
   sessionKey?: string;
   /** 会话工作目录：任务级 cwd 时传入；缺省用 agent 默认 cwd（definition.cwd / defaultCwd / 网关启动目录） */
   cwd?: string;
+  /**
+   * 启动 ACP 子进程时叠加的环境变量（默认任务任务管理 skill 的 LINKAGENT_*）。
+   * 不写入 agents[].env，按会话隔离；acpx 的 agentProcessEnv 不落盘。
+   */
+  env?: Record<string, string>;
   permissionMode?: AcpPermissionMode;
 }
 
