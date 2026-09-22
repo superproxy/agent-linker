@@ -13,6 +13,7 @@
     "start": "pnpm --filter @linkagent/backend start",
     "probe": "pnpm --filter @linkagent/backend probe",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @linkagent/backend test",
     "bot:weixin": "pnpm --filter @linkagent/backend bot:weixin",
     "bot:wecom": "pnpm --filter @linkagent/backend bot:wecom",
     "web": "pnpm --filter @linkagent/web dev",
