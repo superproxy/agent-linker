@@ -91,12 +91,18 @@ function PersonalKeySection(props: {
   return (
     <div>
       <p className="page-desc" style={{ marginBottom: 10 }}>
-        以<strong>登录账号</strong>身份调用 /v1 的 <strong>pat_</strong>；完整明文仅在签发/轮换后出现一次。
+        以<strong>登录账号</strong>身份调用 /v1 的 <strong>pat_</strong>；签发后可在此页随时查看与复制完整 Key。
       </p>
       <Space style={{ marginBottom: 14 }} wrap>
-        <Button type="primary" loading={busy === 'ensure'} onClick={() => void run('ensure', () => client.ensurePersonalToken(props.token))}>
-          {info ? '查看 / 重新获取' : '获取 / 签发'}
-        </Button>
+        {info ? (
+          <Button type="primary" onClick={() => setRevealed(info.token)}>
+            查看 Key
+          </Button>
+        ) : (
+          <Button type="primary" loading={busy === 'ensure'} onClick={() => void run('ensure', () => client.ensurePersonalToken(props.token))}>
+            获取 / 签发
+          </Button>
+        )}
         <Button
           disabled={!info || busy === 'rotate'}
           onClick={async () => {
@@ -119,7 +125,7 @@ function PersonalKeySection(props: {
           type="success"
           showIcon
           style={{ marginBottom: 14 }}
-          message="完整 token（仅显示一次）"
+          message="完整 pat_ Key"
           description={
             <Space direction="vertical" style={{ marginTop: 6 }} size={8}>
               <CopyableCode text={revealed} block size={13} />

@@ -509,7 +509,7 @@ export class AuthClient {
 
   // ── 个人 API token（pat_，OpenAI 客户端直连 /v1）──
 
-  /** 查看自己的 token（仅预览；尚无则返回 null） */
+  /** 查看自己的 token（含全文；尚无则返回 null） */
   async personalToken(token: string): Promise<PersonalTokenInfo | null> {
     const res = await fetch(this.url('/api/personal-tokens'), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -549,8 +549,9 @@ export class AuthClient {
   }
 }
 
-/** 个人 token 视图（仅预览，不含全文） */
+/** 个人 token 视图（属主自助接口含全文） */
 export interface PersonalTokenInfo {
+  token: string;
   tokenPreview: string;
   createdAt: string;
   lastUsedAt?: string;
@@ -776,6 +777,7 @@ export interface NodeEnrollInfo {
 
 export interface NodeTokenInfo {
   id: string;
+  token: string;
   tokenPreview: string;
   label?: string;
   nodeId?: string;

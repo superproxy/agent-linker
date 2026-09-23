@@ -115,10 +115,7 @@ export function NodeKeyPanel(props: {
             type="link"
             size="small"
             style={{ padding: 0, height: 'auto' }}
-            onClick={() => {
-              const full = revealed?.id === t.id ? revealed.token : undefined;
-              setViewNt({ preview: t.tokenPreview, full, label: t.label });
-            }}
+            onClick={() => setViewNt({ preview: t.tokenPreview, full: t.token, label: t.label })}
           >
             <code className="code-cell">{t.tokenPreview}</code>
           </Button>
@@ -205,7 +202,7 @@ export function NodeKeyPanel(props: {
       {revealed ? (
         <div className="enroll-block" style={{ marginBottom: 14 }}>
           <div className="sub-muted" style={{ marginBottom: 6 }}>
-            完整 nt_（仅显示一次）
+            完整 nt_ Key
           </div>
           <CopyableCode text={revealed.token} block size={13} />
           {envContext ? (
@@ -274,7 +271,7 @@ export function NodeKeyPanel(props: {
                 <div>
                   预览：<code className="code-cell">{viewNt.preview}</code>
                 </div>
-                <div className="sub-muted">完整 nt_ 不在列表中保存；遗失请「轮换」或重新「颁发」。</div>
+                <div className="sub-muted">列表加载失败或未刷新时无法显示全文；请刷新页面或「轮换」后重试。</div>
               </>
             )}
           </div>

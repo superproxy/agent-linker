@@ -26,6 +26,16 @@ export function resolveCwd(p: string): string {
   return resolve(expandHome(p.trim()));
 }
 
+/**
+ * 任务 cwd 在执行端落盘：网关 TaskService 只会在网关机 mkdir，
+ * 远程节点收到 turn 时目录可能尚不存在，启动会话前补齐。
+ */
+export function ensureTaskCwdExists(raw: string): string {
+  const cwd = resolveCwd(raw);
+  mkdirSync(cwd, { recursive: true });
+  return cwd;
+}
+
 /** 各 ACP agent 的默认启动命令（definition.command / options.command 可覆盖） */
 export const DEFAULT_COMMANDS: Record<AcpAgentKind, string[]> = {
   // --port 0：opencode acp 会读 opencode.json 的 server.port 并尝试绑定固定端口，
@@ -378,7 +388,7 @@ export class AcpEngine {
     const sessionKey = persistent ? opts.sessionKey!.trim() : `gw-${this.id}-${requestId}`;
     const mode: 'persistent' | 'oneshot' = persistent ? 'persistent' : 'oneshot';
     const text = opts.text;
-    const cwd = opts.cwd?.trim() ? resolveCwd(opts.cwd) : this.baseCwd();
+    const cwd = opts.cwd?.trim() ? ensureTaskCwdExists(opts.cwd) : this.baseCwd();
 
     const attempt = async (resetFirst: boolean): Promise<RunTurnResult> => {
       if (resetFirst) {

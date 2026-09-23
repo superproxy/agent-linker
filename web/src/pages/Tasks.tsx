@@ -5,7 +5,7 @@ import { CommentOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons
 import { OpsClient, type NodeInfo, type TaskItem, type UserTasks } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
-import { EmptyHint } from '../components/common';
+import { CopyableCode, EmptyHint } from '../components/common';
 import { agentDisplayLabel } from '../lib/agent-labels';
 import type { ChatSession } from './types';
 
@@ -409,7 +409,8 @@ export function TasksPage(props: {
       dataIndex: 'key',
       key: 'key',
       responsive: ['md'],
-      render: (k?: string) => (k ? <code className="code-cell">{k.slice(0, 10)}…</code> : <span className="sub-muted">—</span>),
+      render: (k?: string) =>
+        k ? <CopyableCode text={k} truncate title="点击查看并复制完整任务 Key" /> : <span className="sub-muted">—</span>,
     },
     {
       title: 'Agent',

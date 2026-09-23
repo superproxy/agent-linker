@@ -102,9 +102,11 @@ export interface ResetPasswordRequest {
 
 // ── 个人 API token（登录账号自助管理，pat_ 前缀，用于 OpenAI 客户端直连 /v1）──
 
-/** 个人 token 视图（不含 token 全文，仅预览前缀）；账号尚无 token 时为 null */
+/** 个人 token 视图（登录账号自助 GET；账号尚无 token 时为 null） */
 export interface PersonalTokenPublic {
-  /** token 本体前缀（pat_xxxx…），完整 token 仅在 ensure/rotate 当次返回 */
+  /** 完整 pat_ 凭据（仅属主已登录时可查） */
+  token: string;
+  /** 列表/表格用短预览 */
   tokenPreview: string;
   createdAt: string;
   lastUsedAt?: string;
@@ -112,9 +114,11 @@ export interface PersonalTokenPublic {
 
 // ── 用户颁发的机器（节点）token（nt_ 前缀，仅用于节点 WebSocket 握手）──
 
-/** 机器 token 列表项（不含全文） */
+/** 机器 token 列表项（登录用户 GET 自己的列表） */
 export interface NodeTokenPublic {
   id: string;
+  /** 完整 nt_ 凭据（仅属主已登录时可查） */
+  token: string;
   tokenPreview: string;
   label?: string;
   /** 首次连上后锁定的 nodeId */

@@ -232,11 +232,11 @@ test('个人 API token：未登录 401；ensure 幂等；rotate 换发；DELETE 
   const again = await app.inject({ method: 'POST', url: '/api/personal-tokens/ensure', headers: auth });
   assert.equal((again.json() as { token: string }).token, pat);
 
-  // 列表只回显预览，不回显全文
+  // GET 可重复查看全文
   const listed = await app.inject({ method: 'GET', url: '/api/personal-tokens', headers: auth });
-  const view = (listed.json() as { token: { tokenPreview: string; createdAt: string } }).token;
+  const view = (listed.json() as { token: { token: string; tokenPreview: string; createdAt: string } }).token;
+  assert.equal(view.token, pat);
   assert.ok(view.tokenPreview.startsWith('pat_'));
-  assert.ok(!JSON.stringify(view).includes(pat));
 
   // pat_ 可直接作为 Bearer 访问受保护接口（等同本人）
   const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${pat}` } });

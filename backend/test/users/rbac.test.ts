@@ -117,6 +117,11 @@ test('普通用户可颁发 nt_ 机器凭证（非 pat_ / 登录会话）', asyn
   const body = res.json() as { token: string; tokenPreview: string };
   assert.ok(body.token.startsWith('nt_'), body.token);
   assert.ok(body.tokenPreview.includes('…'));
+
+  const listed = await app.inject({ method: 'GET', url: '/api/node-tokens', headers: auth(userToken) });
+  assert.equal(listed.statusCode, 200, listed.body);
+  const rows = (listed.json() as { tokens: Array<{ token: string; tokenPreview: string }> }).tokens;
+  assert.ok(rows.some((r) => r.token === body.token && r.tokenPreview.includes('…')));
 });
 
 test('普通用户节点列表不含本机；by-node / node-agents 不带 local', async () => {

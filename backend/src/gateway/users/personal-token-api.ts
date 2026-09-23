@@ -8,7 +8,7 @@ type HeaderCarrier = { headers: Record<string, string | string[] | undefined> };
 /**
  * 登录账号「个人 API token」自助管理（与管理员的渠道用户凭据 /api/channel-tokens 同构，
  * 区别：这里任何登录账号只能操作自己的那一枚，非 admin 专属）。
- *   GET    /api/personal-tokens          查看自己的 token（仅预览，不回显全文）
+ *   GET    /api/personal-tokens          查看自己的 token（含全文，可重复查看）
  *   POST   /api/personal-tokens/ensure   获取或签发自己的 token（幂等）
  *   POST   /api/personal-tokens/rotate   轮换（签发新 token 并吊销旧 token）
  *   DELETE /api/personal-tokens          吊销自己的 token
@@ -32,7 +32,7 @@ export function registerPersonalTokenApi(
   };
 
   const publicOf = (r: PersonalTokenRecord): PersonalTokenPublic => ({
-    // token 本体仅在 ensure/rotate 接口返回；列表只回显预览，避免后台页面泄露
+    token: r.token,
     tokenPreview: `${r.token.slice(0, 6)}…`,
     createdAt: r.createdAt,
     ...(r.lastUsedAt ? { lastUsedAt: r.lastUsedAt } : {}),
