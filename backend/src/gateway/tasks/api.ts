@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { normalizeAgentId } from '@linkagent/shared';
 import { isTaskCommand, type TaskService } from './service.js';
 import { LOGIN_TASK_CHANNEL, isDefaultTaskId, normalizeNodeId, type TaskItem, type UserTasks } from './types.js';
 import { isSkillRequest } from './skill-files.js';
@@ -398,7 +399,7 @@ export interface TaskRoutingInput {
   lockedTask?: { channel: string; userId: string; taskId: string; ownerUsername?: string };
   /**
    * OpenAI 标准 model 参数（agent:<id> 形式）：
-   * - taskKey 直连分支可用于覆盖任务绑定 agent（保留通用客户端显式指定能力）；
+   * - taskKey 直连：model 不覆盖任务绑定（与微信三元素一致）；仅 body.agent 可显式改 agent；
    * - 三元素路由（微信渠道）不参与：agent 只由任务绑定/显式 agent 字段决定，
    *   避免 weixin.model 写死值（如 agent:pi）与 tasks.defaultAgentId 不一致时
    *   把 default 任务误路由到写死的 agent。
@@ -410,7 +411,9 @@ export interface TaskRoutingInput {
 /** 从 model 参数（agent:xxx）解析 agent id；非 agent: 前缀返回空串 */
 function agentFromModel(model?: string): string {
   const m = model?.trim() ?? '';
-  return m.startsWith('agent:') ? m.slice('agent:'.length) : '';
+  if (!m.startsWith('agent:')) return '';
+  const id = m.slice('agent:'.length).trim();
+  return id ? normalizeAgentId(id) : '';
 }
 
 export type TaskRoutingDecision =
@@ -480,7 +483,8 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
       };
     }
     const route = service.resolveRoute(state, ref.task.id);
-    const agentId = input.agent?.trim() || agentFromModel(input.model) || route.agentId;
+    // 任务 key 直连：以任务绑定 agent 为准；仅 body.agent 可显式覆盖（OpenAI 客户端常带写死的 model，不得盖掉任务）
+    const agentId = normalizeAgentId(input.agent?.trim() || route.agentId || agentFromModel(input.model));
     return withSkillEnv(service, state, {
       kind: 'chat',
       nodeId: route.nodeId,
@@ -508,7 +512,7 @@ export function decideTaskRouting(service: TaskService, input: TaskRoutingInput)
   // 微信渠道（三元素路由）：agent 只由「任务」决定 —— 激活任务绑定的 agent，
   // 或 input.agent 显式覆盖；model（weixin.model 写死 agent:pi）不参与，
   // 保证 default 任务权威绑定 tasks.defaultAgentId，避免配置分叉时误路由。
-  const agentId = input.agent?.trim() || route.agentId;
+  const agentId = normalizeAgentId(input.agent?.trim() || route.agentId);
   return withSkillEnv(service, state, {
     kind: 'chat',
     nodeId: route.nodeId,

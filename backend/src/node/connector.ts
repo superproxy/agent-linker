@@ -3,10 +3,16 @@ import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import type { GatewayToNode, NodeAgentInfo, NodeToGateway, NodeTurnEvent } from '@linkagent/shared';
-import { defaultAgentDefinitions } from '@linkagent/shared';
+import { defaultAgentDefinitions, normalizeAgentId } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
-import { AcpEngine, DEFAULT_LABELS, type AcpAgentKind } from '../gateway/agents/acpEngine.js';
+import {
+  AcpEngine,
+  DEFAULT_COMMANDS,
+  DEFAULT_LABELS,
+  resolveAcpKindForAgentId,
+  type AcpAgentKind,
+} from '../gateway/agents/acpEngine.js';
 import { isNodeTokenShape } from '../gateway/users/node-token-store.js';
 import { isNodeClaimShape } from '../gateway/users/node-claim-store.js';
 import { isPersonalTokenShape } from '../gateway/users/personal-token-store.js';
@@ -23,6 +29,7 @@ import { TASK_KEY_PREFIX } from '../gateway/tasks/types.js';
  *   LINKAGENT_NODE_ID      节点 id（缺省首次连接由网关签发并持久化，重连复用）
  *   LINKAGENT_NODE_AGENTS  逗号分隔的 agent id（缺省上报网关默认：opencode/pi/workbuddy/trace-cli/cursor）
  *   LINKAGENT_NODE_STATE_DIR 节点状态目录（默认 .runtime-state/node；本机多实例时各自指定可避免 nodeId 冲突）
+ *   LINKAGENT_NODE_VERBOSE  设为 1 时输出 turn 文本预览，并开启 acpx verbose
  *
  * 两种运行场景（agent 来源不同）：
  *   - 本机节点（supervisor 托管，config.yaml node.enabled=true 经 pm start 拉起）：
@@ -86,6 +93,10 @@ function buildWsUrl(raw: string): string {
 
 class NodeConnector {
   private readonly opts: ConnectorOptions;
+  /** turn 文本预览 + acpx verbose（LINKAGENT_NODE_VERBOSE=1） */
+  private readonly verbose = ['1', 'true', 'yes'].includes(
+    (process.env.LINKAGENT_NODE_VERBOSE ?? '').trim().toLowerCase(),
+  );
   private ws: WebSocket | null = null;
   private stopped = false;
   /** 被管理员明确拒绝：停止重连，等待人工处理后重启进程 */
@@ -236,11 +247,20 @@ class NodeConnector {
   private engineFor(agentId: string): AcpEngine {
     let engine = this.engines.get(agentId);
     if (!engine) {
-      const kind = (DEFAULT_LABELS[agentId as AcpAgentKind] ? agentId : 'opencode') as AcpAgentKind;
+      const kind = resolveAcpKindForAgentId(agentId);
+      const cmd = DEFAULT_COMMANDS[kind].join(' ');
+      if (kind !== agentId.trim()) {
+        console.warn(
+          `[node] agentId "${agentId}" 未注册为 ACP 类型，启动命令回退 opencode（${DEFAULT_COMMANDS.opencode.join(' ')}）`,
+        );
+      } else {
+        console.log(`[node] engine init agentId=${agentId} command=${cmd}`);
+      }
       engine = new AcpEngine({
         id: agentId,
         agentName: kind,
         stateDir: join(this.opts.stateDir, 'acpx', agentId),
+        verbose: this.verbose,
       });
       this.engines.set(agentId, engine);
     }
@@ -255,6 +275,14 @@ class NodeConnector {
     const controller = new AbortController();
     this.turns.set(msg.requestId, controller);
     const emit = (event: NodeTurnEvent) => this.send({ type: 'turnEvent', requestId: msg.requestId, event });
+    const acpKind = resolveAcpKindForAgentId(msg.agentId);
+    console.log(
+      `[node] turn start requestId=${msg.requestId} agentId=${msg.agentId} acpKind=${acpKind} cwd=${msg.cwd ?? '-'} session=${msg.sessionKey ? 'persistent' : 'oneshot'} textLen=${msg.text.length}`,
+    );
+    if (this.verbose) {
+      const preview = msg.text.length > 120 ? `${msg.text.slice(0, 120)}…` : msg.text;
+      console.log(`[node] turn preview requestId=${msg.requestId}: ${JSON.stringify(preview)}`);
+    }
     try {
       const result = await this.engineFor(msg.agentId).runTurn({
         text: msg.text,
@@ -265,12 +293,17 @@ class NodeConnector {
         signal: controller.signal,
         onEvent: emit,
       });
+      console.log(
+        `[node] turn done requestId=${msg.requestId} agentId=${msg.agentId} status=${result.status}${result.error?.message ? ` error=${result.error.message}` : ''}`,
+      );
       this.send({ type: 'turnResult', requestId: msg.requestId, result });
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[node] turn failed requestId=${msg.requestId} agentId=${msg.agentId} acpKind=${acpKind}: ${message}`);
       this.send({
         type: 'turnError',
         requestId: msg.requestId,
-        message: err instanceof Error ? err.message : String(err),
+        message,
       });
     } finally {
       this.turns.delete(msg.requestId);
@@ -307,11 +340,15 @@ function main(): void {
   // supervisor 托管的本机节点会把 LINKAGENT_NODE_AGENTS 置空（空串走 falsy 分支），
   // 因此本机节点只走 config.node.agents / 内置默认，环境变量不生效；独立节点仍环境变量优先。
   const envAgents = process.env.LINKAGENT_NODE_AGENTS
-    ? process.env.LINKAGENT_NODE_AGENTS.split(',').map((s) => s.trim()).filter(Boolean)
+    ? process.env.LINKAGENT_NODE_AGENTS.split(',')
+        .map((s) => normalizeAgentId(s))
+        .filter(Boolean)
     : null;
   const agents =
     envAgents ??
-    (config.node.agents.length > 0 ? config.node.agents : defaultAgentDefinitions().map((d) => d.id));
+    (config.node.agents.length > 0
+      ? config.node.agents.map((id) => normalizeAgentId(id))
+      : defaultAgentDefinitions().map((d) => d.id));
 
   const rawToken = runtime.gatewayToken.trim();
   const token = rawToken || undefined;

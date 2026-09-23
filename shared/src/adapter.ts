@@ -74,6 +74,13 @@ export type NonInteractivePermissionPolicy = 'deny' | 'fail';
 /** 模型对外 id 统一形如 agent:<agentId>，如 agent:opencode */
 export const modelIdFor = (agentId: string): string => `agent:${agentId}`;
 
+/** 路由/agent 配置 id 归一化：去 agent: 前缀、小写（hermes 非 Hermes） */
+export function normalizeAgentId(agentId: string): string {
+  let id = agentId.trim();
+  if (id.toLowerCase().startsWith('agent:')) id = id.slice('agent:'.length).trim();
+  return id.toLowerCase();
+}
+
 export interface AgentDescriptor {
   id: string;
   displayName: string;

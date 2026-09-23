@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import type { AgentAdapter, AgentCatalogItem, AgentDefinition, AgentDescriptor } from '@linkagent/shared';
-import { ACP_AGENT_KINDS, LOCAL_NODE_ID, modelIdFor } from '@linkagent/shared';
+import { ACP_AGENT_KINDS, LOCAL_NODE_ID, modelIdFor, normalizeAgentId } from '@linkagent/shared';
 import { getLayout } from '../../install/layout.js';
 import type { NodeManager } from '../nodes/manager.js';
 import type { NodeLink } from '../nodes/link.js';
@@ -114,7 +114,7 @@ export class AgentManager {
 
   /** 将模型 id 解析为内建 local adapter：形如 agent:opencode；已停用的 agent 返回 undefined */
   resolve(modelId: string): AgentAdapter | undefined {
-    const key = modelId.replace(/^agent:/, '');
+    const key = normalizeAgentId(modelId.replace(/^agent:/, ''));
     const adapter = this.adapters.get(key);
     if (!adapter || !this.enabled.has(key)) return undefined;
     return adapter;
@@ -131,13 +131,14 @@ export class AgentManager {
     | { kind: 'offline'; nodeId: string }
     | { kind: 'unknown' } {
     const node = nodeId?.trim() || LOCAL_NODE_ID;
+    const agent = normalizeAgentId(agentId);
     if (node === LOCAL_NODE_ID) {
-      const adapter = this.adapters.get(agentId);
-      if (!adapter || !this.enabled.has(agentId)) return { kind: 'unknown' };
+      const adapter = this.adapters.get(agent);
+      if (!adapter || !this.enabled.has(agent)) return { kind: 'unknown' };
       return { kind: 'ok', adapter };
     }
     if (!this.nodeManager || !this.nodeManager.isOnline(node)) return { kind: 'offline', nodeId: node };
-    const adapter = this.remote.get(node)?.get(agentId);
+    const adapter = this.remote.get(node)?.get(agent);
     if (!adapter) return { kind: 'unknown' };
     return { kind: 'ok', adapter };
   }
@@ -226,7 +227,7 @@ export class AgentManager {
   }
 
   /**
-   * 运行时热添加一个 agent（仅内存生效，重启还原 config/config.yaml）。
+   * 运行时热添加一个 agent（调用方负责 persist gateway.agents + node.agents）。
    * id 重复或类型未知抛错；返回新 agent 的详情。
    */
   addAgent(def: AgentDefinition): AgentDetail {

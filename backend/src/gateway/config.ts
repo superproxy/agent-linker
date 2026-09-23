@@ -12,6 +12,7 @@ import {
   defaultConfig,
   type GatewayConfig,
   type AgentDefinition,
+  normalizeAgentId,
 } from '@linkagent/shared';
 import { findInstallRoot, findRepoRoot, getLayout } from '../install/layout.js';
 
@@ -339,6 +340,42 @@ export function persistAgentEnabled(
     throw new Error(`持久化校验失败：${id}.enabled 未更新为 ${enabled}`);
   }
   return [...reparsed.gateway.agents];
+}
+
+function nodeAgentsSeqOf(doc: ReturnType<typeof parseDocument>): YAMLSeq {
+  let node = doc.get('node');
+  if (!isMap(node)) {
+    doc.set('node', new YAMLMap());
+    node = doc.get('node');
+  }
+  const n = node as YAMLMap;
+  let agents = n.get('agents');
+  if (!isSeq(agents)) {
+    agents = new YAMLSeq();
+    n.set('agents', agents);
+  }
+  return agents as YAMLSeq;
+}
+
+/**
+ * 把 agent id 登记进 node.agents（节点连接器握手自报清单）。
+ * 任务路由 (nodeId, agentId) 以节点注册为准；本机 pm 托管的 node 进程只读此列表（不读环境变量）。
+ */
+export function persistNodeAgentRegistered(path: string, agentId: string): string[] {
+  const id = normalizeAgentId(agentId);
+  if (!id) throw new Error('agentId 不能为空');
+  const p = resolve(path);
+  const doc = parseDocument(existsSync(p) ? readFileSync(p, 'utf8') : '');
+  if (!existsSync(p)) mkdirSync(dirname(p), { recursive: true });
+  const seq = nodeAgentsSeqOf(doc);
+  const exists = seq.items.some((item) => normalizeAgentId(String(item ?? '')) === id);
+  if (!exists) seq.add(id);
+  writeFileSync(p, doc.toString(), 'utf8');
+  const reparsed = migrateConfig(parse(readFileSync(p, 'utf8')));
+  if (!reparsed.node.agents.map(normalizeAgentId).includes(id)) {
+    throw new Error(`持久化校验失败：node.agents 未包含 ${id}`);
+  }
+  return [...reparsed.node.agents];
 }
 
 const WEIXIN_ACCOUNT_ID_RE = /^[A-Za-z0-9._-]+$/;

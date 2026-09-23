@@ -35,6 +35,7 @@ export function TasksPage(props: {
   const { tick } = useRefreshTick();
   const [users, setUsers] = useState<UserTasks[] | null>(null);
   const [nodes, setNodes] = useState<NodeInfo[]>([]);
+  const [localNode, setLocalNode] = useState<{ nodeId: string; name: string } | null>(null);
   const [localAgents, setLocalAgents] = useState<{ id: string; displayName?: string }[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,6 +45,23 @@ export function TasksPage(props: {
   const [form] = Form.useForm();
   const isAdmin = Boolean(props.isAdmin);
   const remoteNodes = useMemo(() => nodes.filter((n) => n.nodeId !== 'local'), [nodes]);
+
+  /** 任务表里 nodeId → 展示名（与「节点」页 name 字段一致；未知节点仅显示 ID） */
+  const nodeNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    if (localNode) m.set(localNode.nodeId, localNode.name);
+    for (const n of nodes) m.set(n.nodeId, n.name);
+    return m;
+  }, [nodes, localNode]);
+
+  const resolveTaskNode = (nodeId?: string): { id: string; name: string } => {
+    const id = !nodeId?.trim() || nodeId === 'local' ? 'local' : nodeId.trim();
+    if (id === 'local') return { id: 'local', name: localNode?.name ?? '本机' };
+    return { id, name: nodeNameById.get(id) ?? '—' };
+  };
+
+  const nodeSelectLabel = (n: { nodeId: string; name: string }) =>
+    n.name.trim() && n.name.trim() !== n.nodeId ? `${n.name} · ${n.nodeId}` : n.nodeId;
 
   const nodeId = Form.useWatch('nodeId', form) as string | undefined;
   const isLocalNode = (id?: string) => !id || id === 'local';
@@ -65,6 +83,7 @@ export function TasksPage(props: {
       const [u, na] = await Promise.all([ops.listAllTasks(), ops.nodeAgents()]);
       setUsers(u);
       setNodes(na.nodes);
+      setLocalNode(na.local ? { nodeId: na.local.nodeId, name: na.local.name } : null);
       setLocalAgents(na.local?.agents ?? []);
       setErr(null);
     } catch (e) {
@@ -272,11 +291,22 @@ export function TasksPage(props: {
       render: (v: string) => <code className="code-cell">{v}</code>,
     },
     {
-      title: '节点',
-      dataIndex: 'nodeId',
+      title: '节点名称',
+      key: 'nodeName',
+      responsive: ['lg'],
+      render: (_: unknown, t: FlatTask) => {
+        const { name } = resolveTaskNode(t.nodeId);
+        return <span style={{ fontSize: 13 }}>{name}</span>;
+      },
+    },
+    {
+      title: '节点 ID',
       key: 'nodeId',
       responsive: ['lg'],
-      render: (v?: string) => v || <span className="sub-muted">本机</span>,
+      render: (_: unknown, t: FlatTask) => {
+        const { id } = resolveTaskNode(t.nodeId);
+        return <code className="code-cell">{id}</code>;
+      },
     },
     {
       title: 'cwd',
@@ -431,15 +461,22 @@ export function TasksPage(props: {
               ]}
             />
           </Form.Item>
-          <Form.Item name="nodeId" label="运行节点">
+          <Form.Item
+            name="nodeId"
+            label="运行节点"
+            extra="保存的是节点 ID；名称仅便于识别，与「远程 · 节点」列表一致。"
+          >
             <Select
               disabled={editing?.task?.id === 'default'}
               options={
                 editing?.task?.id === 'default'
-                  ? [{ value: '', label: '本机' }]
+                  ? [{ value: '', label: localNode ? nodeSelectLabel(localNode) : '本机 · local' }]
                   : isAdmin
-                    ? [{ value: '', label: '本机' }, ...nodes.map((n) => ({ value: n.nodeId, label: n.name }))]
-                    : remoteNodes.map((n) => ({ value: n.nodeId, label: n.name }))
+                    ? [
+                        { value: '', label: localNode ? nodeSelectLabel(localNode) : '本机 · local' },
+                        ...nodes.map((n) => ({ value: n.nodeId, label: nodeSelectLabel(n) })),
+                      ]
+                    : remoteNodes.map((n) => ({ value: n.nodeId, label: nodeSelectLabel(n) }))
               }
               onChange={(v: string) => syncAgentForNode(v)}
             />

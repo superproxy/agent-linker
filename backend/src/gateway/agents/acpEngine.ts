@@ -95,6 +95,15 @@ export const DEFAULT_LABELS: Record<AcpAgentKind, { displayName: string; descrip
   zcode: { displayName: 'ZCode', description: 'ZCode（zcode-acp-server，需 npm i -g zcode-acp-server），默认只读问答' },
 };
 
+/**
+ * 将路由/agent 配置里的 agentId 映射为 ACP 启动种类。
+ * 未知 id（不在 DEFAULT_LABELS）与节点 connector 一致回退 opencode，避免静默用错 CLI。
+ */
+export function resolveAcpKindForAgentId(agentId: string): AcpAgentKind {
+  const id = agentId.trim().toLowerCase();
+  return DEFAULT_LABELS[id as AcpAgentKind] ? (id as AcpAgentKind) : 'opencode';
+}
+
 /** 本机安装指引：命令框展示用；argv 存在才允许网关代执行（固定白名单，不跑用户改写的文本） */
 export interface AgentInstallGuide {
   command: string;

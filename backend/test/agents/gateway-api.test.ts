@@ -1,8 +1,11 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
+import { migrateConfig } from '@linkagent/shared';
 import { buildServer } from '../../src/gateway/index.js';
 
 type Built = Awaited<ReturnType<typeof buildServer>>;
@@ -13,10 +16,16 @@ after(() => {
   for (const root of TMP_ROOTS) rmSync(root, { recursive: true, force: true });
 });
 
+const FIXTURE_CONFIG = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/gateway.test.yaml');
+
 async function freshBuilt(definitions: { id: string; type: string; displayName: string }[]): Promise<Built> {
   const stateRoot = mkdtempSync(join(tmpdir(), 'linkagent-agents-'));
   TMP_ROOTS.push(stateRoot);
-  return buildServer({ configPath: 'test/fixtures/gateway.test.yaml', definitions: definitions as never, stateRoot });
+  const cfgDir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
+  TMP_ROOTS.push(cfgDir);
+  const configPath = join(cfgDir, 'config.yaml');
+  copyFileSync(FIXTURE_CONFIG, configPath);
+  return buildServer({ configPath, definitions: definitions as never, stateRoot });
 }
 
 test('GET /api/agents/catalog：返回全部支持类型与配置状态', async () => {
@@ -131,6 +140,39 @@ test('POST /api/agents：未知类型 400；重复 409；合法添加 200 且模
 
     const models = await app.inject({ method: 'GET', url: '/v1/models' });
     assert.ok((models.json().data as { id: string }[]).some((m) => m.id === 'agent:codex'));
+  } finally {
+    await pluginManager?.dispose().catch(() => {});
+    await manager.dispose().catch(() => {});
+    await app.close().catch(() => {});
+  }
+});
+
+test('POST /api/agents：添加 hermes 写入 config.yaml，重启配置仍含该 agent', async () => {
+  const stateRoot = mkdtempSync(join(tmpdir(), 'linkagent-agents-persist-'));
+  TMP_ROOTS.push(stateRoot);
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
+  TMP_ROOTS.push(dir);
+  const configPath = join(dir, 'config.yaml');
+  writeFileSync(
+    configPath,
+    'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n  agents:\n    - id: opencode\n      type: opencode\n      enabled: true\n',
+  );
+  const built = await buildServer({
+    configPath,
+    definitions: [{ id: 'opencode', type: 'opencode', displayName: 'OpenCode' }],
+    stateRoot,
+  });
+  const { app, manager, pluginManager } = built;
+  try {
+    const ok = await app.inject({ method: 'POST', url: '/api/agents', payload: { type: 'hermes' } });
+    assert.equal(ok.statusCode, 200);
+    const cfg = migrateConfig(parse(readFileSync(configPath, 'utf8')));
+    const hermes = cfg.gateway.agents.find((a) => a.id === 'hermes');
+    assert.ok(hermes);
+    assert.equal(hermes.type, 'hermes');
+    assert.equal(hermes.enabled !== false, true);
+    const cfgNode = migrateConfig(parse(readFileSync(configPath, 'utf8')));
+    assert.ok(cfgNode.node.agents.map((a) => a.toLowerCase()).includes('hermes'));
   } finally {
     await pluginManager?.dispose().catch(() => {});
     await manager.dispose().catch(() => {});

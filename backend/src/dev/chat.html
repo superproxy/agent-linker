@@ -953,7 +953,10 @@
     state.busy = true;
     els.sendBtn.disabled = true;
     els.sendBtn.textContent = '停止';
-    const model = `agent:${a.id}`;
+    const model =
+      state.taskMode && state.ctx.agent
+        ? `agent:${state.ctx.agent}`
+        : `agent:${a.id}`;
 
     const aborter = new AbortController();
     state.aborter = aborter;

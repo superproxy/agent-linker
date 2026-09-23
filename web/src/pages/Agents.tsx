@@ -311,7 +311,7 @@ export function AgentsPage(props: {
           locale={{ emptyText: <EmptyHint text="所有支持的 agent 类型均已配置" /> }}
         />
         <p className="page-desc" style={{ marginTop: 10, marginBottom: 0 }}>
-          添加为运行时热生效（重启网关后还原 config.yaml，需长期保留请写入配置）。未装 CLI 时点「安装」查看命令；npm 全局包可由网关代执行，含管道的安装请复制到本机终端。
+          「添加并启用」会写入 config.yaml，重启网关后仍会加载。未装 CLI 时点「安装」查看命令；npm 全局包可由网关代执行，含管道的安装请复制到本机终端。
         </p>
       </PageCard>
       ) : null}

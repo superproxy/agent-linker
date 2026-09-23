@@ -608,7 +608,7 @@ test('userId 缺省 → 走 default 用户路由；微信渠道 model 不参与 
   assert.equal(d3.kind, 'legacy');
 });
 
-test('微信渠道：model 不覆盖任务绑定 agent；taskKey 直连 model 仍可覆盖', () => {
+test('微信渠道与 taskKey：model 不覆盖任务绑定 agent；body.agent 可显式覆盖', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_m1');
   const t = svc.createTask(state, '股票', 'pi');
@@ -617,25 +617,28 @@ test('微信渠道：model 不覆盖任务绑定 agent；taskKey 直连 model �
   assert.equal(d1.kind, 'chat');
   assert.equal(d1.agentId, 'pi');
   assert.equal(d1.taskId, t.id);
-  // taskKey 直连：model 仍可显式覆盖任务绑定 agent（通用客户端能力保留）
+  // taskKey 直连：写死的 model 也不覆盖任务绑定
   const d2 = decideTaskRouting(svc, { text: '继续', taskKey: t.key, model: 'agent:opencode' });
   assert.equal(d2.kind, 'chat');
-  assert.equal(d2.agentId, 'opencode');
+  assert.equal(d2.agentId, 'pi');
+  const d3 = decideTaskRouting(svc, { text: '继续', taskKey: t.key, agent: 'hermes', model: 'agent:opencode' });
+  assert.equal(d3.agentId, 'hermes');
 });
 
-test('taskKey 直连 + model 覆盖任务绑定 agent', () => {
+test('taskKey 直连：默认任务 agent；model 不覆盖；agent: 前缀归一化', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_k1');
   const t = svc.createTask(state, '分享', 'opencode');
-  // key 直连默认走任务绑定 agent
   const d1 = decideTaskRouting(svc, { text: '继续', taskKey: t.key });
   assert.equal(d1.kind, 'chat');
   assert.equal(d1.agentId, 'opencode');
   assert.equal(d1.taskId, t.id);
-  // model: agent:pi 覆盖
   const d2 = decideTaskRouting(svc, { text: '继续', taskKey: t.key, model: 'agent:pi' });
   assert.equal(d2.kind, 'chat');
-  assert.equal(d2.agentId, 'pi');
+  assert.equal(d2.agentId, 'opencode');
+  const d3 = decideTaskRouting(svc, { text: '继续', taskKey: t.key, agent: 'agent:Hermes' });
+  assert.equal(d3.kind, 'chat');
+  assert.equal(d3.agentId, 'hermes');
 });
 
 /* ===================== 全局默认 Agent（tasks.defaultAgentId） ===================== */

@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import { loadSharedConfig, persistDefaultTaskAgentId, persistAgentEnabled, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth, deriveGatewayBase } from './config.js';
+import { loadSharedConfig, persistDefaultTaskAgentId, persistAgentEnabled, persistNodeAgentRegistered, persistEnsureWeixinAccount, persistRemoveWeixinAccount, resolveGatewayAuth, deriveGatewayBase } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
@@ -502,6 +502,20 @@ export async function buildServer(options?: {
           .send(openaiError(`节点 ${routing.nodeId} 上没有可用 agent: ${routing.agentId}`, 'invalid_request_error', 'agent_unavailable'));
       }
       adapter = resolved.adapter;
+      request.log.info(
+        {
+          route: 'task',
+          nodeId: routing.nodeId,
+          agentId: routing.agentId,
+          taskId: routing.taskId,
+          bodyModel: body.model,
+          bodyAgent: typeof body.agent === 'string' ? body.agent : undefined,
+          taskKey: typeof body.taskKey === 'string' ? body.taskKey : undefined,
+          auth: authState.status,
+          stream: body.stream === true,
+        },
+        'chat task routing',
+      );
     } else {
       adapter = manager.resolve(modelForChat);
       if (!adapter) {
@@ -510,7 +524,13 @@ export async function buildServer(options?: {
           .code(404)
           .send(openaiError(`未知模型 "${modelForChat}"；可用: ${known}`, 'invalid_request_error', 'model_not_found'));
       }
+      request.log.info({ route: 'legacy', model: modelForChat, stream: body.stream === true }, 'chat legacy routing');
     }
+
+    const chatRouteMeta =
+      routing.kind === 'chat'
+        ? { nodeId: routing.nodeId, agentId: routing.agentId, taskId: routing.taskId }
+        : { model: modelForChat };
 
     const chatRequest = {
       messages: [{ role: 'user' as const, content: prompt }],
@@ -534,7 +554,7 @@ export async function buildServer(options?: {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        request.log.error({ err }, 'agent chat failed');
+        request.log.error({ err, ...chatRouteMeta }, 'agent chat failed');
         return reply.code(500).send(openaiError(message, 'server_error', 'agent_error'));
       }
       const result: ChatCompletion = {
@@ -580,7 +600,7 @@ export async function buildServer(options?: {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const offline = err instanceof Error && (err as { code?: string }).code === 'node_offline';
-      request.log.error({ err }, 'agent chat failed (stream)');
+      request.log.error({ err, ...chatRouteMeta }, 'agent chat failed (stream)');
       // 流已开启，无法改状态码：以 SSE error 事件结束
       res.write(
         formatSseData(
@@ -722,7 +742,7 @@ export async function buildServer(options?: {
     }
   });
 
-  /** 一键添加 agent：body { type }，按内置目录模板创建并热启用（仅内存生效，重启还原 yaml） */
+  /** 一键添加 agent：body { type }，按内置目录模板创建、热启用并写入 config.yaml（重启仍加载） */
   app.post('/api/agents', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) {
       return reply.code(401).send(openaiError('无效或缺失 API key（Authorization: Bearer <token>）', 'invalid_request_error', 'unauthorized'));
@@ -755,6 +775,10 @@ export async function buildServer(options?: {
     };
     try {
       const agent = manager.addAgent(def);
+      const agents = persistAgentEnabled(configPath, kind, true, manager.snapshotDefinitions());
+      config.gateway = { ...config.gateway, agents };
+      const nodeAgents = persistNodeAgentRegistered(configPath, kind);
+      config.node = { ...config.node, agents: nodeAgents };
       return { agent };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

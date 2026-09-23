@@ -16,6 +16,7 @@ import {
   persistEnsureWeixinAccount,
   persistRemoveWeixinAccount,
   persistAgentEnabled,
+  persistNodeAgentRegistered,
 } from '../../src/gateway/config.js';
 
 function tmpRoot(): string {
@@ -302,6 +303,18 @@ test('persistEnsureWeixinAccount：写入 accounts 并切 external；remove 去�
   persistEnsureWeixinAccount(file, 'bob');
   assert.deepEqual(migrateConfig(parse(readFileSync(file, 'utf8'))).weixin.accounts, ['alice', 'bob']);
   assert.deepEqual(persistRemoveWeixinAccount(file, 'alice'), ['bob']);
+});
+
+test('persistNodeAgentRegistered：追加 node.agents id，不重复', () => {
+  const dir = tmpRoot();
+  const file = join(dir, 'config.yaml');
+  writeFileSync(file, 'node:\n  enabled: true\n  agents:\n    - pi\n');
+  persistNodeAgentRegistered(file, 'hermes');
+  let cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
+  assert.deepEqual(cfg.node.agents, ['pi', 'hermes']);
+  persistNodeAgentRegistered(file, 'hermes');
+  cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
+  assert.deepEqual(cfg.node.agents, ['pi', 'hermes']);
 });
 
 test('persistAgentEnabled：写入 agents[].enabled，缺列表时整表落下', () => {

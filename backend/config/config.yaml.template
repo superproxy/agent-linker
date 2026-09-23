@@ -1,5 +1,13 @@
 # linkagent 三进程共享配置（gateway / weixin / node 读同一文件）
 # 旧的扁平格式（顶层 server/auth/...）仍被自动识别并迁移，无需手工改动。
+#
+# Agent 与任务路由（必读）：
+#   任务绑定 (nodeId, agentId) 能否执行，取决于「该 nodeId 对应机器」在握手时自报的 agent 清单。
+#   - nodeId=local：由网关进程按 gateway.agents 在本机拉起 ACP（/api/node-agents 的 local 分组）。
+#   - nodeId=n_xxx：由该节点连接器自报 agents（config.node.agents 或独立节点的 LINKAGENT_NODE_AGENTS）；
+#     网关只读注册表，不在远程机器上改开通情况。
+#   因此：本机若要任务走「远程节点」或 pm 拉起的 node 进程，gateway.agents 与 node.agents 须同时包含
+#   同一 agent id（gateway 侧是完整定义，node 侧是 id 列表）；仅写 gateway 不会出现在节点注册里。
 
 # ── gateway 网关进程 ──────────────────────────────────────
 gateway:
@@ -19,12 +27,13 @@ gateway:
     token: ""
     # 账号登录会话有效期（天），滑动续期；默认 7 天（token/local 模式下账号会话使用）
     sessionTtlDays: 7
-  # agents：自定义 agent 列表（覆盖内置默认 opencode/pi/workbuddy/trace-cli/cursor）。
+  # gateway.agents：仅描述 nodeId=local（网关本机执行）的 agent 完整定义。
+  # 远程机器各自在 node.agents / 环境变量里声明 id，与这里无关。
   # permissionMode 透传 ACP 权限模式（AcpWrapper 缺省 approve-reads + 非交互 deny = 只读问答）：
   #   approve-all   自动批准全部权限请求（写文件/终端命令直接放行）
   #   approve-reads 只读放行、写类操作需审批（headless 下审批一律拒绝）
   #   deny-all      全部拒绝
-  # 注意：配置 agents 后以本列表为准，需要哪些 agent 就列全。
+  # 注意：配置 agents 后以本列表为准，需要哪些 local agent 就列全；后台「添加并启用」会同步写入 node.agents。
   agents:
     - id: opencode
       type: opencode
@@ -52,6 +61,12 @@ gateway:
       type: cursor
       displayName: Cursor
       description: Cursor CLI（经 agent acp），全权限
+      permissionMode: approve-all
+    # 示例：Hermes（须本机已装 hermes acp；与 node.agents 中的 hermes 成对出现）
+    - id: hermes
+      type: hermes
+      displayName: Hermes
+      description: Hermes Agent（hermes acp），全权限
       permissionMode: approve-all
   # agent 默认工作目录：未显式配 cwd 的 agent 在此目录下运行（缺省回退网关启动目录）
   # defaultCwd: /Users/yangxuezeng/linkagent/works
@@ -95,10 +110,19 @@ weixin:
   # gatewayUrl: ""           # 缺省由 gateway.server 推导（0.0.0.0/:: 归一化到 127.0.0.1）
   # gatewayToken: ""         # 缺省取 gateway.auth.token 或自动生成的 gateway-token 文件
 
-  # ── node（executor）执行器进程 ────────────────────────────
+# ── node 执行器进程（连接器）──────────────────────────────
+# pm start node 拉起的本机节点：agents 只认本段（LINKAGENT_NODE_AGENTS 被 supervisor 置空）。
+# 独立节点包仍可用环境变量 LINKAGENT_NODE_AGENTS 覆盖。
+# 列表须与本机已安装 CLI 一致；任务路由到 n_xxx 时只认此处（及握手）注册的 id。
 node:
   enabled: true
   # name: ""                # 节点展示名（缺省 node-<hostname>）
-  # agents: []              # 上报的 agent id（空 = 网关默认 4 种）
+  agents:
+    - opencode
+    - pi
+    - workbuddy
+    - trace-cli
+    - cursor
+    - hermes
   # gatewayUrl: ""          # 缺省由 gateway.server 推导
   # gatewayToken: ""        # 缺省取 gateway.auth.token 或 gateway-token 文件

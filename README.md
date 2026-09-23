@@ -545,7 +545,7 @@ backend/                      # 网关包（@linkagent/backend）
     modelcandidates.ts        # 本机模型候选收集
   src/node/connector.ts       # 远程节点连接器（在执行机运行，出站 WS 连入网关跑本地 agent）
   src/channels/               # 独立 botAgent：weixin-bot / wecom-bot / gateway-chat / ilink-client
-  src/dev/                    # console.html（内置控制台）、probe、smoke-plugin、weixin-login
+  src/dev/                    # chat.html（无 web 构建时 GET / 兜底）、probe、smoke-plugin、weixin-login
 shared/                       # 领域共享类型：OpenAI 兼容类型、agent 抽象、config schema（@linkagent/shared）
 web/                          # 独立 React 后台管理页（@linkagent/web，Vite）
 openclaw-shim/                # openclaw 包本地 shim（overrides workspace:*）
