@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntimeError, type AcpxRuntime } from 'acpx/runtime';
@@ -33,7 +34,32 @@ export function resolveCwd(p: string): string {
 export function ensureTaskCwdExists(raw: string): string {
   const cwd = resolveCwd(raw);
   mkdirSync(cwd, { recursive: true });
+  if (!existsSync(cwd)) {
+    throw new Error(`任务工作目录创建后仍不存在: ${cwd}`);
+  }
   return cwd;
+}
+
+/** acpx spawn 失败时补充 cwd / PATH 诊断（节点服务常缺交互式 shell 的 PATH） */
+export function formatAgentSpawnFailure(command: string[], cwd: string, cause: unknown): Error {
+  const base = cause instanceof Error ? cause.message : String(cause);
+  const lines = [base];
+  lines.push(existsSync(cwd) ? `工作目录: ${cwd}（已存在）` : `工作目录不存在: ${cwd}`);
+  const bin = command[0]?.trim();
+  if (bin) {
+    const lookup =
+      process.platform === 'win32'
+        ? spawnSync('where', [bin], { encoding: 'utf8', windowsHide: true })
+        : spawnSync('which', [bin], { encoding: 'utf8' });
+    if (lookup.status !== 0 || !lookup.stdout?.trim()) {
+      lines.push(
+        `未在 node 进程 PATH 中解析到「${bin}」（命令: ${command.join(' ')}）。请在执行机安装对应 CLI，或将可执行文件目录加入 node 连接器启动环境的 PATH。`,
+      );
+    } else {
+      lines.push(`PATH 解析 ${bin} → ${lookup.stdout.trim().split(/\r?\n/)[0] ?? lookup.stdout.trim()}`);
+    }
+  }
+  return new Error(lines.join('\n'));
 }
 
 /** 各 ACP agent 的默认启动命令（definition.command / options.command 可覆盖） */
@@ -262,6 +288,8 @@ export interface AcpEngineOptions {
   /** 额外环境变量 */
   env?: Record<string, string>;
   verbose?: boolean;
+  /** 跳过 init 时 probeAvailability（远程 node：先补齐任务 cwd，再在 ensureSession 时启动 agent） */
+  skipProbe?: boolean;
   /** persistent 会话空闲超时（默认 30 分钟） */
   persistentIdleTimeoutMs?: number;
 }
@@ -372,7 +400,13 @@ export class AcpEngine {
       probeAgent: this.agentName,
       verbose: this.options.verbose ?? false,
     });
-    await runtime.probeAvailability();
+    if (this.options.skipProbe !== true) {
+      try {
+        await runtime.probeAvailability();
+      } catch (err) {
+        throw formatAgentSpawnFailure(this.command(), cwd, err);
+      }
+    }
     return runtime;
   }
 
@@ -382,13 +416,13 @@ export class AcpEngine {
    * - 无 sessionKey → oneshot（每轮独立会话，用完即弃，避免记忆跨请求串扰）。
    */
   async runTurn(opts: RunTurnOptions): Promise<RunTurnResult> {
+    const cwd = opts.cwd?.trim() ? ensureTaskCwdExists(opts.cwd) : this.baseCwd();
     const runtime = await this.getRuntime(opts.env);
     const requestId = randomUUID();
     const persistent = Boolean(opts.sessionKey?.trim());
     const sessionKey = persistent ? opts.sessionKey!.trim() : `gw-${this.id}-${requestId}`;
     const mode: 'persistent' | 'oneshot' = persistent ? 'persistent' : 'oneshot';
     const text = opts.text;
-    const cwd = opts.cwd?.trim() ? ensureTaskCwdExists(opts.cwd) : this.baseCwd();
 
     const attempt = async (resetFirst: boolean): Promise<RunTurnResult> => {
       if (resetFirst) {
@@ -401,6 +435,10 @@ export class AcpEngine {
         handle = await runtime.ensureSession({ sessionKey, agent: this.agentName, mode, cwd });
       } catch (err) {
         if (persistent && !resetFirst && isSessionRecoveryRequiredError(err)) return attempt(true);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/Failed to spawn agent command|ENOENT|spawn/i.test(msg)) {
+          throw formatAgentSpawnFailure(this.command(), cwd, err);
+        }
         throw err;
       }
 

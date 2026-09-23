@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Popconfirm, Space, Table, Tag } from 'antd';
+import { Alert, Button, Card, Modal, Popconfirm, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined } from '@ant-design/icons';
-import { OpsClient, type NodeInfo } from '../api';
+import { ApiError, OpsClient, type NodeInfo, type NodeTokenInfo } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { notify } from '../lib/notify';
-import { EmptyHint, StateTag } from '../components/common';
+import { CopyableCode, EmptyHint, StateTag } from '../components/common';
 import { relTime, type TabId } from '../lib/constants';
 import { NodeEnrollPanel } from './NodeEnroll';
 
@@ -20,19 +20,36 @@ export function NodesPage(props: {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
   const { tick } = useRefreshTick();
   const [nodes, setNodes] = useState<NodeInfo[] | null>(null);
+  const [nodeTokens, setNodeTokens] = useState<NodeTokenInfo[]>([]);
+  const [viewNt, setViewNt] = useState<{ preview: string; full: string; label?: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showEnroll, setShowEnroll] = useState(false);
 
+  const tokenByNodeId = useMemo(() => {
+    const m = new Map<string, NodeTokenInfo>();
+    for (const t of nodeTokens) {
+      if (t.nodeId) m.set(t.nodeId, t);
+    }
+    return m;
+  }, [nodeTokens]);
+
   const load = useCallback(async () => {
     try {
-      setNodes(await ops.listNodes());
+      const listNodes = ops.listNodes();
+      const listTokens = props.scope === 'remote' ? ops.listNodeTokens().catch((e) => {
+        if (e instanceof ApiError && e.status === 401) return [] as NodeTokenInfo[];
+        throw e;
+      }) : Promise.resolve([] as NodeTokenInfo[]);
+      const [nextNodes, nextTokens] = await Promise.all([listNodes, listTokens]);
+      setNodes(nextNodes);
+      setNodeTokens(nextTokens);
       setErr(null);
     } catch (e) {
       if (!props.onAuthError(e)) setErr(e instanceof Error ? e.message : String(e));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ops, tick]);
+  }, [ops, props.scope, tick]);
 
   useEffect(() => {
     void load();
@@ -71,6 +88,30 @@ export function NodesPage(props: {
       width: 180,
       render: (v: string) => <code className="code-cell">{v}</code>,
     },
+    ...(isRemote
+      ? [
+          {
+            title: '节点 Key（nt_）',
+            key: 'nodeKey',
+            width: 120,
+            responsive: ['md'] as const,
+            render: (_: unknown, n: NodeInfo) => {
+              const tok = tokenByNodeId.get(n.nodeId);
+              if (!tok) return <span className="sub-muted">—</span>;
+              return (
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, height: 'auto' }}
+                  onClick={() => setViewNt({ preview: tok.tokenPreview, full: tok.token, label: tok.label })}
+                >
+                  <code className="code-cell">{tok.tokenPreview}</code>
+                </Button>
+              );
+            },
+          } satisfies ColumnsType<NodeInfo>[number],
+        ]
+      : []),
     {
       title: '状态',
       key: 'status',
@@ -278,6 +319,22 @@ export function NodesPage(props: {
           }}
         />
       </Card>
+
+      <Modal
+        open={viewNt !== null}
+        title="节点 Key（nt_）"
+        onCancel={() => setViewNt(null)}
+        footer={<Button onClick={() => setViewNt(null)}>关闭</Button>}
+        destroyOnClose
+      >
+        {viewNt ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {viewNt.label ? <div className="sub-muted">备注：{viewNt.label}</div> : null}
+            <div className="sub-muted">完整凭证</div>
+            <CopyableCode text={viewNt.full} block size={13} />
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

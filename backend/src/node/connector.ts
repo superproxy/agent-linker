@@ -10,6 +10,7 @@ import {
   AcpEngine,
   DEFAULT_COMMANDS,
   DEFAULT_LABELS,
+  ensureTaskCwdExists,
   resolveAcpKindForAgentId,
   type AcpAgentKind,
 } from '../gateway/agents/acpEngine.js';
@@ -261,6 +262,7 @@ class NodeConnector {
         agentName: kind,
         stateDir: join(this.opts.stateDir, 'acpx', agentId),
         verbose: this.verbose,
+        skipProbe: true,
       });
       this.engines.set(agentId, engine);
     }
@@ -284,10 +286,15 @@ class NodeConnector {
       console.log(`[node] turn preview requestId=${msg.requestId}: ${JSON.stringify(preview)}`);
     }
     try {
+      let taskCwd: string | undefined;
+      if (msg.cwd?.trim()) {
+        taskCwd = ensureTaskCwdExists(msg.cwd);
+        console.log(`[node] task cwd ready requestId=${msg.requestId} path=${taskCwd}`);
+      }
       const result = await this.engineFor(msg.agentId).runTurn({
         text: msg.text,
         ...(msg.sessionKey ? { sessionKey: msg.sessionKey } : {}),
-        ...(msg.cwd ? { cwd: msg.cwd } : {}),
+        ...(taskCwd ? { cwd: taskCwd } : {}),
         ...(msg.model ? { model: msg.model } : {}),
         ...(msg.permissionMode ? { permissionMode: msg.permissionMode } : {}),
         signal: controller.signal,
