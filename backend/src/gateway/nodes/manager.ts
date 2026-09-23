@@ -256,9 +256,13 @@ export class NodeManager {
    *   - 不存在 → 抛错
    */
   removeNode(nodeId: string): void {
+    const rec = this.registry.get(nodeId);
+    if (!rec) throw new Error(`节点不存在: ${nodeId}`);
     const conn = this.connections.get(nodeId);
-    if (conn?.approved) throw new Error('节点在线，不能删除（请先断开节点连接）');
-    if (!this.registry.get(nodeId)) throw new Error(`节点不存在: ${nodeId}`);
+    // 已停用：连接可能尚在 close 回调前残留，仍允许删注册
+    if (conn?.approved && rec.disabled !== true) {
+      throw new Error('节点在线，不能删除（请先断开节点连接）');
+    }
     if (conn) {
       try {
         conn.ws.close(4404, 'registration removed');

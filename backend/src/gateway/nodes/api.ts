@@ -14,9 +14,9 @@ type HeaderReq = { headers: Record<string, string | string[] | undefined> };
  *   GET    /api/nodes                                  可见节点（管理员含本机+全部；其他人只看自己的远程机器）
  *   POST   /api/nodes/:nodeId/approve                  批准待审批节点（仅管理员）
  *   POST   /api/nodes/:nodeId/reject                   拒绝待审批节点（仅管理员）
- *   POST   /api/nodes/:nodeId/disable                  临时停用节点：在线则关闭连接，重连被拒（仅管理员）
- *   POST   /api/nodes/:nodeId/enable                   恢复已停用节点（仅管理员）
- *   DELETE /api/nodes/:nodeId                          删除离线/已停用节点（管理员或属主）
+ *   POST   /api/nodes/:nodeId/disable                  临时停用节点：在线则关闭连接，重连被拒（管理员或 nt_ 属主）
+ *   POST   /api/nodes/:nodeId/enable                   恢复已停用节点（管理员或 nt_ 属主）
+ *   DELETE /api/nodes/:nodeId                          删除离线/已停用节点（管理员或 nt_ 属主）
  *   GET    /api/users/:channel/:userId/preferences     用户默认节点+agent（仅预填，不鉴权）
  *   PUT    /api/users/:channel/:userId/preferences     保存用户默认节点+agent
  */
@@ -51,6 +51,26 @@ export function registerNodeApi(
     admin: isAdmin(request),
     username: sessionUser(request)?.username,
   });
+
+  const canManageNode = (
+    rec: { ownerUsername?: string },
+    viewer: ReturnType<typeof viewerOf>,
+  ): boolean => viewer.admin || (!!viewer.username && rec.ownerUsername === viewer.username);
+
+  type ManageNodeGate = { ok: true } | { ok: false; status: 401 | 403 | 404 | 400; error: string };
+
+  const manageNodeGate = (
+    request: HeaderReq,
+    rec: { ownerUsername?: string } | undefined,
+    nodeId: string,
+    localError: string,
+  ): ManageNodeGate => {
+    if (!checkAuth(request)) return { ok: false, status: 401, error: 'unauthorized' };
+    if (nodeId === LOCAL_NODE_ID) return { ok: false, status: 400, error: localError };
+    if (!rec) return { ok: false, status: 404, error: `节点不存在: ${nodeId}` };
+    if (!canManageNode(rec, viewerOf(request))) return { ok: false, status: 403, error: '只能管理自己的机器' };
+    return { ok: true };
+  };
 
   app.get('/api/nodes', async (request, reply) => {
     if (!requireAuth(request, reply)) return { error: 'unauthorized' };
@@ -97,15 +117,10 @@ export function registerNodeApi(
   });
 
   app.delete('/api/nodes/:nodeId', async (request, reply) => {
-    if (!requireAuth(request, reply)) return { error: 'unauthorized' };
     const { nodeId } = request.params as { nodeId: string };
-    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可删除' });
     const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
-    if (!rec) return reply.code(404).send({ error: `节点不存在: ${nodeId}` });
-    const viewer = viewerOf(request);
-    if (!viewer.admin && rec.ownerUsername !== viewer.username) {
-      return reply.code(403).send({ error: '只能删除自己的机器' });
-    }
+    const gate = manageNodeGate(request, rec, nodeId, '内建本机节点不可删除');
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     try {
       nodeManager.removeNode(nodeId);
       return { ok: true };
@@ -116,9 +131,10 @@ export function registerNodeApi(
   });
 
   app.post('/api/nodes/:nodeId/disable', async (request, reply) => {
-    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
     const { nodeId } = request.params as { nodeId: string };
-    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可停用' });
+    const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
+    const gate = manageNodeGate(request, rec, nodeId, '内建本机节点不可停用');
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     const body = request.body as { reason?: string } | null | undefined;
     try {
       const node = nodeManager.disableNode(nodeId, body?.reason?.trim() || undefined);
@@ -131,9 +147,10 @@ export function registerNodeApi(
   });
 
   app.post('/api/nodes/:nodeId/enable', async (request, reply) => {
-    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
     const { nodeId } = request.params as { nodeId: string };
-    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可启用' });
+    const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
+    const gate = manageNodeGate(request, rec, nodeId, '内建本机节点不可启用');
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     try {
       const node = nodeManager.enableNode(nodeId);
       return { node };

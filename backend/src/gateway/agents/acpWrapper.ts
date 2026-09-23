@@ -16,6 +16,8 @@ export {
   installGuideFor,
   expandHome,
   resolveCwd,
+  agentDisplayName,
+  enrichAgentInfos,
   type AcpAgentKind,
   type AgentCatalogEntry,
   type AgentInstallGuide,

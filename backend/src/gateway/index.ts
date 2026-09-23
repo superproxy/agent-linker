@@ -8,7 +8,7 @@ import { loadSharedConfig, persistDefaultTaskAgentId, persistAgentEnabled, persi
 import type { SharedConfig } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
-import { AGENT_CATALOG, type AcpAgentKind } from './agents/acpWrapper.js';
+import { AGENT_CATALOG, enrichAgentInfos, type AcpAgentKind } from './agents/acpWrapper.js';
 import { AgentInstallError, runAgentInstall } from './agents/installCli.js';
 import { collectModelCandidates } from './modelcandidates.js';
 import { PluginManager } from './plugins/manager.js';
@@ -652,11 +652,18 @@ export async function buildServer(options?: {
               nodeId: 'local',
               name: '本机（网关）',
               online: true,
-              agents: manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })),
+              agents: enrichAgentInfos(
+                manager.listAgentDetails().filter((a) => a.enabled).map((a) => ({ id: a.id, displayName: a.displayName })),
+              ),
             },
           }
         : {}),
-      nodes: nodes.filter((n) => canSeeNode(n, viewer)).map((n) => ({ nodeId: n.nodeId, name: n.name, online: n.online, agents: n.agents })),
+      nodes: nodes.filter((n) => canSeeNode(n, viewer)).map((n) => ({
+        nodeId: n.nodeId,
+        name: n.name,
+        online: n.online,
+        agents: enrichAgentInfos(n.agents),
+      })),
       agents: viewer.admin ? manager.listRoutingAgents() : [],
     };
   });
@@ -692,7 +699,7 @@ export async function buildServer(options?: {
         name: n.name,
         online: n.online,
         ...(n.status ? { status: n.status } : {}),
-        agents: n.agents,
+        agents: enrichAgentInfos(n.agents),
         ...(n.version ? { version: n.version } : {}),
         ...(n.connectedAt ? { connectedAt: n.connectedAt } : {}),
         ...(n.lastSeenAt ? { lastSeenAt: n.lastSeenAt } : {}),

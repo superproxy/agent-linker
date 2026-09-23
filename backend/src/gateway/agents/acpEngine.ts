@@ -104,6 +104,19 @@ export function resolveAcpKindForAgentId(agentId: string): AcpAgentKind {
   return DEFAULT_LABELS[id as AcpAgentKind] ? (id as AcpAgentKind) : 'opencode';
 }
 
+/** 展示名：优先节点/配置自报，否则用内置 DEFAULT_LABELS（如 hermes → Hermes） */
+export function agentDisplayName(agentId: string, hint?: string): string {
+  const fromHint = hint?.trim();
+  if (fromHint) return fromHint;
+  const id = agentId.trim().toLowerCase();
+  const label = DEFAULT_LABELS[id as AcpAgentKind];
+  return label?.displayName ?? agentId;
+}
+
+export function enrichAgentInfos(agents: { id: string; displayName?: string }[]): { id: string; displayName: string }[] {
+  return agents.map((a) => ({ id: a.id, displayName: agentDisplayName(a.id, a.displayName) }));
+}
+
 /** 本机安装指引：命令框展示用；argv 存在才允许网关代执行（固定白名单，不跑用户改写的文本） */
 export interface AgentInstallGuide {
   command: string;

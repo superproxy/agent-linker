@@ -6,6 +6,7 @@ import { OpsClient, type NodeInfo, type TaskItem, type UserTasks } from '../api'
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 import { EmptyHint } from '../components/common';
+import { agentDisplayLabel } from '../lib/agent-labels';
 import type { ChatSession } from './types';
 
 interface EditState {
@@ -64,18 +65,97 @@ export function TasksPage(props: {
     n.name.trim() && n.name.trim() !== n.nodeId ? `${n.name} · ${n.nodeId}` : n.nodeId;
 
   const nodeId = Form.useWatch('nodeId', form) as string | undefined;
+  const watchedAgentId = Form.useWatch('agentId', form) as string | undefined;
   const isLocalNode = (id?: string) => !id || id === 'local';
-  const agentOptions = useMemo<{ id: string; displayName?: string }[]>(() => {
-    if (editing?.task?.id === 'default') return [{ id: 'pi', displayName: 'Pi' }];
-    if (!isLocalNode(nodeId)) return nodes.find((n) => n.nodeId === nodeId)?.agents ?? [];
-    return localAgents;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, nodes, localAgents, editing]);
+
+  const agentsForNode = useCallback(
+    (targetNodeId?: string): { id: string; displayName?: string }[] => {
+      if (editing?.task?.id === 'default') return [{ id: 'pi', displayName: 'Pi' }];
+      if (!isLocalNode(targetNodeId)) {
+        return nodes.find((n) => n.nodeId === targetNodeId)?.agents ?? [];
+      }
+      return localAgents;
+    },
+    [nodes, localAgents, editing?.task?.id],
+  );
+
+  const agentOptions = useMemo<{ id: string; displayName?: string }[]>(
+    () => agentsForNode(nodeId),
+    [agentsForNode, nodeId],
+  );
+
+  const agentLabelForId = useCallback(
+    (id: string) => {
+      const fromLocal = localAgents.find((a) => a.id === id)?.displayName;
+      if (fromLocal) return agentDisplayLabel(id, fromLocal);
+      for (const n of nodes) {
+        const hit = n.agents?.find((a) => a.id === id);
+        if (hit?.displayName) return agentDisplayLabel(id, hit.displayName);
+      }
+      return agentDisplayLabel(id);
+    },
+    [localAgents, nodes],
+  );
+
+  const agentSelectOptions = useMemo(
+    () =>
+      agentOptions.map((a) => ({
+        value: a.id,
+        label: agentDisplayLabel(a.id, a.displayName),
+      })),
+    [agentOptions],
+  );
+
+  const nodeLabelFor = useCallback(
+    (targetNodeId?: string) => {
+      if (isLocalNode(targetNodeId)) return localNode ? nodeSelectLabel(localNode) : '本机';
+      const n = nodes.find((x) => x.nodeId === targetNodeId);
+      return n ? nodeSelectLabel(n) : targetNodeId ?? '—';
+    },
+    [nodes, localNode],
+  );
+
+  const agentBindingInvalid = useMemo(() => {
+    if (editing?.task?.id === 'default') return false;
+    const aid = (watchedAgentId ?? '').trim();
+    if (!aid) return false;
+    const list = agentsForNode(nodeId);
+    if (list.length === 0) return true;
+    return !list.some((a) => a.id === aid);
+  }, [agentsForNode, nodeId, watchedAgentId, editing?.task?.id]);
+
+  const validateAgentForNode = (targetNodeId: string | undefined, agentId: string | undefined): boolean => {
+    if (editing?.task?.id === 'default') return true;
+    const aid = agentId?.trim();
+    if (!aid) return true;
+    const list = agentsForNode(targetNodeId);
+    const nodeLabel = nodeLabelFor(targetNodeId);
+    if (list.length === 0) {
+      notify.error(`节点「${nodeLabel}」上没有可用 Agent（请确认节点在线且已上报 agent）`);
+      return false;
+    }
+    if (!list.some((a) => a.id === aid)) {
+      notify.error(
+        `节点「${nodeLabel}」上没有可用 agent: ${agentLabelForId(aid)}（请从列表中选择或更换节点）`,
+      );
+      return false;
+    }
+    return true;
+  };
 
   const syncAgentForNode = (nextNode?: string) => {
-    const list = isLocalNode(nextNode) ? localAgents : nodes.find((n) => n.nodeId === nextNode)?.agents ?? [];
-    const cur = form.getFieldValue('agentId') as string | undefined;
-    if (!list.some((a) => a.id === cur)) form.setFieldValue('agentId', list[0]?.id ?? '');
+    const list = agentsForNode(nextNode);
+    const nodeLabel = nodeLabelFor(nextNode);
+    if (list.length === 0) {
+      notify.error(`节点「${nodeLabel}」上没有可用 Agent（请确认节点在线且已上报 agent）`);
+      form.setFieldValue('agentId', undefined);
+      return;
+    }
+    const cur = (form.getFieldValue('agentId') as string | undefined)?.trim();
+    if (!cur) return;
+    if (list.some((a) => a.id === cur)) return;
+    notify.error(`Agent「${agentLabelForId(cur)}」在节点「${nodeLabel}」不可用，请重新选择`);
+    form.setFieldValue('agentId', undefined);
   };
 
   const load = useCallback(async () => {
@@ -128,23 +208,61 @@ export function TasksPage(props: {
       notify.info('普通用户的默认任务固定为本机 pi。新建其它任务请先接入自己的远程机器。');
       return;
     }
-    const firstRemote = remoteNodes[0];
     setEditing({ channel: 'web', userId: ownerUsername, ownerUsername });
-    form.setFieldsValue({
-      name: '',
-      agentId: isAdmin ? (localAgents[0]?.id ?? '') : (firstRemote?.agents[0]?.id ?? ''),
-      nodeId: isAdmin ? '' : (firstRemote?.nodeId ?? ''),
-      key: '',
-      cwd: '',
-      ownerUsername,
-    });
-    setOpen(true);
+
+    const finishOpen = (fields: {
+      agentId?: string;
+      nodeId?: string;
+    }) => {
+      form.setFieldsValue({
+        name: '',
+        key: '',
+        cwd: '',
+        ownerUsername,
+        agentId: fields.agentId,
+        nodeId: fields.nodeId ?? '',
+      });
+      setOpen(true);
+    };
+
     if (isAdmin) {
+      if (localAgents.length === 0) {
+        notify.error('本机没有已启用的 Agent，请先在「Agents」中启用后再创建任务');
+        return;
+      }
       void ops
         .getDefaultAgent()
-        .then((id) => form.setFieldValue('agentId', localAgents.some((a) => a.id === id) ? id : localAgents[0]?.id ?? ''))
-        .catch(() => undefined);
+        .then((id) => {
+          const agentId = localAgents.some((a) => a.id === id) ? id : localAgents[0]?.id;
+          if (!agentId) {
+            notify.error('本机没有已启用的 Agent，请先在「Agents」中启用后再创建任务');
+            return;
+          }
+          finishOpen({ agentId, nodeId: '' });
+        })
+        .catch(() => {
+          const agentId = localAgents[0]?.id;
+          if (!agentId) {
+            notify.error('本机没有已启用的 Agent，请先在「Agents」中启用后再创建任务');
+            return;
+          }
+          finishOpen({ agentId, nodeId: '' });
+        });
+      return;
     }
+
+    const firstRemote = remoteNodes[0];
+    if (!firstRemote) {
+      notify.info('普通用户的默认任务固定为本机 pi。新建其它任务请先接入自己的远程机器。');
+      return;
+    }
+    if (firstRemote.agents.length === 0) {
+      notify.error(
+        `远程节点「${nodeSelectLabel(firstRemote)}」未上报可用 Agent，请检查节点配置与连接后再创建任务`,
+      );
+      return;
+    }
+    finishOpen({ agentId: firstRemote.agents[0]?.id, nodeId: firstRemote.nodeId });
   };
 
   const openEdit = (t: FlatTask) => {
@@ -156,12 +274,21 @@ export function TasksPage(props: {
       cwd: t.cwd ?? '',
     });
     setOpen(true);
-    syncAgentForNode(t.nodeId ?? '');
+    const list = agentsForNode(t.nodeId ?? '');
+    const bound = t.agentId?.trim();
+    if (bound && list.length > 0 && !list.some((a) => a.id === bound)) {
+      notify.error(
+        `任务当前绑定的 Agent「${agentLabelForId(bound)}」在节点「${nodeLabelFor(t.nodeId)}」不可用，请重新选择或更换节点后再保存`,
+      );
+    } else if (bound && list.length === 0) {
+      notify.error(`节点「${nodeLabelFor(t.nodeId)}」上没有可用 Agent，请确认节点在线后再编辑`);
+    }
   };
 
   const submit = async () => {
     const v = await form.validateFields();
     if (!editing) return;
+    if (!validateAgentForNode(v.nodeId, v.agentId)) return;
     if (editing.task) {
       const t = editing.task;
       await withBusy(async () => {
@@ -288,7 +415,7 @@ export function TasksPage(props: {
       title: 'Agent',
       dataIndex: 'agentId',
       key: 'agentId',
-      render: (v: string) => <code className="code-cell">{v}</code>,
+      render: (v: string) => agentLabelForId(v),
     },
     {
       title: '节点名称',
@@ -451,13 +578,23 @@ export function TasksPage(props: {
           <Form.Item
             name="agentId"
             label="Agent"
-            extra={editing?.task?.id === 'default' ? '默认任务固定使用本机 pi，不能修改。' : undefined}
+            validateStatus={agentBindingInvalid ? 'error' : undefined}
+            help={
+              editing?.task?.id === 'default'
+                ? '默认任务固定使用本机 pi，不能修改。'
+                : agentBindingInvalid
+                  ? '当前 Agent 不在所选节点的可用列表中，请重新选择或更换节点。'
+                  : agentOptions.length === 0 && editing?.task?.id !== 'default'
+                    ? '所选节点暂无可用 Agent，请确认节点在线且已上报 agent。'
+                    : undefined
+            }
           >
             <Select
-              disabled={editing?.task?.id === 'default'}
+              disabled={editing?.task?.id === 'default' || (agentOptions.length === 0 && Boolean(editing?.task))}
+              placeholder={agentOptions.length === 0 ? '该节点暂无可用 Agent' : '选择 Agent'}
               options={[
                 ...(editing?.task ? [] : [{ value: '', label: '（跟随当前激活任务）' }]),
-                ...agentOptions.map((a) => ({ value: a.id, label: a.displayName || a.id })),
+                ...agentSelectOptions,
               ]}
             />
           </Form.Item>
