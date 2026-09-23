@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import { resolveTaskPath, resolveTaskWorkspaceRoot, isWindowsDriveRoot, isLegacyBrokenTaskCwd, resolveCwd } from '../../util/task-paths.js';
 import { identityForLoginTask, taskSkillProcessEnv, writeTaskSkillMarkdown } from './skill-files.js';
 import type { TaskStore } from './store.js';
 import { LOCAL_NODE_ID } from '@linkagent/shared';
@@ -79,7 +80,9 @@ export class TaskService {
   constructor(options: TaskServiceOptions) {
     this.store = options.store;
     this.defaultAgentId = options.defaultAgentId ?? DEFAULT_AGENT_ID;
-    this.workspaceRoot = options.workspaceRoot?.trim() || undefined;
+    this.workspaceRoot = options.workspaceRoot?.trim()
+      ? resolveTaskWorkspaceRoot(options.workspaceRoot.trim())
+      : undefined;
     this.skill = options.skill;
   }
 
@@ -102,7 +105,7 @@ export class TaskService {
   private taskWorkspacePath(owner: string, taskId: string): string | undefined {
     if (!this.workspaceRoot) return undefined;
     const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, '_');
-    return join(this.workspaceRoot, safe(owner), taskId);
+    return resolveTaskPath(this.workspaceRoot, safe(owner), taskId);
   }
 
   private ensureWorkspace(owner: string, taskId: string): string | undefined {
@@ -132,7 +135,9 @@ export class TaskService {
   /** 把按微信联系人建的自动目录挪到登录用户名下；目标已有内容时只改指向 */
   private relocateWorkspace(from: string, to: string): void {
     if (relative(from, to) === '') return;
-    mkdirSync(dirname(to), { recursive: true });
+    if (!isWindowsDriveRoot(dirname(to))) {
+      mkdirSync(dirname(to), { recursive: true });
+    }
     const fromOk = existsSync(from);
     const toOk = existsSync(to);
     if (fromOk && toOk && this.dirIsEmpty(to)) rmSync(to, { recursive: true, force: true });
@@ -157,7 +162,11 @@ export class TaskService {
     if (!owner) return false;
     const next = this.taskWorkspacePath(owner, task.id);
     if (!next) return false;
-    const current = task.cwd?.trim();
+    let current = task.cwd?.trim();
+    if (current && isLegacyBrokenTaskCwd(current)) {
+      delete task.cwd;
+      current = undefined;
+    }
     if (!current) {
       mkdirSync(next, { recursive: true });
       task.cwd = next;
@@ -357,6 +366,7 @@ export class TaskService {
   ): TaskItem {
     const id = newTaskId();
     const explicit = cwd?.trim();
+    if (explicit) resolveCwd(explicit);
     const owner = this.workspaceOwner(state);
     const workspace = explicit ? explicit : owner ? this.ensureWorkspace(owner, id) : undefined;
     const task: TaskItem = {
@@ -399,7 +409,8 @@ export class TaskService {
     for (const u of this.store.list()) {
       const state = this.store.read(u.channel, u.userId, u.ownerUsername);
       if (!state) continue;
-      const task = state.tasks.find((t) => t.key === k);
+      const normalized = this.ensureKeys(state);
+      const task = normalized.tasks.find((t) => t.key === k);
       if (task) return { channel: u.channel, userId: u.userId, ...(u.ownerUsername ? { ownerUsername: u.ownerUsername } : {}), task };
     }
     return undefined;
@@ -528,7 +539,10 @@ export class TaskService {
     const task = state.tasks.find((t) => t.id === id);
     if (!task) throw new Error(`任务不存在: ${id}`);
     const trimmed = cwd?.trim();
-    if (trimmed) task.cwd = trimmed;
+    if (trimmed) {
+      resolveCwd(trimmed);
+      task.cwd = trimmed;
+    }
     else {
       const owner = this.workspaceOwner(state);
       const fallback = owner ? this.ensureWorkspace(owner, task.id) : undefined;

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { ensureTaskCwdExists, expandHome, resolveCwd } from '../../util/task-paths.js';
+
+export { ensureTaskCwdExists, expandHome, resolveCwd } from '../../util/task-paths.js';
 import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntimeError, type AcpxRuntime } from 'acpx/runtime';
 import type { AgentDefinition, AgentDescriptor, PermissionPolicySpec } from '@linkagent/shared';
 import { ACP_AGENT_KINDS } from '@linkagent/shared';
@@ -10,35 +12,6 @@ import { lastUserText } from '@linkagent/shared/opencode';
 import { collectModelCandidates } from '../modelcandidates.js';
 
 export type AcpAgentKind = (typeof ACP_AGENT_KINDS)[number];
-
-/**
- * 展开路径中的用户主目录：Node 的 path.resolve 不会展开 `~`，
- * 用户在任务 cwd 里填 `~/test` 会被当成相对路径拼成 `<网关cwd>/~/test`（不存在）→ spawn ENOENT。
- * 支持 `~` 与 `~/xxx`（不展开 `~user` 其他用户形式）。
- */
-export function expandHome(p: string): string {
-  if (p === '~') return homedir();
-  if (p.startsWith('~/') || p.startsWith('~\\')) return join(homedir(), p.slice(2));
-  return p;
-}
-
-/** 解析工作目录：先展开 ~，再转绝对路径 */
-export function resolveCwd(p: string): string {
-  return resolve(expandHome(p.trim()));
-}
-
-/**
- * 任务 cwd 在执行端落盘：网关 TaskService 只会在网关机 mkdir，
- * 远程节点收到 turn 时目录可能尚不存在，启动会话前补齐。
- */
-export function ensureTaskCwdExists(raw: string): string {
-  const cwd = resolveCwd(raw);
-  mkdirSync(cwd, { recursive: true });
-  if (!existsSync(cwd)) {
-    throw new Error(`任务工作目录创建后仍不存在: ${cwd}`);
-  }
-  return cwd;
-}
 
 /** acpx spawn 失败时补充 cwd / PATH 诊断（节点服务常缺交互式 shell 的 PATH） */
 export function formatAgentSpawnFailure(command: string[], cwd: string, cause: unknown): Error {
