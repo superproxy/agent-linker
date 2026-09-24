@@ -45,12 +45,12 @@ export type TargetId = ProcessTargetId;
  */
 export type ProcessInstanceId = TargetId | `weixin:${string}`;
 
-export const ALL_TARGETS: TargetId[] = ['gateway', 'weixin', 'node'];
+export const ALL_TARGETS: TargetId[] = ['gateway', 'weixin', 'channels', 'node'];
 
-/** 启动顺序：gateway 先就绪，再起微信与节点（二者依赖网关） */
-const START_ORDER: TargetId[] = ['gateway', 'weixin', 'node'];
+/** 启动顺序：gateway 先就绪，再起渠道与节点（二者依赖网关） */
+const START_ORDER: TargetId[] = ['gateway', 'weixin', 'channels', 'node'];
 /** 停止顺序：反序，先停依赖方 */
-const STOP_ORDER: TargetId[] = ['node', 'weixin', 'gateway'];
+const STOP_ORDER: TargetId[] = ['node', 'weixin', 'channels', 'gateway'];
 
 /** 是否合法进程目标 id（含 weixin:<accountId> 账号实例） */
 export function isKnownTargetId(id: string): id is ProcessInstanceId {
@@ -73,7 +73,7 @@ export interface InstanceSpec {
 
 /** 实例归一化：基目标 + 展示名 + pid 键 + 可选账号 id */
 export function instOf(id: ProcessInstanceId): InstanceSpec {
-  if (id === 'gateway' || id === 'weixin' || id === 'node') {
+  if (id === 'gateway' || id === 'weixin' || id === 'channels' || id === 'node') {
     return { base: id, label: TARGETS[id].label, pidKey: id };
   }
   const accountId = id.slice('weixin:'.length);
@@ -96,6 +96,7 @@ export interface TargetSpec {
 export const TARGETS: Record<TargetId, TargetSpec> = {
   gateway: { id: 'gateway', label: 'gateway 网关', healthUrl: (base) => `${base}/healthz` },
   weixin: { id: 'weixin', label: '微信 bot' },
+  channels: { id: 'channels', label: 'channel-gateway 渠道' },
   node: { id: 'node', label: 'node 节点' },
 };
 
@@ -182,10 +183,22 @@ export class ProcessManager {
     return { command: process.execPath, args, env };
   }
 
+  /** 个人微信是否由 channels 进程托管（不再起 weixin:<账号> 独立进程） */
+  private weixinUsesChannels(): boolean {
+    const shared = this.gw.shared;
+    if (shared.channelGateway?.enabled === true) return true;
+    const accounts = this.weixinAccountList();
+    return shared.weixin.enabled !== false && accounts.length > 0;
+  }
+
   /** 某进程在共享配置段里是否启用（pm start all 时 enabled:false 跳过；显式单起不拦截） */
   isEnabled(id: ProcessInstanceId): boolean {
     const base = instOf(id).base;
-    if (base === 'weixin') return this.gw.shared.weixin.enabled;
+    if (base === 'channels') {
+      if (this.gw.shared.channelGateway?.enabled === true) return true;
+      return this.weixinUsesChannels();
+    }
+    if (base === 'weixin') return false;
     if (base === 'node') return this.gw.shared.node.enabled;
     return true;
   }
@@ -201,25 +214,34 @@ export class ProcessManager {
     return accounts;
   }
 
-  /**
-   * weixin 实例：每个已绑定登录用户一个 `weixin:<username>`。
-   * 未绑定（accounts 空）不占位默认 `weixin`——`restart:all` 不会空拉一份立刻退出的进程。
-   * 扫码绑定后写入 accounts，再 restart 对应实例。
-   */
+  /** @deprecated 个人微信已合并进 channels；保留空列表兼容旧调用 */
   weixinInstanceIds(): ProcessInstanceId[] {
-    return this.weixinAccountList().map((a) => `weixin:${a}` as ProcessInstanceId);
+    return [];
   }
 
-  /** 全量实例（状态/启动顺序展示：gateway → weixin 实例 → node） */
+  /** 全量实例：gateway → channels（企微/微信/飞书）→ node */
   allInstanceIds(): ProcessInstanceId[] {
-    return ['gateway', ...this.weixinInstanceIds(), 'node'];
+    const ids: ProcessInstanceId[] = ['gateway'];
+    if (this.gw.shared.channelGateway?.enabled === true || this.weixinUsesChannels()) {
+      ids.push('channels');
+    }
+    ids.push('node');
+    return ids;
   }
 
   /** 展开：weixin → 账号实例列表（或默认单实例），其余原样；去重保序 */
   expand(ids: ProcessInstanceId[]): ProcessInstanceId[] {
     const out: ProcessInstanceId[] = [];
     for (const id of ids) {
-      for (const x of id === 'weixin' ? this.weixinInstanceIds() : [id]) {
+      let expanded: ProcessInstanceId[];
+      if (id === 'weixin') {
+        expanded = this.weixinUsesChannels() ? ['channels'] : [];
+      } else if (/^weixin:/.test(id)) {
+        expanded = this.weixinUsesChannels() ? ['channels'] : [];
+      } else {
+        expanded = [id];
+      }
+      for (const x of expanded) {
         if (!out.includes(x)) out.push(x);
       }
     }
@@ -235,9 +257,16 @@ export class ProcessManager {
   private envFor(id: ProcessInstanceId): Record<string, string> {
     const spec = instOf(id);
     switch (spec.base) {
-      case 'gateway':
-        // 管理器托管微信：强制 gateway 走 external，不在进程内内嵌 bot（避免同账号重复收消息）
-        return { LINKAGENT_WEIXIN_MODE: 'external' };
+      case 'gateway': {
+        const env: Record<string, string> = { LINKAGENT_WEIXIN_MODE: 'external' };
+        if (this.gw.shared.channelGateway?.enabled) env.LINKAGENT_CHANNEL_GATEWAY = '1';
+        return env;
+      }
+      case 'channels':
+        return {
+          LINKAGENT_GATEWAY_URL: '',
+          LINKAGENT_GATEWAY_TOKEN: '',
+        };
       case 'weixin':
         // 回连 URL/token 由 weixin 进程自行读共享配置推导，supervisor 不再当二传手；
         // 同时显式把 LINKAGENT_GATEWAY_URL/TOKEN 置空，覆盖父进程（shell/systemd/docker）

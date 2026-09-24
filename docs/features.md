@@ -24,10 +24,12 @@
 
 - 其他机器通过节点连接器 WebSocket 接入。可用**网关静态 token**直连、用户颁发的**机器 token（`nt_`，一机一证、归属该用户）**直连，或匿名申请后由管理员审批；节点自报名称、版本、开通 agent 列表，网关签发重连凭证（secret）。后台「接入」可按 **env 文件 / Bash / PowerShell** 生成环境变量片段。
 
-## 渠道接入（微信）
+## 渠道接入（微信 / 企微）
 
-- **个人微信 / 企业微信**：两种实现形态——插件运行时（openclaw 插件）或网关内嵌/独立进程的 botAgent（`channels/weixin-bot.ts`、`wecom-bot.ts`）。
-- `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起）。
+- **总览文档**：[`docs/channels.md`](channels.md)（两套方案、单进程 `channels`、四文件配置、后台与迁移）。
+- **个人微信 / 企业微信**：两套接入方案——**A** 薄 adapter `weixin-bot`；**B** 企微 OpenClaw 插件（或 legacy `wecom-bot`）。启用 **`channelGateway`** 时由 **一个 `channels` 进程**按需同时挂载 A+B；未启用时仍可拆成 `weixin:<用户>` + 网关内嵌插件等。
+- **配置边界**：企微 OpenClaw 的 `channels.wecom` / `plugins` 写在 **`channels.yaml`**，不写 `gateway.yaml`。
+- `weixin.mode` 三选一：`weixin-bot`（默认，网关内嵌 adapter）、`openclaw-weixin-plugin`、`external`（进程管理器单独拉起；channel-gateway 模式下等价于 channels 进程内 bot）。
 - **多账号**：每个**登录用户**（含管理员账号）绑定自己的微信（账号槽 = 用户名，进程 `weixin:<username>`）。流程是：**注册/登录账号 → 扫码绑定 → 重启该用户微信进程**。插件状态按用户名隔离：`login-users/<用户名>/`（`OPENCLAW_STATE_DIR`），**所有人同一规则**，不存在管理员仍写共享 `plugins/openclaw-weixin/accounts/`。扫码成功后写入 `weixin.accounts` 并将 `weixin.mode` 设为 `external`、打开 `weixin.enabled`，由进程管理器为该用户单独拉起 bot（pid/日志/登录态隔离）。`pnpm restart:all` 只拉起**已绑定**的 `weixin:<用户名>`，未绑定不会空跑默认 `weixin`。「微信登录」页每人只看自己的绑定；管理员另外在「本机 · 进程」可见全部 `weixin:*` 实例。yaml 里仍可用 `weixin.accounts` 预置账号。
 - 扫码登录复用 npm 包 **`@tencent-weixin/openclaw-weixin`**（只 import，不改包内代码）拿二维码和 token；消息收发是 `weixin-bot` 直连 ilink。插件把登录态写到该用户目录下 `openclaw-weixin/accounts/<botId>-im-bot.json`；**绑定**在同目录 `bindings/`（登录用户 → 机器人文件 id）。不复制成 `<用户名>.json`。插件若返回「已连接过此 OpenClaw」，表示该机器人已绑定且不再下发 token；此时若**该用户目录**有未被其他登录用户占用的 `*-im-bot`，重新扫码只会**更新绑定指向**，不复制文件。`weixin:<用户名>` 进程必须已有绑定，否则启动失败，不会借用其它机器人文件。
 - 支持扫码登录与**取消绑定 / 清空登录态**（删除绑定指向、清 ct_/bot 缓存、`notifyBotStop`；插件 `*-im-bot.json` 可残留但无绑定则不用。从 `weixin.accounts` 移除并停止 `weixin:<用户名>`）。手机微信若仍显示已连接，需要在手机上退出该机器人后，新的扫码才会拿到 token。绑定成功后**重启**对应用户的微信进程，吊销 `ct_`、清掉相关 token 缓存，并**重签该用户任务 key（`k_`）**。任务工作目录按**登录用户名**：`<workspaceDir>/<用户名>/<taskId>`。
@@ -36,6 +38,7 @@
 ## 管理后台（web /ui）
 
 - React + antd 单页，分组导航：
+  - **我的**（管理员可见）：**企业微信**、**飞书**（OpenClaw 配置 + 启停 channels，位于「微信」之后）。
   - **本机**（仅管理员）：网关、进程、节点、agent。网关模式下普通用户看不到本组。
   - **远程**：网关（管理员）、节点（审批/接入；普通用户只看自己的机器）、agent（普通用户可看自己机器上连接器自报的开通列表；本机目录/启停/安装仅管理员）。
   - **通用**：概览、对话、key、任务管理（每人一份登录用户任务空间；当前任务由微信 `/task` 或后台「激活」切换）。

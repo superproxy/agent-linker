@@ -313,12 +313,17 @@ test('persistEnsureWeixinAccount：写入 overlay accounts 并切 external；rem
   const rt = runtimeDirFor(dir);
   const file = join(dir, 'gateway.yaml');
   writeFileSync(file, 'server:\n  host: 127.0.0.1\n  port: 8787\n');
+  writeFileSync(join(dir, 'weixin.yaml'), 'enabled: true\n');
+  writeFileSync(join(dir, 'node.yaml'), 'enabled: false\n');
+  writeFileSync(join(dir, 'channels.yaml'), 'channelGateway:\n  enabled: false\n');
   const ids = persistEnsureWeixinAccount(file, 'alice', rt);
   assert.deepEqual(ids, ['alice']);
   let cfg = loadSharedConfig(file, rt).config;
   assert.equal(cfg.weixin.mode, 'external');
   assert.equal(cfg.weixin.enabled, true);
   assert.deepEqual(cfg.weixin.accounts, ['alice']);
+  assert.equal(cfg.channelGateway.enabled, true);
+  assert.equal(cfg.channelGateway.weixin, true);
   persistEnsureWeixinAccount(file, 'alice', rt);
   persistEnsureWeixinAccount(file, 'bob', rt);
   cfg = loadSharedConfig(file, rt).config;

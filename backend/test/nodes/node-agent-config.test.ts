@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { migrateConfig } from '@linkagent/shared/config';
-import { nodeAgentEntryId, resolveNodeAgentInfos } from '@linkagent/shared';
+import { nodeAgentEntryId, resolveNodeAcpLaunch, resolveNodeAgentInfos } from '@linkagent/shared';
 
 test('resolveNodeAgentInfos：从 node.agents 对象项合并 permissionMode', () => {
   const nodeAgents = [
@@ -25,6 +25,25 @@ test('resolveNodeAgentInfos：从 node.agents 对象项合并 permissionMode', (
 test('nodeAgentEntryId：字符串与对象项', () => {
   assert.equal(nodeAgentEntryId('Pi'), 'pi');
   assert.equal(nodeAgentEntryId({ id: 'cursor' }), 'cursor');
+});
+
+test('resolveNodeAcpLaunch：cursor 默认命令追加 --key', () => {
+  const launch = resolveNodeAcpLaunch(['agent', 'acp'], { id: 'cursor', key: 'ck-test' });
+  assert.deepEqual(launch.command, ['agent', 'acp', '--key', 'ck-test']);
+});
+
+test('resolveNodeAcpLaunch：自定义 command 且已含 --key 时不重复', () => {
+  const launch = resolveNodeAcpLaunch(['agent', 'acp'], {
+    id: 'cursor',
+    key: 'ignored',
+    command: ['agent', 'acp', '--key', 'from-cmd'],
+  });
+  assert.deepEqual(launch.command, ['agent', 'acp', '--key', 'from-cmd']);
+});
+
+test('resolveNodeAcpLaunch：合并 env', () => {
+  const launch = resolveNodeAcpLaunch(['agent', 'acp'], { id: 'cursor', env: { FOO: 'bar' } });
+  assert.deepEqual(launch.env, { FOO: 'bar' });
 });
 
 test('migrateConfig：node.agents 对象项含 permissionMode', () => {

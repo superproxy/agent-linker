@@ -6,7 +6,9 @@
  *                                           ⇄ SSE 解析 reasoning_content(思考) + content(正文)
  *                                           ⇄ ilink sendMessage 推回微信
  *
- * 多轮会话：sessionKey = "weixin:<from_user_id>" → 网关持久会话（有记忆），botAgent 无状态。
+ * 多轮会话与 /task 命令：全部由网关 /v1 的 decideTaskRouting 处理（adapter 不拦截、不查 /api/tasks）。
+ * sessionKey 由网关按「登录用户 + 渠道 + 终端用户 + 激活任务」派生；bot 只透传 channel / userId / ownerUsername。
+ * 鉴权：每个微信联系人一枚用户级 ct_ token（内嵌签发或 external 经 /api/bot/channel-token 换取）。
  *
  * 运行方式：
  *   1. 独立进程：pnpm --filter @linkagent/backend bot:weixin
@@ -25,9 +27,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getLayout } from '../install/layout.js';
-import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
+import { loadSharedConfig, resolveChildRuntime } from '../config/index.js';
 import { runChatSession, GatewayUnauthorizedError } from './gateway-chat.js';
-import { TaskRouter } from './task-router.js';
+import { emitChannelDispatchTrace, newDispatchTraceId } from '../store/dispatch-trace.js';
 import { HttpUserTokenProvider, type UserTokenProvider } from './user-token.js';
 import { loadBoundWeixinAccount } from './weixin-binding.js';
 import { ensureWeixinLoginStateDir } from './weixin-login-state.js';
@@ -190,17 +192,6 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
       ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: ownerUsername, log })
       : undefined);
 
-  // bot 路由层：选中任务缓存（网关 /api/tasks 为单一事实源），按用户携带用户级 token
-  const router = new TaskRouter({
-    gatewayUrl,
-    channel: 'weixin',
-    ownerUsername,
-    ...(gatewayToken ? { gatewayToken } : {}),
-    ...(tokenProvider
-      ? { resolveToken: (userId: string, force?: boolean) => tokenProvider.resolve('weixin', userId, force) }
-      : {}),
-  });
-
   const syncBufPathOf = (id: string) => join(stateDir, 'openclaw-weixin', 'accounts', `${id}.sync.json`);
 
   const loadSyncBuf = (): string => {
@@ -244,12 +235,18 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
       log(`[bot] 跳过无内容消息 from=${from}`);
       return;
     }
+    const traceId = newDispatchTraceId();
     log(`[bot] inbound from=${from} text="${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"`);
+    emitChannelDispatchTrace('channels.inbound', {
+      traceId,
+      source: 'weixin-bot',
+      channel: 'weixin',
+      userId: from,
+      owner: ownerUsername,
+      textLen: text.length,
+    });
     // 入站即更新该用户最新 context_token（供回推原样带回）
     setContextToken(stateDir, account.id, from, msg.context_token);
-
-    const isCmd = TaskRouter.isCommand(text);
-    const route = isCmd ? null : await router.active(from);
 
     // 该用户的网关凭据：优先用户级 token（ct_），无 provider 时回退全局静态 token
     const resolveBearer = async (force: boolean): Promise<string> => {
@@ -258,7 +255,16 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
           errLog('[bot] 解析用户 token 失败，回退静态 token:', err instanceof Error ? err.message : err);
           return '';
         });
-        if (t) return t;
+        if (t) {
+          emitChannelDispatchTrace('channels.token', {
+            traceId,
+            channel: 'weixin',
+            userId: from,
+            force,
+            ok: true,
+          });
+          return t;
+        }
       }
       return gatewayToken;
     };
@@ -285,9 +291,8 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
         userId: from,
         ownerUsername,
         message: text,
+        traceId,
         ...(bearer ? { gatewayToken: bearer } : {}),
-        // 命令：网关本地解析回文本；普通消息：按激活任务路由（agent/task 透传）
-        ...(!isCmd && route ? { agent: route.agent, task: route.task } : {}),
         send,
         split: (t) => splitChunks(t, MAX_MSG_LEN),
         // 快速返回：正文累计达到 512 字符即中断请求，用户只收到前 512 字符
@@ -308,11 +313,23 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
         throw err;
       }
     }
-    if (isCmd) router.invalidate(from); // 命令改过任务状态，失效缓存
     if (out.text.trim()) {
       log(`[bot] outbound to=${from} len=${out.text.length}`);
+      emitChannelDispatchTrace('channels.reply', {
+        traceId,
+        channel: 'weixin',
+        userId: from,
+        delivered: true,
+        replyChars: out.text.length,
+      });
     } else if (!out.reasoning.trim()) {
       log(`[bot] 网关无输出 from=${from}`);
+      emitChannelDispatchTrace('channels.reply', {
+        traceId,
+        channel: 'weixin',
+        userId: from,
+        delivered: false,
+      });
     }
   };
 

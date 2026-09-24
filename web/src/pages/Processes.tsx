@@ -478,6 +478,12 @@ export function ProcessesPage(props: { token: string }) {
         />
       </Col>
       <Col xs={24}>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="启用 channel-gateway（channels.yaml）后，本页会出现 channels 进程：个人微信与企微可在同一进程内运行；微信扫码绑定后请重启 channels。企微 / 飞书 OpenClaw 配置见「我的 · 企业微信」「我的 · 飞书」。"
+        />
         <ProcessTable client={client} />
       </Col>
       <Col xs={24}>

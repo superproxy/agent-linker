@@ -1,9 +1,15 @@
 import { resolve } from 'node:path';
 import type { AgentDefinition, SharedConfig } from '@linkagent/shared';
 import { nodeAgentEntryId, normalizeAgentId } from '@linkagent/shared';
-import { getLayout } from '../../install/layout.js';
-import { applyRuntimeOverlay, createGatewayRuntimeRepository, type GatewayRuntimeRepository } from '../store/runtime/index.js';
+import { getLayout } from '../install/layout.js';
+import {
+  applyRuntimeOverlay,
+  createGatewayRuntimeRepository,
+  type GatewayRuntimeRepository,
+} from '../gateway/store/runtime/index.js';
 import { yamlBaseFromPath } from './yaml.js';
+import { resolveConfigPaths } from './paths.js';
+import { persistWeixinChannelGatewaySetup } from './persist-weixin.js';
 
 const WEIXIN_ACCOUNT_ID_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -85,13 +91,32 @@ export function persistEnsureWeixinAccount(path: string, accountId: string, runt
   if (!effective.weixin.accounts.includes(id)) {
     throw new Error(`持久化校验失败：weixin.accounts 未包含 ${id}`);
   }
-  if (effective.weixin.mode !== 'external') {
-    throw new Error('持久化校验失败：weixin.mode 未更新为 external');
+  const mode = effective.weixin.mode;
+  if (mode !== 'external' && mode !== 'weixin-bot' && mode !== 'openclaw-weixin-plugin') {
+    throw new Error(`持久化校验失败：weixin.mode 非法 ${mode}`);
   }
   if (effective.weixin.enabled !== true) {
     throw new Error('持久化校验失败：weixin.enabled 未打开');
   }
+  if (resolveConfigPaths(path).mode === 'split') {
+    persistWeixinChannelGatewaySetup(path, {
+      enabled: true,
+      weixin: true,
+      weixinPlugin: mode === 'openclaw-weixin-plugin',
+    });
+  }
   return [...effective.weixin.accounts];
+}
+
+/** 已有 overlay 账号但 channels.yaml 未开时，补齐 channel-gateway（启动/ pm all 用）。 */
+export function persistEnsureWeixinChannelGateway(path: string, mode: string): void {
+  if (resolveConfigPaths(path).mode !== 'split') return;
+  const plugin = mode === 'openclaw-weixin-plugin';
+  persistWeixinChannelGatewaySetup(path, {
+    enabled: true,
+    weixin: true,
+    weixinPlugin: plugin,
+  });
 }
 
 /** 从运行时 KV 的 weixin.accounts 去掉账号 id。 */

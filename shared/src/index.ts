@@ -1,3 +1,4 @@
+export * from './channel-agent-dispatch.js';
 export * from './openai.js';
 export * from './adapter.js';
 export * from './config.js';

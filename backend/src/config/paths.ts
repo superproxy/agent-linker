@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { CONFIG_BASENAMES } from '@linkagent/shared';
-import { getLayout } from '../../install/layout.js';
+import { getLayout } from '../install/layout.js';
 
 export type ConfigLoadMode = 'split' | 'defaults';
 
@@ -13,6 +13,7 @@ export interface ResolvedConfigPaths {
   primaryPath: string;
   gatewayFile: string;
   weixinFile: string;
+  channelsFile: string;
   nodeFile: string;
 }
 
@@ -22,6 +23,7 @@ function filesInDir(dir: string): Omit<ResolvedConfigPaths, 'mode'> {
     primaryPath: join(dir, CONFIG_BASENAMES.gateway),
     gatewayFile: join(dir, CONFIG_BASENAMES.gateway),
     weixinFile: join(dir, CONFIG_BASENAMES.weixin),
+    channelsFile: join(dir, CONFIG_BASENAMES.channels),
     nodeFile: join(dir, CONFIG_BASENAMES.node),
   };
 }
@@ -40,7 +42,12 @@ function finalize(dir: string, mode: ConfigLoadMode, primaryOverride?: string): 
 function pathsFromExistingFile(file: string): ResolvedConfigPaths {
   const dir = dirname(file);
   const base = basename(file);
-  if (base === CONFIG_BASENAMES.gateway || base === CONFIG_BASENAMES.weixin || base === CONFIG_BASENAMES.node) {
+  if (
+    base === CONFIG_BASENAMES.gateway ||
+    base === CONFIG_BASENAMES.weixin ||
+    base === CONFIG_BASENAMES.channels ||
+    base === CONFIG_BASENAMES.node
+  ) {
     return finalize(dir, 'split', join(dir, CONFIG_BASENAMES.gateway));
   }
   const mode = modeForDir(dir);

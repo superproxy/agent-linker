@@ -15,10 +15,12 @@ function readYamlFile(path: string): unknown {
 function loadSplitYaml(paths: ResolvedConfigPaths): SharedConfig {
   const gatewayRaw = existsSync(paths.gatewayFile) ? readYamlFile(paths.gatewayFile) : undefined;
   const weixinRaw = existsSync(paths.weixinFile) ? readYamlFile(paths.weixinFile) : undefined;
+  const channelsRaw = existsSync(paths.channelsFile) ? readYamlFile(paths.channelsFile) : undefined;
   const nodeRaw = existsSync(paths.nodeFile) ? readYamlFile(paths.nodeFile) : undefined;
   return assembleSharedConfig({
     gateway: gatewayRaw !== undefined ? normalizeSectionDocument(gatewayRaw, 'gateway') : undefined,
     weixin: weixinRaw !== undefined ? normalizeSectionDocument(weixinRaw, 'weixin') : undefined,
+    channelGateway: channelsRaw !== undefined ? normalizeSectionDocument(channelsRaw, 'channelGateway') : undefined,
     node: nodeRaw !== undefined ? normalizeSectionDocument(nodeRaw, 'node') : undefined,
   });
 }

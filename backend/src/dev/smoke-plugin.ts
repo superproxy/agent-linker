@@ -11,13 +11,13 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createPluginRuntime, type RuntimeLogger } from '../gateway/plugins/runtime/core.js';
-import { createPluginApi, type PluginApiCollector } from '../gateway/plugins/runtime/api.js';
-import type { ChannelPluginHandle } from '../gateway/plugins/manager.js';
-import type { ChannelAgentDispatch } from '../gateway/plugins/runtime/channel/reply.js';
-import { resolveAgentRoute, buildAgentSessionKey } from '../gateway/plugins/runtime/channel/routing.js';
-import { chunkText } from '../gateway/plugins/runtime/channel/text.js';
-import { resolveCommandAuthorizedFromAuthorizers } from '../gateway/plugins/runtime/channel/commands.js';
+import { createPluginRuntime, type RuntimeLogger } from '../plugins/runtime/core.js';
+import { createPluginApi, type PluginApiCollector } from '../plugins/runtime/api.js';
+import type { ChannelPluginHandle } from '../plugins/manager.js';
+import type { ChannelAgentDispatch } from '@linkagent/shared';
+import { resolveAgentRoute, buildAgentSessionKey } from '../plugins/runtime/channel/routing.js';
+import { chunkText } from '../plugins/runtime/channel/text.js';
+import { resolveCommandAuthorizedFromAuthorizers } from '../plugins/runtime/channel/commands.js';
 
 const log: RuntimeLogger = {
   debug: (m) => console.log(`  [debug] ${m}`),

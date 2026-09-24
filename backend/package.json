@@ -15,6 +15,7 @@
     "weixin-login": "tsx src/dev/weixin-login.ts",
     "bot:weixin": "tsx src/channels/weixin-bot.ts",
     "bot:wecom": "tsx src/channels/wecom-bot.ts",
+    "channel-gateway": "tsx src/channels/channel-gateway.ts",
     "pm": "tsx src/supervisor/cli.ts",
     "pm:start": "tsx src/supervisor/cli.ts start",
     "pm:stop": "tsx src/supervisor/cli.ts stop",
@@ -23,13 +24,14 @@
     "pm:logs": "tsx src/supervisor/cli.ts logs",
     "pm:fg": "tsx src/supervisor/cli.ts foreground",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/channels/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts test/gateway/*.test.ts",
+    "test": "tsx --test test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/channels/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts test/gateway/*.test.ts test/store/*.test.ts test/plugins/*.test.ts",
     "test:watch": "tsx --test --watch test/tasks/*.test.ts test/agents/*.test.ts test/nodes/*.test.ts test/users/*.test.ts test/channels/*.test.ts test/supervisor/*.test.ts test/install/*.test.ts test/gateway/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@fastify/static": "^8.0.0",
     "@linkagent/shared": "workspace:*",
+    "@openclaw/feishu": "^2026.9.6",
     "@tencent-weixin/openclaw-weixin": "^2.4.8",
     "@wecom/aibot-node-sdk": "^1.0.6",
     "@wecom/wecom-openclaw-plugin": "^2026.8.17",

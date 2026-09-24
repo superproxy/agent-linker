@@ -39,6 +39,23 @@ test('普通消息 → chat，解析激活任务 agent+task，sessionKey 编码�
   assert.equal(d.sessionKey, 'weixin:wx_1:task:default');
 });
 
+test('企微 userId → chat 任务路由（不用 body.model agent:pi）', () => {
+  const svc = freshService();
+  svc.load('wecom', 'zhangsan');
+  const d = decideTaskRouting(svc, {
+    text: '你好',
+    channel: 'wecom',
+    userId: 'zhangsan',
+    model: 'agent:opencode',
+  });
+  assert.equal(d.kind, 'chat');
+  if (d.kind === 'chat') {
+    assert.equal(d.taskId, 'default');
+    assert.equal(d.agentId, 'pi');
+    assert.equal(d.sessionKey, 'wecom:zhangsan:task:default');
+  }
+});
+
 test('带 ownerUsername 的会话 key 前缀隔离；同 peer 不同 owner 不串文件', () => {
   const svc = freshService();
   const alice = svc.load('weixin', 'wx_same', 'alice');
@@ -589,6 +606,13 @@ test('PATCH /api/tasks/:taskId keyEnabled 停用/启用；by-key 反查带状态
   } finally {
     await app.close().catch(() => {});
   }
+});
+
+test('decideTaskRouting：feishu 渠道走任务路由（与 wecom 同白名单）', () => {
+  const svc = freshService();
+  const d = decideTaskRouting(svc, { text: '你好', channel: 'feishu', userId: 'ou_abc' });
+  assert.equal(d.kind, 'chat');
+  assert.equal(d.sessionKey, 'feishu:ou_abc:task:default');
 });
 
 test('userId 缺省 → 走 default 用户路由；微信渠道 model 不参与 agent 路由', () => {

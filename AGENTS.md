@@ -20,6 +20,7 @@ web 后台 (/ui, React)                        ──┘                   (open
 
 ```bash
 pnpm install
+pnpm setup:channels                   # 安装并校验企微/飞书 OpenClaw 插件（backend 依赖，一般 install 后执行一次）
 pnpm setup:pi                         # 可选：安装 pi / pi-acp 并生成 ~/.pi/agent 模型配置
 pnpm dev                              # 网关开发，缺省 0.0.0.0:8787
 pnpm typecheck                        # 全部包 tsc --noEmit
@@ -98,6 +99,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 | 文档 | 内容 |
 |---|---|
 | [`docs/features.md`](docs/features.md) | 产品功能特性总览（/v1、按机器路由、节点审批、微信渠道、后台、鉴权、运维） |
+| [`docs/channels.md`](docs/channels.md) | 个人微信 + 企微两套方案、channel-gateway 单进程、channels.yaml、后台企微配置 |
 | [`docs/architecture.md`](docs/architecture.md) | monorepo 结构、后端分层、鉴权与凭据模型 |
 | [`docs/faq.md`](docs/faq.md) | 常用命令、测试方法、TS/ESM 坑、错误与密钥处理、已知遗留 |
 | [`docs/design.md`](docs/design.md) / [`docs/deployment.md`](docs/deployment.md) | 设计记录 / 部署说明 |

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'n
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { AuthMode, SharedConfig } from '@linkagent/shared';
-import { getLayout } from '../../install/layout.js';
+import { getLayout } from '../install/layout.js';
 
 /** 生成一枚随机永久 token（不写入 yaml，落盘 .runtime-state/gateway-token） */
 export function generateGatewayToken(): string {

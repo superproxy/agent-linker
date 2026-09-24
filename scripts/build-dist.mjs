@@ -54,6 +54,7 @@ const FULL_EXTERNAL = [
   'ws',
   '@wecom/aibot-node-sdk',
   '@wecom/wecom-openclaw-plugin',
+  '@openclaw/feishu',
   '@tencent-weixin/openclaw-weixin',
 ];
 
@@ -111,7 +112,7 @@ function copySplitConfig(destDir, profile) {
     writeFileSync(join(destDir, 'node.yaml'), NODE_YAML);
     return;
   }
-  for (const name of ['gateway.yaml', 'weixin.yaml', 'node.yaml']) {
+  for (const name of ['gateway.yaml', 'weixin.yaml', 'channels.yaml', 'node.yaml']) {
     const live = join(REPO, 'backend', 'config', name);
     const template = join(REPO, 'backend', 'config', `${name}.template`);
     const src = existsSync(live) ? live : template;
@@ -128,6 +129,7 @@ function copyPiSetup(destRoot) {
   }
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
   cpSync(join(REPO, 'scripts', 'setup-pi.mjs'), join(destRoot, 'scripts', 'setup-pi.mjs'));
+  cpSync(join(REPO, 'scripts', 'setup-channels.mjs'), join(destRoot, 'scripts', 'setup-channels.mjs'));
 }
 
 /** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */
@@ -373,11 +375,12 @@ async function buildFull(dist, skipInstall) {
     runBin(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@linkagent/web', 'build'], REPO);
   });
 
-  step('3/6 esbuild 打包（gateway / weixin / node / pm 四入口）', async () => {
+  step('3/6 esbuild 打包（gateway / channels / weixin / node / pm 五入口）', async () => {
     const src = join(REPO, 'backend', 'src');
     await esbuildServerBundle(
       {
         gateway: join(src, 'gateway', 'index.ts'),
+        channels: join(src, 'channels', 'channel-gateway.ts'),
         weixin: join(src, 'channels', 'weixin-bot.ts'),
         node: join(src, 'node', 'connector.ts'),
         pm: join(src, 'supervisor', 'cli.ts'),
@@ -419,6 +422,7 @@ async function buildFull(dist, skipInstall) {
             logs: 'node server/pm.mjs logs',
             gateway: 'node server/gateway.mjs',
             'setup:pi': 'node scripts/setup-pi.mjs',
+            'setup:channels': 'node scripts/setup-channels.mjs',
           },
           dependencies: runtimeDependenciesFull(),
         },

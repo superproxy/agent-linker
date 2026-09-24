@@ -27,6 +27,7 @@ test('dev 形态：无 marker 时 kind=dev，配置/入口/页面走 backend 源
   assert.ok(layout.entry('gateway').endsWith(join('backend', 'src', 'gateway', 'index.ts')));
   assert.ok(layout.entry('weixin').endsWith(join('backend', 'src', 'channels', 'weixin-bot.ts')));
   assert.ok(layout.entry('node').endsWith(join('backend', 'src', 'node', 'connector.ts')));
+  assert.ok(layout.entry('channels').endsWith(join('backend', 'src', 'channels', 'channel-gateway.ts')));
   // 内置页面随代码走（src/dev），与传入的临时 root 无关
   assert.equal(layout.page('chat'), join(srcDevDir, 'chat.html'));
   assert.ok(existsSync(layout.page('chat')));
@@ -47,6 +48,7 @@ test('dist 形态：有 .linkagent-root 时 kind=dist，配置/入口/页面走�
   assert.ok(layout.entry('gateway').endsWith(join('server', 'gateway.mjs')));
   assert.ok(layout.entry('weixin').endsWith(join('server', 'weixin.mjs')));
   assert.ok(layout.entry('node').endsWith(join('server', 'node.mjs')));
+  assert.ok(layout.entry('channels').endsWith(join('server', 'channels.mjs')));
   // 页面随代码走，dist 形态下仍解析到 bundle 旁的 dev 目录（此处仅校验命名规则）
   assert.ok(layout.page('chat').endsWith(join('dev', 'chat.html')));
   // dist 态无 pnpm，只引导后台；重启提示走 start 脚本

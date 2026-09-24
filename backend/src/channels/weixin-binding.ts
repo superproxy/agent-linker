@@ -6,7 +6,7 @@
  * 绑定只记录「登录用户名 → 机器人文件 id」。一个登录用户一份绑定、一个机器人只属于一个登录用户。
  * 每个已绑定用户由进程管理器单独拉起 weixin:<用户名>，进程用这份绑定去读对应的机器人文件。
  */
-import { createKvJsonStore } from '../gateway/store/kv.js';
+import { createKvJsonStore } from '../store/kv.js';
 import { loadWeixinAccount, type WeixinAccount } from './ilink-client.js';
 import { join } from 'node:path';
 
@@ -48,6 +48,11 @@ export function readWeixinBinding(stateDir: string, username: string): WeixinUse
   const hit = bindingsStore(stateDir).get(id);
   if (!hit || hit.username !== id || !USER_ID_RE.test(hit.botAccountId)) return null;
   return hit;
+}
+
+/** 登录用户是否已完成微信扫码绑定（channel-gateway 跳过未绑定账号，避免拖垮企微等同进程渠道） */
+export function isWeixinUserBound(stateDir: string, username: string): boolean {
+  return readWeixinBinding(stateDir, username) !== null;
 }
 
 export type ClaimBindingResult = 'ok' | 'missing' | 'taken' | 'invalid';

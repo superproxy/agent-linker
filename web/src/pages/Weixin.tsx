@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Row, Space, Spin, Steps, Tag } from 'antd';
-import { QrcodeOutlined, ReloadOutlined } from '@ant-design/icons';
-import { WeixinClient, type WeixinStatus } from '../api';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Row, Space, Spin, Steps, Switch, Tag, Typography } from 'antd';
+import { CloudServerOutlined, QrcodeOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PmClient, WeixinChannelConfigClient, WeixinClient, type WeixinChannelConfig, type WeixinStatus } from '../api';
+import { processApiBase } from '../lib/constants';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 
@@ -14,8 +15,18 @@ export function WeixinPage(props: {
   isAdmin?: boolean;
 }) {
   const wx = useMemo(() => new WeixinClient(props.base, () => props.token), [props.base, props.token]);
+  const apiBase = processApiBase();
+  const wxCg = useMemo(
+    () => (props.isAdmin ? new WeixinChannelConfigClient(apiBase, () => props.token) : null),
+    [apiBase, props.token, props.isAdmin],
+  );
+  const pm = useMemo(() => (props.isAdmin ? new PmClient(apiBase, () => props.token) : null), [apiBase, props.token, props.isAdmin]);
   const { tick } = useRefreshTick();
   const [status, setStatus] = useState<WeixinStatus | null>(null);
+  const [cgCfg, setCgCfg] = useState<WeixinChannelConfig | null>(null);
+  const [cgBusy, setCgBusy] = useState(false);
+  const [usePlugin, setUsePlugin] = useState(false);
+  const [cgEnabled, setCgEnabled] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -34,8 +45,18 @@ export function WeixinPage(props: {
       setErr(e instanceof Error ? e.message : String(e));
       props.onStatus?.(null);
     }
+    if (wxCg) {
+      try {
+        const c = await wxCg.get();
+        setCgCfg(c);
+        setUsePlugin(c.channelGateway.weixinPlugin);
+        setCgEnabled(c.channelGateway.enabled);
+      } catch {
+        /* 非管理员或 channels 未配置时忽略 */
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wx, tick]);
+  }, [wx, wxCg, tick]);
 
   useEffect(() => {
     void refresh();
@@ -57,7 +78,7 @@ export function WeixinPage(props: {
         return;
       }
       setQr(r.qrDataUrl);
-      setMsg({ type: 'info', text: slot ? `请扫码绑定账号槽 ${slot}（将启动进程 weixin:${slot}）` : '请用手机微信扫一扫完成绑定' });
+      setMsg({ type: 'info', text: slot ? `请扫码绑定账号槽 ${slot}（绑定后将重启 channels 进程）` : '请用手机微信扫一扫完成绑定' });
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
@@ -82,7 +103,7 @@ export function WeixinPage(props: {
               ? `已扫码（账号 ${st.accountId ?? slot ?? ''}）。${st.boundWarning}`
               : st.alreadyBound
                 ? st.message || '这个微信机器人已经绑定过，沿用本机登录态。'
-                : `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试拉起进程 weixin:${st.accountId ?? slot ?? ''}。`,
+                : `绑定成功：账号 ${st.accountId ?? slot ?? ''}。已尝试重启 channels 进程。`,
           });
           await refresh();
         } else {
@@ -148,13 +169,111 @@ export function WeixinPage(props: {
     }
   };
 
+  const startPluginWeixin = async (restart = true) => {
+    if (!wxCg) return;
+    setCgBusy(true);
+    try {
+      await wxCg.save({
+        channelGateway: {
+          enabled: true,
+          weixin: true,
+          weixinPlugin: usePlugin,
+        },
+        restart,
+        startOnly: !restart,
+      });
+      notify.success(restart ? '已保存并重启 channels（插件微信）' : '已启动 channels');
+      await refresh();
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCgBusy(false);
+    }
+  };
+
+  const pmAct = async (op: 'start' | 'restart' | 'stop') => {
+    if (!pm) return;
+    setCgBusy(true);
+    try {
+      if (op === 'start') await pm.start(['channels']);
+      else if (op === 'stop') await pm.stop(['channels']);
+      else await pm.restart(['channels']);
+      await refresh();
+      notify.success('操作完成');
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCgBusy(false);
+    }
+  };
+
   const slot = status?.bindAccountId || props.username || '';
   const bound = !!status?.configured;
-  const running = !!status?.processRunning;
+  const channelsRunning = cgCfg?.status.channelsRunning ?? false;
+  const channelGatewayOn = cgCfg?.status.channelGatewayEnabled ?? false;
+  const running = channelGatewayOn ? channelsRunning : !!status?.processRunning;
   const stepCurrent = !slot ? 0 : !bound ? 1 : 2;
 
   return (
     <Row gutter={[16, 16]}>
+      {props.isAdmin && wxCg ? (
+        <Col xs={24}>
+          <Card
+            title={
+              <Space>
+                <CloudServerOutlined />
+                <span>插件微信 · channel-gateway</span>
+                {channelsRunning ? <Tag color="success">channels 运行中</Tag> : <Tag>channels 已停止</Tag>}
+              </Space>
+            }
+            style={{ marginBottom: 0 }}
+          >
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+              在 channels 进程内托管个人微信：默认 <code>weixin-bot</code>（ilink）；开启「OpenClaw 插件收发」则加载{' '}
+              <code>@tencent-weixin/openclaw-weixin</code>（需先在本页扫码绑定，并执行 <code>pnpm setup:channels</code>）。
+            </Typography.Paragraph>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap>
+                <span>启用 channel-gateway</span>
+                <Switch checked={cgEnabled} onChange={setCgEnabled} disabled={cgBusy} />
+                <span style={{ marginLeft: 16 }}>OpenClaw 插件收发</span>
+                <Switch checked={usePlugin} onChange={setUsePlugin} disabled={cgBusy} />
+              </Space>
+              <Space wrap>
+                <Button
+                  type="primary"
+                  loading={cgBusy}
+                  onClick={() =>
+                    void wxCg
+                      .save({
+                        channelGateway: { enabled: cgEnabled, weixin: true, weixinPlugin: usePlugin },
+                        restart: true,
+                      })
+                      .then(() => refresh())
+                      .then(() => notify.success('已保存'))
+                      .catch((e) => notify.error(e instanceof Error ? e.message : String(e)))
+                      .finally(() => setCgBusy(false))
+                  }
+                >
+                  保存并重启 channels
+                </Button>
+                <Button loading={cgBusy} disabled={!usePlugin && !cgEnabled} onClick={() => void startPluginWeixin(true)}>
+                  启动插件微信
+                </Button>
+                <Button disabled={cgBusy || channelsRunning} onClick={() => void pmAct('start')}>
+                  启动 channels
+                </Button>
+                <Button icon={<ReloadOutlined />} disabled={cgBusy || !channelsRunning} onClick={() => void pmAct('restart')}>
+                  重启 channels
+                </Button>
+                <Button danger disabled={cgBusy || !channelsRunning} onClick={() => void pmAct('stop')}>
+                  停止 channels
+                </Button>
+              </Space>
+            </Space>
+          </Card>
+        </Col>
+      ) : null}
       <Col xs={24} lg={14}>
         <Card
           bordered
@@ -191,7 +310,7 @@ export function WeixinPage(props: {
             type="info"
             showIcon
             style={{ marginBottom: 14 }}
-            message="微信进程按登录账号维护：注册或登录 → 本页扫码绑定 → 自动重启对应 weixin:<用户名>。pnpm restart:all 只拉起已绑定账号的实例。"
+            message="个人微信统一由 channel-gateway（channels 进程）托管：扫码绑定后会写入 channels.yaml 并重启 channels。收发可选 weixin-bot（ilink）或 OpenClaw 插件（见上方卡片）。"
           />
 
           <Descriptions

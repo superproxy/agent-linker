@@ -27,6 +27,8 @@ import { MyTokenPage } from './pages/MyToken';
 import { NodeKeyPage } from './pages/NodeKey';
 import { NodesPage } from './pages/Nodes';
 import { WeixinPage } from './pages/Weixin';
+import { WecomPage } from './pages/Wecom';
+import { FeishuPage } from './pages/Feishu';
 import { AccountsPage } from './pages/Accounts';
 import { LocalGatewayPage, RemoteGatewayPage } from './pages/Settings';
 import { ProcessesPage } from './pages/Processes';
@@ -283,6 +285,10 @@ function PageRouter(props: {
       );
     case 'weixin':
       return <WeixinPage base={base} token={token} onAuthError={onAuthError} username={username} isAdmin={isAdmin} />;
+    case 'wecom':
+      return isAdmin ? <WecomPage token={token} onAuthError={onAuthError} /> : null;
+    case 'feishu':
+      return isAdmin ? <FeishuPage token={token} onAuthError={onAuthError} /> : null;
     case 'accounts':
       return isAdmin ? <AccountsPage base={base} token={token} onAuthError={onAuthError} /> : null;
     case 'processes':

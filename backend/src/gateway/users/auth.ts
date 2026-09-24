@@ -22,7 +22,7 @@ export type AuthState =
   | { status: 'session'; user: UserRecord }
   | { status: 'personal'; user: UserRecord }
   | { status: 'task'; channel: string; userId: string; taskId: string; taskKey: string; ownerUsername?: string }
-  | { status: 'channelUser'; channel: string; userId: string }
+  | { status: 'channelUser'; channel: string; userId: string; ownerUsername?: string }
   | { status: 'none' };
 
 type HeaderCarrier = {
@@ -139,7 +139,12 @@ export class AuthGuard {
       const channelRec = this.opts.channelTokens?.resolve(token);
       if (channelRec) {
         this.opts.channelTokens?.touch(token);
-        return { status: 'channelUser', channel: channelRec.channel, userId: channelRec.userId };
+        return {
+          status: 'channelUser',
+          channel: channelRec.channel,
+          userId: channelRec.userId,
+          ...(channelRec.ownerUsername ? { ownerUsername: channelRec.ownerUsername } : {}),
+        };
       }
     }
 

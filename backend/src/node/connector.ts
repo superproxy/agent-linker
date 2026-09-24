@@ -5,10 +5,13 @@ import WebSocket from 'ws';
 import type { GatewayToNode, NodeAgentInfo, NodeToGateway, NodeTurnEvent } from '@linkagent/shared';
 import {
   defaultAgentDefinitions,
+  findNodeAgentEntry,
   nodeAgentEntryId,
   normalizeAgentId,
+  resolveNodeAcpLaunch,
   resolveNodeAgentInfos,
 } from '@linkagent/shared';
+import type { NodeAgentListItem } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import {
@@ -61,6 +64,8 @@ interface ConnectorOptions {
   claimToken?: string;
   /** hello 自报清单（含 config node.agents 解析出的权限） */
   agents: NodeAgentInfo[];
+  /** node.agents 原始配置（含 key/command，仅本机 spawn，不经 hello 上报） */
+  nodeAgentConfigs: NodeAgentListItem[];
   stateDir: string;
 }
 
@@ -260,23 +265,25 @@ class NodeConnector {
     let engine = this.engines.get(agentId);
     if (!engine) {
       const kind = resolveAcpKindForAgentId(agentId);
-      const cmd = DEFAULT_COMMANDS[kind].join(' ');
       if (kind !== agentId.trim()) {
         console.warn(
           `[node] agentId "${agentId}" 未注册为 ACP 类型，启动命令回退 opencode（${DEFAULT_COMMANDS.opencode.join(' ')}）`,
         );
-      } else {
-        console.log(`[node] engine init agentId=${agentId} command=${cmd}`);
       }
       const meta = this.opts.agents.find((a) => normalizeAgentId(a.id) === normalizeAgentId(agentId));
+      const entry = findNodeAgentEntry(this.opts.nodeAgentConfigs, agentId);
+      const launch = resolveNodeAcpLaunch(DEFAULT_COMMANDS[kind], entry);
+      console.log(`[node] engine init agentId=${agentId} command=${launch.command.join(' ')}`);
       engine = new AcpEngine({
         id: agentId,
         agentName: kind,
         stateDir: join(this.opts.stateDir, 'acpx', agentId),
+        command: launch.command,
         verbose: this.verbose,
         skipProbe: true,
         ...(meta?.permissionMode ? { permissionMode: meta.permissionMode } : {}),
         ...(meta?.permissionPolicy ? { permissionPolicy: meta.permissionPolicy } : {}),
+        ...(launch.env ? { env: launch.env } : {}),
       });
       this.engines.set(agentId, engine);
     }
@@ -411,6 +418,7 @@ function main(): void {
     // 配置了网关令牌时无需 secret；否则读取审批模式持久化的节点凭证
     ...(token ? {} : { secret: loadPersistedSecret(stateDir) }),
     agents,
+    nodeAgentConfigs: config.node.agents,
     stateDir,
   });
   connector.start();

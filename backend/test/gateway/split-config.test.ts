@@ -13,6 +13,10 @@ test('loadSharedConfig：split 三文件合并为有效配置', () => {
   );
   writeFileSync(join(dir, 'weixin.yaml'), 'enabled: true\nmode: external\nmodel: agent:pi\n');
   writeFileSync(join(dir, 'node.yaml'), 'enabled: true\nagents:\n  - codex\n');
+  writeFileSync(
+    join(dir, 'channels.yaml'),
+    'channelGateway:\n  enabled: true\n  channels:\n    wecom:\n      botId: b1\n      secret: s1\n  plugins:\n    - package: "@wecom/wecom-openclaw-plugin"\n',
+  );
 
   const rt = join(dir, 'rt');
   const loaded = loadSharedConfig(join(dir, 'gateway.yaml'), rt);
@@ -24,4 +28,8 @@ test('loadSharedConfig：split 三文件合并为有效配置', () => {
     loaded.config.node.agents.map((a) => (typeof a === 'string' ? a : a.id)),
     ['codex'],
   );
+  assert.equal(loaded.config.channelGateway.enabled, true);
+  const wecom = loaded.config.channelGateway.channels.wecom as { botId?: string };
+  assert.equal(wecom.botId, 'b1');
+  assert.equal(loaded.config.channelGateway.plugins[0]?.package, '@wecom/wecom-openclaw-plugin');
 });

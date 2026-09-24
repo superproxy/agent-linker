@@ -1,0 +1,32 @@
+# channel-gateway 进程配置（与 gateway.yaml / weixin.yaml / node.yaml 同目录）
+# enabled=true 时：pm 拉起 channels 进程（微信 + 企微插件 + 可选飞书），gateway 不再内嵌 bot/插件。
+
+channelGateway:
+  enabled: false
+  # 仅 exposePluginRoutes=true（Webhook）时使用 server 端口；默认无 HTTP 服务
+  server:
+    host: 127.0.0.1
+    port: 8790
+  http:
+    exposePluginRoutes: false
+    pushStatusToGateway: true
+    pushIntervalSec: 30
+  gatewayUrl: ""
+  gatewayToken: ""
+  model: agent:pi
+  weixin: true
+  wecom: true
+  # 飞书：先 pnpm add @openclaw/feishu（或 @larksuite/openclaw-lark），再启用并填写 channels.feishu
+  feishu: false
+  feishuPluginPackage: "@openclaw/feishu"
+  # OpenClaw 企微（botId/secret 等）；后台「企业微信」页写入，勿放 gateway.yaml
+  channels:
+    wecom:
+      enabled: false
+      # websocket：官方「应用内授权」长连接 wss://openws.work.weixin.qq.com（推荐）
+      connectionMode: websocket
+      botId: ""
+      secret: ""
+  plugins:
+    - package: "@wecom/wecom-openclaw-plugin"
+    # - package: "@openclaw/feishu"

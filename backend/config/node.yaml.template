@@ -8,4 +8,5 @@ agents:
   - trace-cli
   - id: cursor
     permissionMode: approve-all
+    # key: <Cursor API key>   # 启动：agent acp --key <key>（也可写 command: [agent, acp, --key, ...]）
   - hermes

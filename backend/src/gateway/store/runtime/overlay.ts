@@ -81,5 +81,5 @@ export function applyRuntimeOverlay(base: SharedConfig, overlay: GatewayRuntimeO
     if (n.gatewayToken !== undefined) node = { ...node, gatewayToken: n.gatewayToken };
   }
 
-  return { gateway, weixin, node };
+  return { gateway, weixin, channelGateway: base.channelGateway, node };
 }

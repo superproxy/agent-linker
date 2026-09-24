@@ -8,6 +8,7 @@
 
 ```bash
 pnpm install
+pnpm setup:channels # 校验企微/飞书 OpenClaw 插件（backend 已声明依赖；channel-gateway 前建议跑一次）
 pnpm dev            # 网关开发（tsx watch，改代码自动重启），缺省 0.0.0.0:8787
 pnpm start          # 前台运行
 pnpm typecheck      # 对所有 workspace 包跑 tsc --noEmit

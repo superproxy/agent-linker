@@ -1,3 +1,5 @@
+import { emitChannelDispatchTrace } from '../store/dispatch-trace.js';
+
 /**
  * 渠道 botAgent 共享的网关会话逻辑（方案 B）。
  *
@@ -43,6 +45,8 @@ export interface StreamChatParams {
   message: string;
   /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
   gatewayToken?: string;
+  /** 与 channels / gateway 日志对齐，经 X-LinkAgent-Trace-Id 透传 */
+  traceId?: string;
   signal?: AbortSignal;
   onReasoning?: (delta: string) => void;
   onText?: (delta: string) => void;
@@ -55,6 +59,7 @@ export async function streamChat(params: StreamChatParams): Promise<StreamOutput
     headers: {
       'Content-Type': 'application/json',
       ...(params.gatewayToken ? { Authorization: `Bearer ${params.gatewayToken}` } : {}),
+      ...(params.traceId ? { 'X-LinkAgent-Trace-Id': params.traceId } : {}),
     },
     body: JSON.stringify({
       model: params.model,
@@ -151,6 +156,7 @@ export interface RunChatSessionOptions {
   message: string;
   /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
   gatewayToken?: string;
+  traceId?: string;
   /** 底层发送一条消息（已切块）。重试由本模块处理 */
   send: (chunk: string) => Promise<void>;
   /** 切块策略：返回分段（微信按字符，企微按字节） */
@@ -180,14 +186,19 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
   let reasoningFlushed = false;
   let flushTimer: ReturnType<typeof setInterval> | null = null;
 
+  let sendChunks = 0;
+  const deliverChunk = async (chunk: string): Promise<void> => {
+    sendChunks += 1;
+    await send(chunk);
+  };
   const pushChunks = async (text: string): Promise<void> => {
     for (const chunk of split(text)) {
       try {
-        await send(chunk);
+        await deliverChunk(chunk);
       } catch (err) {
         log('[chat] send 失败（重试一次）:', err instanceof Error ? err.message : err);
         await new Promise((r) => setTimeout(r, SEND_RETRY_MS));
-        await send(chunk);
+        await deliverChunk(chunk);
       }
     }
   };
@@ -215,6 +226,15 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
   let truncated = false;
   let receivedText = '';
   try {
+    if (opts.traceId) {
+      emitChannelDispatchTrace('channels.v1.request', {
+        traceId: opts.traceId,
+        channel: opts.channel,
+        userId: opts.userId,
+        owner: opts.ownerUsername,
+        source: 'weixin-bot',
+      });
+    }
     let textReceived = false;
     const out = await streamChat({
       gatewayUrl,
@@ -227,6 +247,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       ...(opts.agent ? { agent: opts.agent } : {}),
       ...(opts.task ? { task: opts.task } : {}),
       ...(opts.ownerUsername ? { ownerUsername: opts.ownerUsername } : {}),
+      ...(opts.traceId ? { traceId: opts.traceId } : {}),
       signal: controller.signal,
       onReasoning: (d) => {
         reasoning += d;
@@ -250,6 +271,14 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       const capped = opts.maxTextChars ? out.text.trim().slice(0, opts.maxTextChars) : out.text.trim();
       await pushChunks(capped);
     }
+    if (opts.traceId) {
+      emitChannelDispatchTrace('channels.v1.response', {
+        traceId: opts.traceId,
+        ok: true,
+        replyChars: out.text.length,
+        sendChunks,
+      });
+    }
     return { text: opts.maxTextChars ? out.text.trim().slice(0, opts.maxTextChars) : out.text, reasoning: out.reasoning };
   } catch (err) {
     // 401（用户级 token 失效）直接上抛：由 bot 强制刷新 token 后重试一次，不向用户推 ⚠️
@@ -263,6 +292,9 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       return { text: capped, reasoning };
     }
     const errMsg = err instanceof Error ? err.message : String(err);
+    if (opts.traceId) {
+      emitChannelDispatchTrace('channels.v1.fail', { traceId: opts.traceId, error: errMsg });
+    }
     log('[chat] 处理失败:', errMsg);
     await pushChunks(`⚠️ 处理失败：${errMsg.slice(0, 500)}`).catch(() => {});
     return { text: '', reasoning };

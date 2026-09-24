@@ -21,7 +21,7 @@ import {
   type ProcessInstanceId,
 } from './manager.js';
 
-const USAGE = `用法: linkagent-pm <start|stop|restart|status|logs|foreground> [all|gateway|weixin|weixin:<accountId>|node]`;
+const USAGE = `用法: linkagent-pm <start|stop|restart|status|logs|foreground> [all|gateway|channels|weixin|weixin:<accountId>|node]`;
 
 /** 跨平台 tail -f：先打印文件末尾，再 watch 增量（零依赖） */
 function followLogs(pm: ProcessManager, ids: ProcessInstanceId[]): void {

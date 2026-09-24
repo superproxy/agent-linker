@@ -10,12 +10,13 @@
  * 5. agent 派发桥：core.channel.reply.dispatch → AgentManager → AcpWrapper（持久会话）
  */
 import type { FastifyInstance } from 'fastify';
-import { getLayout } from '../../install/layout.js';
-import type { AgentManager } from '../agents/manager.js';
+import { getLayout } from '../install/layout.js';
+import type { AgentManager } from '../gateway/agents/manager.js';
 import { createPluginRuntime, type PluginRuntime, type RuntimeLogger } from './runtime/core.js';
 import { createPluginApi, type OpenClawPluginApi, type PluginApiCollector, type PluginChannelRegistration } from './runtime/api.js';
 import { attachHttpRoutes } from './runtime/http.js';
 import type { ChannelAgentDispatch } from './runtime/channel/reply.js';
+import { mergePluginAccountStatus, type PluginAccountStatus } from './account-status.js';
 
 /** pino（Fastify logger）duck-type */
 export interface Logger {
@@ -63,27 +64,30 @@ export interface PluginPackageEntry {
 }
 
 export interface PluginManagerOptions {
-  manager: AgentManager;
+  /** 缺省派发用；channel-gateway 仅注入 agentDispatch 时可省略 */
+  manager?: AgentManager;
   /** gateway 配置（channels 透传给插件） */
   config: Record<string, unknown>;
   stateDir: string;
   logger: Logger;
   /** writeConfigFile 持久化回调；缺省仅内存 */
   persistConfig?: (next: Record<string, unknown>) => boolean | Promise<boolean>;
+  /** 覆盖默认 AgentManager 派发（channel-gateway 使用 /v1 SSE） */
+  agentDispatch?: ChannelAgentDispatch;
+  /** 是否挂载插件 HTTP（webhook）；false 时仅 WS/出站，不对外开回调路由 */
+  attachHttpRoutes?: boolean;
 }
 
-export interface AccountStatus {
-  running: boolean;
-  lastError: string | null;
-  lastStartAt: number | null;
-}
+export type AccountStatus = PluginAccountStatus;
 
 export class PluginManager {
-  private readonly manager: AgentManager;
+  private readonly manager: AgentManager | undefined;
   private readonly config: Record<string, unknown>;
   private readonly stateDir: string;
   private readonly logger: Logger;
   private readonly persistConfig?: (next: Record<string, unknown>) => boolean | Promise<boolean>;
+  private readonly agentDispatchOverride?: ChannelAgentDispatch;
+  private readonly attachHttpRoutes: boolean;
   private runtime: PluginRuntime | null = null;
   private api: OpenClawPluginApi | null = null;
   private channelHandles = new Map<string, ChannelPluginHandle>();
@@ -97,6 +101,8 @@ export class PluginManager {
     this.stateDir = options.stateDir;
     this.logger = options.logger;
     this.persistConfig = options.persistConfig;
+    this.agentDispatchOverride = options.agentDispatch;
+    this.attachHttpRoutes = options.attachHttpRoutes !== false;
   }
 
   get accountStatus(): ReadonlyMap<string, AccountStatus> {
@@ -139,6 +145,11 @@ export class PluginManager {
   /** agent 派发桥：dispatch → AgentManager → AcpWrapper（sessionKey 持久会话） */
   private createAgentDispatch(): ChannelAgentDispatch {
     const manager = this.manager;
+    if (!manager) {
+      throw new Error(
+        'PluginManager 未配置 AgentManager 且无 agentDispatch 覆盖；channel-gateway 进程应传入 agentDispatch',
+      );
+    }
     return {
       async chat({ agentId, sessionKey, accountId, text, attachments }, cb) {
         const adapter = manager.resolve(agentId);
@@ -181,7 +192,7 @@ export class PluginManager {
     }
   }
 
-  async start(app: FastifyInstance): Promise<void> {
+  async start(app?: FastifyInstance): Promise<void> {
     if (this.started) return;
     const pluginPackages = this.resolvePluginPackages();
 
@@ -191,7 +202,7 @@ export class PluginManager {
       stateDir: this.stateDir,
       config: pluginConfig,
       logger: this.runtimeLogger(),
-      agentDispatch: this.createAgentDispatch(),
+      agentDispatch: this.agentDispatchOverride ?? this.createAgentDispatch(),
       persistConfig: this.persistConfig,
     });
     this.runtime = runtime;
@@ -238,10 +249,18 @@ export class PluginManager {
       await this.startChannelAccounts(channelId, channelPlugin, runtime);
     }
 
-    // 挂载 HTTP 路由
     if (collector.httpRoutes.length > 0) {
-      attachHttpRoutes(app, collector.httpRoutes);
-      this.logger.info(`[plugins] 已挂载 ${collector.httpRoutes.length} 条插件 HTTP 路由`);
+      if (this.attachHttpRoutes) {
+        if (!app) {
+          throw new Error('挂载插件 HTTP 路由需要 Fastify 实例');
+        }
+        attachHttpRoutes(app, collector.httpRoutes);
+        this.logger.info(`[plugins] 已挂载 ${collector.httpRoutes.length} 条插件 HTTP 路由`);
+      } else {
+        this.logger.info(
+          `[plugins] exposePluginRoutes=false，跳过 ${collector.httpRoutes.length} 条 HTTP 路由（WebSocket/推送到 gateway）`,
+        );
+      }
     }
 
     this.started = true;
@@ -272,11 +291,7 @@ export class PluginManager {
       this.abortControllers.push(abortController);
       const statusKey = `${channelId}:${accountId}`;
       const setStatus = (status: Record<string, unknown>): void => {
-        this.accountStatuses.set(statusKey, {
-          running: status.running === true,
-          lastError: (status.lastError as string | null) ?? null,
-          lastStartAt: (status.lastStartAt as number | null) ?? Date.now(),
-        });
+        this.accountStatuses.set(statusKey, mergePluginAccountStatus(this.accountStatuses.get(statusKey), status));
       };
       const log = this.runtimeLogger();
       const start = channelPlugin.gateway.startAccount({
@@ -294,6 +309,8 @@ export class PluginManager {
         this.logger.error(`[plugins] ${channelId}[${accountId}] startAccount 失败: ${err instanceof Error ? err.message : String(err)}`);
         setStatus({ running: false, lastError: err instanceof Error ? err.message : String(err) });
       });
+      // 企微 WS 路径认证成功不会 setStatus(running:true)（仅 webhook 会），先登记账号避免运行态 pluginAccounts 为空
+      setStatus({ running: true, lastError: null, lastStartAt: Date.now() });
       this.logger.info(`[plugins] ${channelId}[${accountId}] startAccount 已发起（abort 可停止）`);
     }
   }

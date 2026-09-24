@@ -19,7 +19,7 @@
   - `agents/` agent/ACP 引擎管理；`nodes/` 节点注册与审批；`tasks/` 多任务路由（api→service→store）；
   - `users/` 登录账号、会话、`AuthGuard`、渠道用户凭据（`ct_`）、个人 API token（`pat_`）、机器 token（`nt_`）；
   - `plugins/` 渠道插件运行时；`pm/` 进程管理；`prefs/` 用户偏好；`store/` 通用 KV（原子写/损坏隔离）。
-- `channels/` —— 独立 botAgent：`weixin-bot.ts`、`wecom-bot.ts`。
+- `channels/` —— 渠道侧：`channel-gateway.ts`（统一进程）、`weixin-bot.ts`、`wecom-bot.ts`、`v1-agent-dispatch.ts`。
 - `node/connector.ts` —— 节点连接器（WebSocket 接入网关）。
 - `supervisor/` —— 多进程守护（`cli.ts` 提供 `pm:*` 命令）。
 - `install/` —— 安装/布局；`dev/` —— 探针与冒烟脚本（probe / smoke-plugin 等）。
@@ -31,7 +31,7 @@
 - 单向分层：`api → service → store`，不要反向依赖或跨层。
 - 鉴权统一走 `users/auth.ts` 的 `AuthGuard`，不要在 handler 内另写凭据判断。
 - 持久化优先复用 `gateway/store/` 的通用 KV（JSON 原子写、损坏隔离），落盘到 `.runtime-state/`；不要新造裸文件读写。
-- **启动前 vs 运行时配置**：启动前 yaml 推荐 **按进程拆分**：同目录 `gateway.yaml`（网关）、`weixin.yaml`（微信）、`node.yaml`（节点连接器）；存在 `gateway.yaml` 时优先于旧版单文件 `config.yaml`。运行时 API 改动（agent 启停、默认任务 agent、微信账号、子进程回连网关等）走 **运行时层**（`gateway/store/runtime/` + overlay/SQLite 预留），不改上述 yaml。
+- **启动前 vs 运行时配置**：启动前 yaml 推荐 **按进程拆分**：同目录 `gateway.yaml`（网关）、`weixin.yaml`（微信）、`channels.yaml`（channel-gateway：企微 OpenClaw 等）、`node.yaml`（节点连接器）；存在 `gateway.yaml` 时优先于旧版单文件 `config.yaml`。运行时 API 改动（agent 启停、默认任务 agent、微信账号、子进程回连网关等）走 **运行时层**（`gateway/store/runtime/` + overlay/SQLite 预留），不改上述 yaml 中的启动模板（企微静态配置由 `channels.yaml` + 后台 `/api/channels/wecom` 维护）。
 - 前后端共享契约放 `shared/src`，经 `@linkagent/shared` 引用，不要两端重复定义。
 
 ## 鉴权与凭据模型（改动时务必对齐）
@@ -50,5 +50,8 @@
 
 ## 其他设计文档
 
+- `docs/channels.md` —— 渠道总览（两套方案、单进程、配置、后台、迁移）。
+- `docs/channel-gateway.md` —— channel-gateway 进程细节。
+- `docs/channel-gateway-integration.md` —— 薄 adapter 对接网关（`ct_`、任务路由）。
 - `docs/design.md` —— 设计记录。
 - `docs/deployment.md` —— 部署说明。

@@ -176,13 +176,15 @@ export interface WeixinLoginDeps {
   log?: (...args: unknown[]) => void;
   isAdmin?: AuthCheck;
   sessionUser?: (request: FastifyRequest) => { username: string } | null;
-  /** 扫码成功后登记账号并拉起 weixin:<accountId> 进程 */
+  /** 扫码成功后登记账号并重启 channels 进程 */
   onBound?: (accountId: string) => void | Promise<void>;
   /** 重启该用户的微信进程（优先于内嵌 reloadBot） */
   restartAccount?: (accountId: string) => void | Promise<void>;
   /** 取消绑定后停进程并从 weixin.accounts 移除 */
   onUnbound?: (accountId: string) => void | Promise<void>;
   isProcessRunning?: (accountId: string) => boolean;
+  /** channel-gateway 模式下固定为 channels */
+  processId?: string;
 }
 
 export class WeixinLoginService {
@@ -610,7 +612,7 @@ export function registerWeixinApi(
       savedPlugins,
       activeAccountId: mine?.botAccountId,
       bindAccountId: bindId,
-      processId: `weixin:${bindId}`,
+      processId: deps.processId ?? 'channels',
       processRunning: deps.isProcessRunning?.(bindId) === true,
     };
   };
@@ -753,7 +755,7 @@ export function registerWeixinApi(
     try {
       if (accountId && deps.restartAccount) {
         await deps.restartAccount(accountId);
-        return { ok: true, processId: `weixin:${accountId}` };
+        return { ok: true, processId: deps.processId ?? 'channels' };
       }
       if (!deps.reloadBot) {
         return reply

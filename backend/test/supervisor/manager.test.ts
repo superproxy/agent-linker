@@ -37,8 +37,8 @@ function writeDistSplit(
 }
 
 test('parseTargets：缺省/all → 三进程；单个目标；weixin:<accountId> 实例；非法值抛错', () => {
-  assert.deepEqual(parseTargets(), ['gateway', 'weixin', 'node']);
-  assert.deepEqual(parseTargets('all'), ['gateway', 'weixin', 'node']);
+  assert.deepEqual(parseTargets(), ['gateway', 'weixin', 'channels', 'node']);
+  assert.deepEqual(parseTargets('all'), ['gateway', 'weixin', 'channels', 'node']);
   assert.deepEqual(parseTargets('weixin'), ['weixin']);
   assert.deepEqual(parseTargets('weixin:acc1'), ['weixin:acc1']);
   assert.throws(() => parseTargets('nope'), /未知进程/);
@@ -196,12 +196,12 @@ auth: { mode: token, token: abc }
   // 三目标 dist 入口都解析到 server/*.mjs
   const layout = createInstallLayout(root);
   assert.equal(layout.kind, 'dist');
-  for (const id of ['gateway', 'weixin', 'node'] as const) {
+  for (const id of ['gateway', 'channels', 'weixin', 'node'] as const) {
     assert.ok(layout.entry(id).endsWith(join('server', `${id}.mjs`)), `${id} 入口应指向 server/${id}.mjs`);
   }
 });
 
-test('ProcessManager：weixin.accounts 多账号 → 每账号一个独立实例（实例展开/pid/log/env 隔离）', () => {
+test('ProcessManager：weixin.accounts 多账号 → 合并为 channels 进程', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
   writeDistSplit(root, {
@@ -209,25 +209,10 @@ test('ProcessManager：weixin.accounts 多账号 → 每账号一个独立实例
     weixin: 'accounts: [acc-1, acc2]',
   });
   const pm = new ProcessManager(root);
-  // 实例展开：gateway → 微信账号实例（按配置顺序）→ node
-  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'weixin:acc-1', 'weixin:acc2', 'node']);
-  assert.deepEqual(pm.expand(['weixin']), ['weixin:acc-1', 'weixin:acc2']);
-  assert.deepEqual(pm.expand(['weixin:acc2']), ['weixin:acc2']);
-  assert.deepEqual(pm.expand(['gateway', 'weixin', 'gateway']), ['gateway', 'weixin:acc-1', 'weixin:acc2']);
-  // pid/log 文件名按账号隔离；默认单实例沿用旧文件名
-  assert.equal(pm.pidFile('weixin:acc-1'), join(root, '.runtime-state', 'pm', 'weixin-acc-1.pid'));
-  assert.ok(pm.logFile('weixin:acc2').endsWith(join('pm', 'logs', 'weixin-acc2.log')));
-  assert.equal(pm.pidFile('weixin'), join(root, '.runtime-state', 'pm', 'weixin.pid'));
-  // 账号实例 env 注入账号 id；默认实例不注入。回连 URL/token 由进程自读共享配置，
-  // supervisor 显式置空屏蔽父进程继承的环境变量
-  const instEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('weixin:acc2');
-  assert.equal(instEnv.LINKAGENT_ACCOUNT_ID, 'acc2');
-  assert.equal(instEnv.LINKAGENT_GATEWAY_URL, '');
-  assert.equal(instEnv.LINKAGENT_GATEWAY_TOKEN, '');
-  const defEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('weixin');
-  assert.equal(defEnv.LINKAGENT_ACCOUNT_ID, undefined);
-  assert.equal(defEnv.LINKAGENT_GATEWAY_URL, '');
-  assert.equal(defEnv.LINKAGENT_GATEWAY_TOKEN, '');
+  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'channels', 'node']);
+  assert.deepEqual(pm.expand(['weixin']), ['channels']);
+  assert.deepEqual(pm.expand(['weixin:acc2']), ['channels']);
+  assert.deepEqual(pm.expand(['gateway', 'weixin', 'gateway']), ['gateway', 'channels']);
 });
 
 test('ProcessManager：操作 weixin:<账号> 时停掉遗留的默认 weixin 进程', async () => {
@@ -250,15 +235,15 @@ test('ProcessManager：操作 weixin:<账号> 时停掉遗留的默认 weixin �
   assert.equal(pm.isRunning('weixin'), false);
 });
 
-test('ProcessManager：extraWeixinAccounts 与 yaml 合并为多实例', () => {
+test('ProcessManager：extraWeixinAccounts 与 yaml 合并后仍走 channels', () => {
   const root = tmpRoot();
   writeDistSplit(root, {
     gateway: 'server: { host: 127.0.0.1, port: 8787 }',
     weixin: 'enabled: true\naccounts: []\n',
   });
   const pm = new ProcessManager(root, { extraWeixinAccounts: () => ['alice', 'bob'] });
-  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'weixin:alice', 'weixin:bob', 'node']);
-  assert.deepEqual(pm.expand(['weixin']), ['weixin:alice', 'weixin:bob']);
+  assert.deepEqual(pm.allInstanceIds(), ['gateway', 'channels', 'node']);
+  assert.deepEqual(pm.expand(['weixin']), ['channels']);
 });
 
 test('ProcessManager：未绑定微信账号时 all 不含微信进程', () => {

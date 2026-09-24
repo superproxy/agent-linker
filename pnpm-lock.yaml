@@ -35,6 +35,9 @@ importers:
       '@linkagent/shared':
         specifier: workspace:*
         version: link:../shared
+      '@openclaw/feishu':
+        specifier: ^2026.9.6
+        version: 2026.9.6(openclaw@openclaw-shim)
       '@tencent-weixin/openclaw-weixin':
         specifier: ^2.4.8
         version: 2.4.8(openclaw@openclaw-shim)
@@ -1414,6 +1417,24 @@ packages:
   /@nodable/entities@3.0.0:
     resolution: {integrity: sha512-8L9xFeTYKhm49xfIypoe2W5wV1m/3Z58kT+7kR9A8OyFxcPduI4VmxaUMQyKYrRjUoLLSXv6EKKID5Tvj9cUVw==}
     dev: false
+
+  /@openclaw/feishu@2026.9.6(openclaw@openclaw-shim):
+    resolution: {integrity: sha512-4jx4iEd0gpVQ2TQJSQLMJCaSb+iOlQo101Ypkq1VcpIcKyxz+i+ybcfEZbXBdx9P6KKM4HKTqeCkT+mET6RsaQ==}
+    peerDependencies:
+      openclaw: '>=2026.9.6'
+    peerDependenciesMeta:
+      openclaw:
+        optional: true
+    dependencies:
+      openclaw: link:openclaw-shim
+    dev: false
+    bundledDependencies:
+      - '@larksuiteoapi/node-sdk'
+      - mdast-util-from-markdown
+      - mdast-util-gfm-table
+      - micromark-extension-gfm-table
+      - typebox
+      - zod
 
   /@pinojs/redact@0.4.0:
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}

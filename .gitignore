@@ -7,6 +7,7 @@ nohup.out
 backend/config/gateway.yaml
 backend/config/weixin.yaml
 backend/config/node.yaml
+backend/config/channels.yaml
 backend/config/config.yaml
 .runtime-state/
 .tmp/

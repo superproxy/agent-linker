@@ -95,18 +95,15 @@ export const weixinSectionSchema = z
     /** pm start all 时是否拉起该进程（默认 true） */
     enabled: z.boolean().default(true),
     /**
-     * weixin-bot：gateway 进程内拉起（默认，单跑 gateway 时）
-     * openclaw-weixin-plugin：openclaw 插件运行时
-     * external：独立进程（进程管理器托管）
+     * 个人微信一律由 channel-gateway（channels 进程）托管，gateway 不内嵌 bot。
+     * external：channels 内 weixin-bot（ilink，默认）
+     * openclaw-weixin-plugin：channels 内 @tencent-weixin/openclaw-weixin 插件收发
+     * weixin-bot：兼容旧 yaml，等同 external
      */
-    mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).default('weixin-bot'),
+    mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).default('external'),
     /** 登录态账号 id（缺省取 accounts/ 下第一个） */
     accountId: z.string().default(''),
-    /**
-     * 多账号：账号 id 白名单（外部进程托管时生效，每个账号一个独立 bot 进程，
-     * 实例 id weixin:<accountId>，pid/日志独立，互不干扰）。
-     * 留空 = 单实例（跑 accountId 或 accounts/ 下第一个账号），保持旧行为。
-     */
+    /** 多账号：登录用户名列表；channel-gateway 进程内按账号拉起 bot/插件（非 weixin:<id> 多进程）。 */
     accounts: z.array(z.string().min(1)).default([]),
     /** 对话模型（默认 agent:pi） */
     model: z.string().default('agent:pi'),
@@ -117,7 +114,7 @@ export const weixinSectionSchema = z
   })
   .default({
     enabled: true,
-    mode: 'weixin-bot',
+    mode: 'external',
     accountId: '',
     accounts: [],
     model: 'agent:pi',
@@ -132,6 +129,15 @@ export const nodeAgentEntrySchema = z.object({
   displayName: z.string().optional(),
   permissionMode: z.enum(ACP_PERMISSION_MODES).optional(),
   permissionPolicy: permissionPolicySchema,
+  /** ACP server 启动命令；缺省按 agent id 对应内置默认（见 backend acpEngine DEFAULT_COMMANDS） */
+  command: z.array(z.string()).optional(),
+  /** 透传给 ACP 子进程的额外环境变量 */
+  env: z.record(z.string(), z.string()).optional(),
+  /**
+   * Cursor CLI 等经 `--key` 鉴权时使用的 API key（仅节点本机 spawn，hello 不上报）。
+   * 未配 command 时会在默认 `agent acp` 后追加 `--key <key>`。
+   */
+  key: z.string().optional(),
 });
 export type NodeAgentConfigEntry = z.infer<typeof nodeAgentEntrySchema>;
 export const nodeAgentListItemSchema = z.union([z.string().min(1), nodeAgentEntrySchema]);
@@ -146,7 +152,7 @@ export const nodeSectionSchema = z
     name: z.string().default(''),
     /**
      * 节点自报 agent 清单（空 = 内置默认 id 列表）。
-     * 可为 id 字符串，或 { id, permissionMode?, permissionPolicy?, displayName? }（ACP 权限只在此段配置）。
+     * 可为 id 字符串，或 { id, permissionMode?, permissionPolicy?, displayName?, command?, env?, key? }（ACP 权限与启动参数只在此段配置）。
      */
     agents: z.array(nodeAgentListItemSchema).default([]),
     /** 网关地址；缺省由 gateway.server 推导 */
@@ -157,10 +163,79 @@ export const nodeSectionSchema = z
   .default({ enabled: true, name: '', agents: [], gatewayUrl: '', gatewayToken: '' });
 export type NodeSection = z.infer<typeof nodeSectionSchema>;
 
-/** 三进程有效配置结构（启动前 yaml：单文件 config.yaml 或 gateway/weixin/node 三文件合并） */
+/**
+ * channel-gateway 进程段：统一托管微信 / 企微 / 飞书渠道，对话回连主网关 /v1（SSE）。
+ * enabled=true 时 supervisor 拉起 channels 进程，gateway 不再内嵌 weixin-bot / 插件运行时。
+ */
+export const channelGatewaySectionSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    server: z
+      .object({
+        host: z.string().default('127.0.0.1'),
+        port: z.number().int().positive().default(8790),
+      })
+      .default({ host: '127.0.0.1', port: 8790 }),
+    /**
+     * HTTP 暴露策略：默认 exposePluginRoutes=false（无 HTTP 服务、无检活）；
+     * 运行态推送到主 gateway，PM 以 pid 判断 channels 存活。
+     */
+    http: z
+      .object({
+        exposePluginRoutes: z.boolean().default(false),
+        pushStatusToGateway: z.boolean().default(true),
+        pushIntervalSec: z.number().int().min(5).default(30),
+      })
+      .default({ exposePluginRoutes: false, pushStatusToGateway: true, pushIntervalSec: 30 }),
+    /** 主网关 base；缺省由 gateway.server 推导 */
+    gatewayUrl: z.string().default(''),
+    gatewayToken: z.string().default(''),
+    /** 插件/OpenClaw 路由缺省 model（/v1 body.model） */
+    model: z.string().default('agent:pi'),
+    /** 进程内拉起个人微信（weixin-bot 或 openclaw 插件，见 weixinPlugin） */
+    weixin: z.boolean().default(true),
+    /** true：在 channels 内加载 @tencent-weixin/openclaw-weixin 收发；false：weixin-bot（ilink） */
+    weixinPlugin: z.boolean().default(false),
+    /** 加载 channelGateway.plugins / channels 中的企微 OpenClaw 插件 */
+    wecom: z.boolean().default(true),
+    /**
+     * 企微任务空间 / ct_ 引导的 web 登录用户名（ownerUsername）。
+     * 缺省时：LINKAGENT_ACCOUNT_ID → 唯一 weixin.accounts → 多账号时取第一个并 warn。
+     */
+    wecomOwner: z.string().default(''),
+    /** 尝试加载 feishuPluginPackage */
+    feishu: z.boolean().default(false),
+    feishuPluginPackage: z.string().default(''),
+    /** OpenClaw 渠道段（企微 botId/secret 等）；写在 channels.yaml，不写 gateway.yaml */
+    channels: z.record(z.string(), z.unknown()).default({}),
+    /** OpenClaw 插件包列表（企微等）；channel-gateway 进程读取 */
+    plugins: z
+      .array(z.object({ package: z.string().min(1), enabled: z.boolean().default(true) }))
+      .default([]),
+  })
+  .default({
+    enabled: false,
+    server: { host: '127.0.0.1', port: 8790 },
+    http: { exposePluginRoutes: false, pushStatusToGateway: true, pushIntervalSec: 30 },
+    gatewayUrl: '',
+    gatewayToken: '',
+    model: 'agent:pi',
+    weixin: true,
+    weixinPlugin: false,
+    wecom: true,
+    wecomOwner: '',
+    feishu: false,
+    feishuPluginPackage: '',
+    channels: {},
+    plugins: [],
+  });
+export type ChannelGatewaySection = z.infer<typeof channelGatewaySectionSchema>;
+
+/** 四段有效配置（gateway / weixin / channels / node yaml 合并） */
 export const sharedConfigSchema = z.object({
   gateway: gatewaySectionSchema,
   weixin: weixinSectionSchema,
+  channelGateway: channelGatewaySectionSchema,
   node: nodeSectionSchema,
 });
 export type SharedConfig = z.infer<typeof sharedConfigSchema>;
@@ -255,7 +330,9 @@ export function migrateConfig(raw: unknown): SharedConfig {
     ...(legacy.node?.gatewayToken !== undefined ? { gatewayToken: legacy.node.gatewayToken } : {}),
   });
 
-  return { gateway, weixin, node };
+  const channelGateway = channelGatewaySectionSchema.parse({});
+
+  return { gateway, weixin, channelGateway, node };
 }
 
 /**

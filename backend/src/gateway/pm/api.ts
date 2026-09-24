@@ -37,7 +37,7 @@ export function normalizeTargets(input: unknown, opts: { allowGateway?: boolean 
     if (typeof item !== 'string') throw new Error('targets 必须是字符串数组');
     const id = item.trim();
     if (!isKnownTargetId(id)) {
-      throw new Error(`未知进程 "${id}"，可选：gateway | weixin | node | weixin:<accountId>`);
+      throw new Error(`未知进程 "${id}"，可选：gateway | channels | weixin | node | weixin:<accountId>`);
     }
     if (instOf(id).base === 'gateway' && !opts.allowGateway) {
       throw new Error('网关进程不允许经网页启动/停止（仅可重启），请在本机用 CLI 操作');

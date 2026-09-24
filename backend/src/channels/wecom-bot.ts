@@ -212,8 +212,8 @@ async function handleWecomMessage(msg: WecomMessage): Promise<void> {
     return;
   }
 
-  // 单聊：wecom 无任务机制（活动任务只属于微信渠道 / dev 控制台对话框），
-  // 直接按默认模型 + 持久 sessionKey 路由（多轮记忆保持，不受任务状态影响）
+  // 单聊：wecom 尚未加入任务白名单 → 网关 legacy（model + sessionKey）。
+  // 接入任务 / ct_ 见 docs/channel-gateway-integration.md
   await runChatSession({
     gatewayUrl: GATEWAY_URL,
     model: GATEWAY_MODEL,

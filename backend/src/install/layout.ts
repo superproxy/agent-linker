@@ -17,8 +17,8 @@ import { CONFIG_BASENAMES } from '@linkagent/shared';
 
 export type InstallKind = 'dev' | 'dist';
 
-/** 进程管理器托管的三个子进程标识 */
-export type ProcessTargetId = 'gateway' | 'weixin' | 'node';
+/** 进程管理器托管的子进程标识（channels = channel-gateway 统一渠道进程） */
+export type ProcessTargetId = 'gateway' | 'weixin' | 'channels' | 'node';
 
 const DEPLOY_MARKER = '.linkagent-root';
 const STATE_DIR = '.runtime-state';
@@ -69,6 +69,7 @@ const PROCESS_ENTRIES: Record<ProcessTargetId, { dev: string; dist: string }> = 
   gateway: { dev: join('backend', 'src', 'gateway', 'index.ts'), dist: join('server', 'gateway.mjs') },
   weixin: { dev: join('backend', 'src', 'channels', 'weixin-bot.ts'), dist: join('server', 'weixin.mjs') },
   node: { dev: join('backend', 'src', 'node', 'connector.ts'), dist: join('server', 'node.mjs') },
+  channels: { dev: join('backend', 'src', 'channels', 'channel-gateway.ts'), dist: join('server', 'channels.mjs') },
 };
 
 export interface InstallLayout {
@@ -117,6 +118,8 @@ export interface InstallLayout {
   readonly loginHint: string;
   /** external 模式下重启微信进程的命令提示（形态感知） */
   readonly restartWeixinHint: string;
+  /** channel-gateway 模式下重启渠道进程 */
+  readonly restartChannelsHint: string;
 }
 
 /** 依据安装根构造布局（可传任意 root，便于单测） */
@@ -157,6 +160,10 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
     kind === 'dist'
       ? './start.sh restart weixin（Windows：start.bat restart weixin）'
       : 'pnpm pm restart weixin';
+  const restartChannelsHint =
+    kind === 'dist'
+      ? './start.sh restart channels（Windows：start.bat restart channels）'
+      : 'pnpm pm restart channels';
 
   return {
     kind,
@@ -184,6 +191,7 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
     entry: (id) => join(root, PROCESS_ENTRIES[id][kind]),
     loginHint,
     restartWeixinHint,
+    restartChannelsHint,
   };
 }
 

@@ -607,7 +607,7 @@ export interface SystemInfo {
 }
 
 export interface PmProcess {
-  id: 'gateway' | 'weixin' | 'node';
+  id: 'gateway' | 'weixin' | 'channels' | 'node';
   label: string;
   running: boolean;
   pid: number | null;
@@ -691,6 +691,198 @@ export class PmClient {
 
 /** 可改挂载网关的本机子进程 */
 export type ChildGatewayId = 'weixin' | 'node';
+
+export interface WecomChannelConfig {
+  enabled: boolean;
+  botId: string;
+  secret: { configured: boolean; preview: string };
+  connectionMode: 'websocket' | 'webhook';
+  pluginPackage: string;
+  channelGateway: {
+    enabled: boolean;
+    wecom: boolean;
+    model: string;
+    server: { host: string; port: number };
+  };
+  status: {
+    channelGatewayEnabled: boolean;
+    channelsRunning: boolean;
+    exposePluginRoutes: boolean;
+    callbackUrls: string[];
+    listen: string;
+    runtimeReport: {
+      reportedAt: number;
+      weixinBotCount: number;
+      pluginAccounts: Array<{ key: string; running: boolean; lastError: string | null }>;
+    } | null;
+  };
+}
+
+export interface FeishuChannelConfig {
+  enabled: boolean;
+  appId: string;
+  appSecret: { configured: boolean; preview: string };
+  connectionMode: 'websocket' | 'webhook';
+  pluginPackage: string;
+  channelGateway: {
+    enabled: boolean;
+    feishu: boolean;
+    feishuPluginPackage: string;
+    model: string;
+    server: { host: string; port: number };
+  };
+  status: WecomChannelConfig['status'];
+}
+
+/** 飞书 + channel-gateway 配置（管理员） */
+export class FeishuConfigClient {
+  constructor(
+    private base: string,
+    private getToken: () => string,
+  ) {}
+
+  private async request(path: string, init?: RequestInit): Promise<unknown> {
+    const res = await fetch(this.base.replace(/\/$/, '') + path, jsonFetchInit(this.getToken(), init));
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.json().catch(() => ({}));
+  }
+
+  async get(): Promise<FeishuChannelConfig> {
+    return (await this.request('/api/channels/feishu')) as FeishuChannelConfig;
+  }
+
+  async save(body: {
+    enabled: boolean;
+    appId: string;
+    appSecret?: string;
+    connectionMode?: 'websocket' | 'webhook';
+    pluginPackage?: string;
+    verificationToken?: string;
+    encryptKey?: string;
+    channelGateway?: Partial<FeishuChannelConfig['channelGateway'] & { server?: { host: string; port: number } }>;
+    restart?: boolean;
+  }): Promise<FeishuChannelConfig & { ok?: boolean }> {
+    return (await this.request('/api/channels/feishu', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })) as FeishuChannelConfig & { ok?: boolean };
+  }
+}
+
+/** channels 进程日志（本地 pm 文件 + 运行态推送缓冲） */
+export class ChannelGatewayLogsClient {
+  constructor(
+    private base: string,
+    private getToken: () => string,
+  ) {}
+
+  private async request(path: string): Promise<unknown> {
+    const res = await fetch(this.base.replace(/\/$/, '') + path, jsonFetchInit(this.getToken()));
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.json().catch(() => ({}));
+  }
+
+  async get(
+    tail = 300,
+    source: 'auto' | 'pm' | 'push' = 'auto',
+  ): Promise<{
+    content: string;
+    gatewayTrace: string;
+    traceHint: string;
+    source: 'auto' | 'pm' | 'push';
+    tail: number;
+    channelsRunning: boolean;
+    reportedAt: number | null;
+  }> {
+    const q = new URLSearchParams({ tail: String(tail), source });
+    return (await this.request(`/api/channels/channel-gateway/logs?${q}`)) as {
+      content: string;
+      gatewayTrace: string;
+      traceHint: string;
+      source: 'pm' | 'push';
+      tail: number;
+      channelsRunning: boolean;
+      reportedAt: number | null;
+    };
+  }
+}
+
+/** 个人微信 channel-gateway（管理员） */
+export interface WeixinChannelConfig {
+  pluginPackage: string;
+  channelGateway: {
+    enabled: boolean;
+    weixin: boolean;
+    weixinPlugin: boolean;
+    model: string;
+  };
+  status: {
+    channelGatewayEnabled: boolean;
+    weixinInChannels: boolean;
+    weixinPlugin: boolean;
+    channelsRunning: boolean;
+  };
+}
+
+export class WeixinChannelConfigClient {
+  constructor(
+    private base: string,
+    private getToken: () => string,
+  ) {}
+
+  private async request(path: string, init?: RequestInit): Promise<unknown> {
+    const res = await fetch(this.base.replace(/\/$/, '') + path, jsonFetchInit(this.getToken(), init));
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.json().catch(() => ({}));
+  }
+
+  async get(): Promise<WeixinChannelConfig> {
+    return (await this.request('/api/channels/weixin')) as WeixinChannelConfig;
+  }
+
+  async save(body: {
+    channelGateway?: Partial<WeixinChannelConfig['channelGateway']>;
+    restart?: boolean;
+    startOnly?: boolean;
+  }): Promise<WeixinChannelConfig & { ok?: boolean }> {
+    return (await this.request('/api/channels/weixin', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })) as WeixinChannelConfig & { ok?: boolean };
+  }
+}
+
+/** 企业微信 + channel-gateway 配置（管理员） */
+export class WecomConfigClient {
+  constructor(
+    private base: string,
+    private getToken: () => string,
+  ) {}
+
+  private async request(path: string, init?: RequestInit): Promise<unknown> {
+    const res = await fetch(this.base.replace(/\/$/, '') + path, jsonFetchInit(this.getToken(), init));
+    if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
+    return res.json().catch(() => ({}));
+  }
+
+  async get(): Promise<WecomChannelConfig> {
+    return (await this.request('/api/channels/wecom')) as WecomChannelConfig;
+  }
+
+  async save(body: {
+    enabled: boolean;
+    botId: string;
+    secret?: string;
+    connectionMode?: 'websocket' | 'webhook';
+    channelGateway?: Partial<WecomChannelConfig['channelGateway']>;
+    restart?: boolean;
+  }): Promise<WecomChannelConfig & { ok?: boolean }> {
+    return (await this.request('/api/channels/wecom', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })) as WecomChannelConfig & { ok?: boolean };
+  }
+}
 
 /** 子进程挂载网关信息（token 只回是否已配置） */
 export interface ChildGatewayTargetInfo {

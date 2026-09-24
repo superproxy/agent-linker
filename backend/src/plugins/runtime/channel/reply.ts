@@ -11,28 +11,12 @@
  *   withReplyDispatcher / dispatchReplyFromConfig
  */
 import { basename, resolve } from 'node:path';
+import type { ChannelAgentDispatch, ChannelAgentDispatchParams } from '@linkagent/shared';
 import { hasControlCommand } from './commands.js';
 import { resolveAgentRoute } from './routing.js';
+import { emitChannelDispatchTrace, newDispatchTraceId } from '../../../store/dispatch-trace.js';
 
-export interface ChannelAgentDispatchParams {
-  agentId: string;
-  sessionKey: string;
-  accountId: string;
-  text: string;
-  attachments?: Array<{ name: string; mimeType: string; url: string }>;
-  signal?: AbortSignal;
-}
-
-export interface ChannelAgentDispatch {
-  chat(
-    params: ChannelAgentDispatchParams,
-    cb: {
-      onText(delta: string): void;
-      onReasoning?(delta: string): void;
-      onToolActivity?(name: string): void;
-    },
-  ): Promise<void>;
-}
+export type { ChannelAgentDispatch, ChannelAgentDispatchParams };
 
 export interface EnvelopeFormatOptions {
   timezone?: string;
@@ -265,14 +249,43 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
   const text = rawText.trim();
   if (!text && !ctx?.Attachments) return { delivered: false };
 
-  const sessionKey = String(ctx.SessionKey ?? 'channel-main');
   const accountId = String(ctx.AccountId ?? 'default');
-  const agentId = String(ctx.AgentId ?? 'opencode');
+  const cfg = params.cfg;
+  const channel = String(ctx.OriginatingChannel ?? 'unknown').toLowerCase();
+  const peerId =
+    typeof ctx.From === 'string' && ctx.From.trim()
+      ? ctx.From.trim()
+      : typeof ctx.To === 'string' && ctx.To.trim()
+        ? ctx.To.trim()
+        : null;
+  const peerKind = String(ctx.ChatType ?? 'direct').toLowerCase() === 'group' ? 'group' : 'direct';
+  const route = resolveAgentRoute({
+    cfg,
+    channel,
+    accountId,
+    peer: peerId ? { kind: peerKind, id: peerId } : null,
+    defaultAgentId: typeof ctx.AgentId === 'string' ? ctx.AgentId : undefined,
+  });
+  const agentId =
+    typeof ctx.AgentId === 'string' && ctx.AgentId.trim() ? ctx.AgentId.trim() : route.agentId;
+  const sessionKey = String(ctx.SessionKey ?? route.sessionKey);
   const attachments = (ctx.Attachments as Array<{ name: string; mimeType: string; url: string }> | undefined) ?? [];
+
+  const traceId = newDispatchTraceId();
+  emitChannelDispatchTrace('channels.inbound', {
+    traceId,
+    source: 'plugin',
+    channel,
+    userId: peerId ?? undefined,
+    sessionKey,
+    agentId,
+    textLen: text.length,
+  });
 
   const stream = createTextStreamDeliverer(deliver);
   const reasoning = createReasoningCollector(deliver);
   let delivered = false;
+  let replyChunks = 0;
   try {
     await agentDispatch.chat(
       { agentId, sessionKey, accountId, text, attachments, signal: ctx.Signal as AbortSignal | undefined },
@@ -280,6 +293,7 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
         onText(delta) {
           reasoning.flushBeforeText();
           delivered = true;
+          replyChunks += 1;
           stream.push(delta);
         },
         onReasoning(delta) {
@@ -293,10 +307,23 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
     );
     stream.flush();
     reasoning.flush(); // 兜底：仅有思考无正文时也要让用户看到
+    emitChannelDispatchTrace('channels.reply', {
+      traceId,
+      channel,
+      userId: peerId ?? undefined,
+      delivered,
+      replyChunks,
+    });
     return { delivered };
   } catch (err) {
     stream.flush();
     reasoning.flush();
+    emitChannelDispatchTrace('channels.reply.fail', {
+      traceId,
+      channel,
+      userId: peerId ?? undefined,
+      error: err instanceof Error ? err.message : String(err),
+    });
     if (onError) {
       await onError(err);
     } else {

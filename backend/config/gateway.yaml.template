@@ -37,6 +37,7 @@ agents:
     type: hermes
     displayName: Hermes
     permissionMode: approve-all
+# 个人微信 openclaw 插件（可选）；企微 OpenClaw 请改 channels.yaml，勿在此写 channels.wecom
 plugins:
   - package: "@tencent-weixin/openclaw-weixin"
 channels:
