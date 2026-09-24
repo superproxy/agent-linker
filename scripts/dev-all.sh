@@ -2,7 +2,7 @@
 # 一键联调：前台同时启动网关 + 一个节点，Ctrl-C 一起退出
 #   scripts/dev-all.sh [节点实例名]
 # 若网关已在 8787 运行（健康检查通过）则复用，不重复启动、退出时也不停止它。
-# 节点配置同 scripts/node.sh：环境变量或 .runtime-state/node[-<name>].env。
+# 节点回连读 node.yaml，不加载 node.env。
 # 注意：两进程日志直接输出到当前终端（节点日志自带 [node] 前缀，网关日志可按时间区分）。
 set -u
 # 后台启动时 SIGINT 可能被 shell 置为忽略，显式恢复以保证 Ctrl-C 能触发 cleanup
@@ -13,19 +13,10 @@ STATE_DIR="$REPO/.runtime-state"
 HOST_URL="http://127.0.0.1:8787"
 
 NAME="${1:-}"
-ENV_FILE="$STATE_DIR/node.env"
-[ -n "$NAME" ] && ENV_FILE="$STATE_DIR/node-$NAME.env"
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
-fi
+NAME_ARGS=()
 if [ -n "$NAME" ]; then
-  if [ -z "${LINKAGENT_NODE_NAME:-}" ]; then
-    export LINKAGENT_NODE_NAME="$NAME"
-  fi
   export LINKAGENT_NODE_STATE_DIR="$STATE_DIR/node-$NAME"
+  NAME_ARGS=(-- --name "$NAME")
 fi
 
 GW_PID=""
@@ -69,7 +60,7 @@ else
 fi
 
 echo "→ 启动节点 ${NAME:-default} ..."
-(cd "$REPO" && exec pnpm --filter @linkagent/backend node:connect) &
+(cd "$REPO" && exec pnpm --filter @linkagent/backend node:connect "${NAME_ARGS[@]}") &
 NODE_PID=$!
 
 wait

@@ -14,7 +14,6 @@
  */
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -277,17 +276,8 @@ export class ProcessManager {
           LINKAGENT_GATEWAY_TOKEN: '',
         };
       case 'node':
-        // 节点名 env 仍注入（配置段 name 缺省时兜底 node-<hostname>）。
-        // 本机节点（supervisor 托管）的 agent 开通只认共享 config 的 node.agents：
-        // 显式把 LINKAGENT_NODE_AGENTS 置空，覆盖父进程（shell/systemd/docker）继承值，
-        // 避免环境变量隐式改变本机节点上线时自报的 agent（独立节点脚本仍可用该环境变量）。
-        // 回连地址同样置空 LINKAGENT_GATEWAY_URL/TOKEN，只认共享 config 或本机网关推导。
-        return {
-          LINKAGENT_NODE_NAME: this.gw.shared.node.name || `node-${hostname()}`,
-          LINKAGENT_NODE_AGENTS: '',
-          LINKAGENT_GATEWAY_URL: '',
-          LINKAGENT_GATEWAY_TOKEN: '',
-        };
+        // 回连地址、token、展示名、agent 清单由 node 进程读 node.yaml，不再注入环境变量。
+        return {};
     }
   }
 

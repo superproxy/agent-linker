@@ -166,7 +166,7 @@ test('ProcessManager：dev 形态路径/命令/环境变量正确（无 .linkage
   assert.equal(gwEnv.LINKAGENT_WEIXIN_MODE, 'raw');
 });
 
-test('ProcessManager：dist 形态用 node 跑 server/*.mjs；子进程自读共享配置，supervisor 置空屏蔽 URL/token 环境变量', () => {
+test('ProcessManager：dist 形态用 node 跑 server/*.mjs；子进程自读 node.yaml，supervisor 不注入回连环境变量', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
   writeDistSplit(root, {
@@ -180,16 +180,12 @@ auth: { mode: token, token: abc }
   const nodeSpec = (pm as unknown as { resolve(id: string): { command: string; args: string[] } }).resolve('node');
   assert.equal(nodeSpec.command, process.execPath);
   assert.ok(nodeSpec.args[0].endsWith(join('server', 'node.mjs')));
-  // 回连 URL/token 由 node/weixin 进程自行读共享配置推导，env 不再注入；
-  // 且显式置空 LINKAGENT_GATEWAY_URL/TOKEN，覆盖父进程继承值，本机进程只认共享 config 或本机推导
+  // node 进程自己读 node.yaml，supervisor 不再注入回连或 agent 环境变量
   const nodeEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('node');
-  assert.equal(nodeEnv.LINKAGENT_GATEWAY_URL, '');
-  assert.equal(nodeEnv.LINKAGENT_GATEWAY_TOKEN, '');
-  // node.name 配置段优先（缺省才 node-<hostname>）
-  assert.equal(nodeEnv.LINKAGENT_NODE_NAME, 'runner-9');
-  // 本机节点（supervisor 托管）屏蔽 LINKAGENT_NODE_AGENTS：agent 开通只认 config.node.agents，
-  // 覆盖父进程继承值，防止 shell/systemd/docker 环境变量隐式改变上线内容
-  assert.equal(nodeEnv.LINKAGENT_NODE_AGENTS, '');
+  assert.equal(nodeEnv.LINKAGENT_GATEWAY_URL, undefined);
+  assert.equal(nodeEnv.LINKAGENT_GATEWAY_TOKEN, undefined);
+  assert.equal(nodeEnv.LINKAGENT_NODE_NAME, undefined);
+  assert.equal(nodeEnv.LINKAGENT_NODE_AGENTS, undefined);
   const wxEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('weixin');
   assert.equal(wxEnv.LINKAGENT_GATEWAY_URL, '');
   assert.equal(wxEnv.LINKAGENT_GATEWAY_TOKEN, '');

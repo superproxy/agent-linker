@@ -9,12 +9,8 @@
 #   scripts/node.sh log [name]            跟随日志
 #   scripts/node.sh foreground [name]     前台运行（Ctrl-C 退出，开发用）
 #
-# 节点配置（环境变量，或写入 .runtime-state/node[-<name>].env，KEY=VALUE 每行一条）：
-#   LINKAGENT_GATEWAY_URL    网关地址（默认 ws://127.0.0.1:8787）
-#   LINKAGENT_GATEWAY_TOKEN  网关 token（网关开启 auth 时必填）
-#   LINKAGENT_NODE_AGENTS    逗号分隔的 agent id（缺省上报默认 opencode/pi/workbuddy/trace-cli/cursor）
-#   LINKAGENT_NODE_ID        一般不填，首次连接由网关签发并持久化
-# 命名实例会自动把 LINKAGENT_NODE_NAME 设为实例名（除非 env 文件已指定）。
+# 回连地址、token、展示名、agent 写在 node.yaml，不读环境变量。
+# 命名实例只隔离状态目录，展示名用命令行 --name。
 set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,21 +24,12 @@ else
 fi
 PID_FILE="$STATE_DIR/$BASE.pid"
 LOG_FILE="$STATE_DIR/$BASE.log"
-ENV_FILE="$STATE_DIR/$BASE.env"
 
-# 加载实例 env 文件（文件不存在则跳过）
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  set +a
-fi
-# 命名实例：未显式指定节点名时，用实例名作为节点名；状态目录独立避免 nodeId 冲突
+# 命名实例：状态目录独立避免 nodeId 冲突；展示名走 --name
+NAME_ARGS=()
 if [ -n "$NAME" ]; then
-  if [ -z "${LINKAGENT_NODE_NAME:-}" ]; then
-    export LINKAGENT_NODE_NAME="$NAME"
-  fi
   export LINKAGENT_NODE_STATE_DIR="$STATE_DIR/node-$NAME"
+  NAME_ARGS=(-- --name "$NAME")
 fi
 
 is_running() {
@@ -77,7 +64,7 @@ do_start() {
   fi
   mkdir -p "$STATE_DIR"
   echo "→ 后台启动节点 ${NAME:-default} ..."
-  nohup pnpm --filter @linkagent/backend node:connect >>"$LOG_FILE" 2>&1 &
+  nohup pnpm --filter @linkagent/backend node:connect "${NAME_ARGS[@]}" >>"$LOG_FILE" 2>&1 &
   write_pid "$!"
   sleep 1
   if is_running; then
@@ -151,7 +138,7 @@ case "${1:-start}" in
   log) do_log ;;
   foreground)
     echo "→ 前台运行节点 ${NAME:-default}（Ctrl-C 停止）..."
-    cd "$REPO" && exec pnpm --filter @linkagent/backend node:connect
+    cd "$REPO" && exec pnpm --filter @linkagent/backend node:connect "${NAME_ARGS[@]}"
     ;;
   *)
     echo "用法: $0 {start|stop|restart|status|log|foreground} [name]"

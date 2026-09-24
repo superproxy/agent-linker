@@ -167,24 +167,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const stateDir = join(root, '.runtime-state');
 const pidFile = join(stateDir, 'node.pid');
 const logFile = join(stateDir, 'node.log');
-const envFile = join(stateDir, 'node.env');
 const entry = join(root, 'server', 'node.mjs');
 const cmd = (process.argv[2] ?? 'start').toLowerCase();
-
-function loadEnvFile(path) {
-  if (!existsSync(path)) return;
-  for (const raw of readFileSync(path, 'utf8').split(/\\r?\\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq < 1) continue;
-    let val = line.slice(eq + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    process.env[line.slice(0, eq).trim()] = val;
-  }
-}
 
 function readPid() {
   if (!existsSync(pidFile)) return null;
@@ -219,7 +203,6 @@ function stopTree(pid) {
   }
 }
 
-loadEnvFile(envFile);
 process.env.LINKAGENT_HOME = process.env.LINKAGENT_HOME || root;
 
 if (cmd === 'status') {
@@ -293,21 +276,11 @@ linkagent-node/
 ├── server/config/node.yaml      # 自报 agent、pi 权限与 setup:pi 说明
 ├── server/config/pi-agent/      # npm run setup:pi 模板
 ├── start.sh / start.bat
-├── node.env.example
 └── node_modules/
 \`\`\`
 
 ## 配置
-优先环境变量（或复制 \`node.env.example\` 为 \`.runtime-state/node.env\`）：
-
-\`\`\`
-LINKAGENT_GATEWAY_URL=wss://gw.example.com
-LINKAGENT_GATEWAY_TOKEN=网关静态 token 或 nt_ 机器 token
-LINKAGENT_NODE_NAME=builder-01
-LINKAGENT_NODE_AGENTS=opencode,pi
-\`\`\`
-
-编辑 \`server/config/node.yaml\`（\`agents\`、\`gatewayUrl\` / \`gatewayToken\`）。pi 模型清单不在 yaml：在本机执行 \`npm run setup:pi\`（模板在 \`server/config/pi-agent/\`）。
+编辑 \`server/config/node.yaml\`（\`gatewayUrl\`、\`gatewayToken\`、\`name\`、\`agents\`）。不要用环境变量覆盖这四项。pi 模型清单不在 yaml：在本机执行 \`npm run setup:pi\`（模板在 \`server/config/pi-agent/\`）。
 
 ## 启动
 \`\`\`bash
@@ -327,11 +300,11 @@ start.bat foreground
 首次匿名接入时，到网关后台「节点」审批；之后会把 secret 落到 \`.runtime-state/node/\`。
 `;
 
-const NODE_ENV_EXAMPLE = `# 复制为 .runtime-state/node.env 后启动（不要把令牌写进命令行历史）
-LINKAGENT_GATEWAY_URL=wss://gw.example.com
-LINKAGENT_GATEWAY_TOKEN=
-LINKAGENT_NODE_NAME=
-# LINKAGENT_NODE_AGENTS=opencode,pi
+const NODE_ENV_EXAMPLE = `# 回连地址、token、展示名、agent 写在 server/config/node.yaml，启动时不读环境变量。
+# gatewayUrl: wss://gw.example.com
+# gatewayToken: ""
+# name: builder-01
+# agents 见 node.yaml
 `;
 
 const NODE_GATEWAY_YAML = `# linkagent-node：仅用于缺省回连地址与鉴权模式推导（agent 清单见 node.yaml）
@@ -344,7 +317,7 @@ auth:
 `;
 
 const NODE_YAML = `# linkagent-node 执行机：节点自报 agent 与 ACP 权限
-# 回连优先：LINKAGENT_GATEWAY_URL / LINKAGENT_GATEWAY_TOKEN 或 .runtime-state/node.env
+# 回连只认本文件的 gatewayUrl / gatewayToken / name / agents，不读环境变量。
 enabled: true
 # name: builder-01
 agents:

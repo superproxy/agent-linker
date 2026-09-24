@@ -8,12 +8,8 @@
 #   scripts/node.ps1 log [name]            跟随日志
 #   scripts/node.ps1 foreground [name]     前台运行（Ctrl-C 退出，开发用）
 #
-# 节点配置（环境变量，或写入 .runtime-state/node[-<name>].env，KEY=VALUE 每行一条）：
-#   LINKAGENT_GATEWAY_URL    网关地址（默认 ws://127.0.0.1:8787）
-#   LINKAGENT_GATEWAY_TOKEN  网关 token（网关开启 auth 时必填）
-#   LINKAGENT_NODE_AGENTS    逗号分隔的 agent id（缺省上报默认 opencode/pi/workbuddy/trace-cli/cursor）
-#   LINKAGENT_NODE_ID        一般不填，首次连接由网关签发并持久化
-# 命名实例会自动把 LINKAGENT_NODE_NAME 设为实例名（除非 env 文件已指定）。
+# 回连地址、token、展示名、agent 写在 node.yaml，不读环境变量。
+# 命名实例只隔离状态目录，展示名用命令行 --name。
 #
 # 注意：不要使用 $PidXxx 变量名，PowerShell 会把 $PID 解析成当前进程 id。
 # 本文件需带 UTF-8 BOM；Windows PowerShell 5.1 否则会把中文后的 ASCII 引号吞掉。
@@ -37,35 +33,14 @@ if ($Name) {
 }
 $NodePidPath = Join-Path $StateDir "$Base.pid"
 $NodeLogPath = Join-Path $StateDir "$Base.log"
-$EnvFile = Join-Path $StateDir "$Base.env"
-
-function Import-NodeEnvFile {
-  param([string]$Path)
-  if (-not (Test-Path -LiteralPath $Path)) { return }
-  Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object {
-    $line = $_.Trim()
-    if ($line -eq "" -or $line.StartsWith("#")) { return }
-    $eq = $line.IndexOf("=")
-    if ($eq -lt 1) { return }
-    $key = $line.Substring(0, $eq).Trim()
-    $val = $line.Substring($eq + 1).Trim()
-    if (
-      ($val.StartsWith('"') -and $val.EndsWith('"') -and $val.Length -ge 2) -or
-      ($val.StartsWith("'") -and $val.EndsWith("'") -and $val.Length -ge 2)
-    ) {
-      $val = $val.Substring(1, $val.Length - 2)
-    }
-    Set-Item -Path "Env:$key" -Value $val
-  }
-}
-
-Import-NodeEnvFile $EnvFile
 
 if ($Name) {
-  if (-not $env:LINKAGENT_NODE_NAME) {
-    $env:LINKAGENT_NODE_NAME = $Name
-  }
   $env:LINKAGENT_NODE_STATE_DIR = Join-Path $StateDir "node-$Name"
+}
+
+function Get-NodeConnectArgs {
+  if ($Name) { return @("--", "--name", $Name) }
+  return @()
 }
 
 function Get-StoredProcId {
@@ -118,7 +93,8 @@ function Start-NodeBackground {
     New-Item -ItemType File -Path $NodeLogPath | Out-Null
   }
   Write-Host "→ 后台启动节点 $(Get-InstanceLabel) ..."
-  $cmdLine = "/c pnpm --filter @linkagent/backend node:connect >> `"$NodeLogPath`" 2>&1"
+  $nameArg = if ($Name) { " -- --name $Name" } else { "" }
+  $cmdLine = "/c pnpm --filter @linkagent/backend node:connect$nameArg >> `"$NodeLogPath`" 2>&1"
   $p = Start-Process -FilePath "cmd.exe" `
     -ArgumentList $cmdLine `
     -WorkingDirectory $Repo `
@@ -201,7 +177,7 @@ function Show-NodeLog {
 function Start-NodeForeground {
   Write-Host "→ 前台运行节点 $(Get-InstanceLabel)（Ctrl-C 停止）..."
   Set-Location -LiteralPath $Repo
-  & pnpm --filter @linkagent/backend node:connect
+  & pnpm --filter @linkagent/backend node:connect @(Get-NodeConnectArgs)
   return $LASTEXITCODE
 }
 
