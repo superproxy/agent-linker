@@ -1,0 +1,5 @@
+# weixin 个人微信进程（gateway 进程内嵌或 pm 独立进程读此文件）
+enabled: true
+mode: weixin-bot
+model: agent:pi
+# gatewayUrl / gatewayToken 缺省由 gateway.yaml 的 server/auth 推导

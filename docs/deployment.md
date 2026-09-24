@@ -78,20 +78,30 @@ pnpm typecheck          # 可选：环境自检
 
 ### 4.1 配置
 
-编辑 `backend/config/config.yaml`（或用环境变量 `GATEWAY_CONFIG_PATH` 指向自定义配置）：
+在 `backend/config/` 下复制模板并编辑（推荐 **三文件**，各进程各改各的）：
+
+| 文件 | 说明 |
+|---|---|
+| `gateway.yaml` | 网关：`server` / `auth` / `agents` / `tasks` / `plugins` |
+| `weixin.yaml` | 个人微信进程 |
+| `node.yaml` | 本机 node 连接器（`node.agents` 与 ACP 权限） |
+
+同目录存在 **`gateway.yaml` 时优先读三文件**；仍兼容旧版单文件 `config.yaml`。也可用环境变量 `GATEWAY_CONFIG_PATH` 指向 `gateway.yaml` 或任意 monolith 路径。
 
 ```yaml
+# gateway.yaml 示例
 server:
-  host: 0.0.0.0      # 需要被其它机器访问时用 0.0.0.0；仅本机用 127.0.0.1
+  host: 0.0.0.0
   port: 8787
 auth:
-  enabled: true      # 跨机部署 / 公网强烈建议开启
-  token: "请改成强随机串"   # 机器客户端（Chatbox）与节点连接器用的静态令牌（可留空）
-  sessionTtlDays: 7  # Web UI 登录会话有效期（天），滑动续期
-# tasks.defaultAgentId: pi
+  mode: token
+  token: "请改成强随机串"
+  sessionTtlDays: 7
+tasks:
+  defaultAgentId: pi
 ```
 
-> 配置优先级：`GATEWAY_CONFIG_PATH` → `backend/config/config.yaml` → 内置默认值。
+> 加载优先级：`GATEWAY_CONFIG_PATH`（缺失则报错）→ 配置目录 split（`gateway.yaml`）→ `config.yaml` → 内置默认值。运行时变更（微信账号列表、agent 启停等）写入 `.runtime-state/gateway/overlay.json`，不改上述 yaml。
 
 #### 4.1.1 两套凭据与登录账号
 

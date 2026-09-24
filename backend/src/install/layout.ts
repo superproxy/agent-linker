@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CONFIG_BASENAMES } from '@linkagent/shared';
 
 export type InstallKind = 'dev' | 'dist';
 
@@ -77,7 +78,11 @@ export interface InstallLayout {
   readonly root: string;
   /** config.yaml 的有序候选路径（形态优先，均不存在时取首个作为报告路径） */
   readonly configCandidates: string[];
-  /** 选中的配置文件路径（不存在时回退形态默认，由加载层决定是否用默认值） */
+  /** 配置目录（gateway.yaml / weixin.yaml / node.yaml 与 config.yaml 同目录） */
+  readonly configDir: string;
+  /** split：gateway.yaml 存在；monolith：仅 config.yaml；none：均不存在 */
+  readonly configMode: 'split' | 'monolith' | 'none';
+  /** 主配置路径：split 时为 gateway.yaml，monolith 时为 config.yaml，否则为形态默认 config.yaml 路径 */
   readonly configFile: string;
   /** 自动生成的永久 gateway token 落盘路径 <root>/.runtime-state/gateway-token（三进程共享，0600） */
   readonly gatewayTokenFile: string;
@@ -124,7 +129,31 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
     kind === 'dist'
       ? [join(root, 'server', 'config', 'config.yaml'), join(root, 'backend', 'config', 'config.yaml')]
       : [join(root, 'backend', 'config', 'config.yaml'), join(root, 'server', 'config', 'config.yaml')];
-  const configFile = configCandidates.find((p) => existsSync(p)) ?? configCandidates[0]!;
+
+  let configDir = dirname(configCandidates[0]!);
+  for (const candidate of configCandidates) {
+    const dir = dirname(candidate);
+    if (existsSync(join(dir, CONFIG_BASENAMES.gateway))) {
+      configDir = dir;
+      break;
+    }
+    if (existsSync(candidate)) {
+      configDir = dir;
+      break;
+    }
+  }
+
+  const splitGateway = join(configDir, CONFIG_BASENAMES.gateway);
+  const monolithExisting = configCandidates.find((p) => existsSync(p));
+  let configMode: InstallLayout['configMode'] = 'none';
+  let configFile = configCandidates[0]!;
+  if (existsSync(splitGateway)) {
+    configMode = 'split';
+    configFile = splitGateway;
+  } else if (monolithExisting) {
+    configMode = 'monolith';
+    configFile = monolithExisting;
+  }
 
   // web 管理端：dist 为 <root>/web；dev 为 vite 产物 <root>/web/dist（兜底 <root>/web）
   const webCandidates = kind === 'dist' ? [join(root, 'web')] : [join(root, 'web', 'dist'), join(root, 'web')];
@@ -149,6 +178,8 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
     kind,
     root,
     configCandidates,
+    configDir,
+    configMode,
     configFile,
     gatewayTokenFile: state('gateway-token'),
     stateRoot: state(),

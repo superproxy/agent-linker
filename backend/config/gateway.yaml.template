@@ -1,0 +1,46 @@
+# gateway 网关进程配置（与 weixin.yaml / node.yaml 同目录）
+# 同目录存在 gateway.yaml 时，加载器优先读三文件；仍兼容旧版 config.yaml 单文件。
+#
+# Agent 与任务路由（必读）：
+#   - nodeId=local：按本文件 agents 在本机拉起 ACP。
+#   - nodeId=n_xxx：认 node.yaml 自报清单；gateway.agents 与 node.agents 须成对包含同一 id。
+
+server:
+  host: 127.0.0.1
+  port: 8787
+auth:
+  mode: local
+  token: ""
+  sessionTtlDays: 7
+agents:
+  - id: opencode
+    type: opencode
+    displayName: OpenCode
+    permissionMode: approve-all
+  - id: pi
+    type: pi
+    displayName: Pi
+    permissionMode: approve-all
+  - id: workbuddy
+    type: workbuddy
+    displayName: WorkBuddy
+    permissionMode: approve-all
+  - id: trace-cli
+    type: trace-cli
+    displayName: TraeCode CLI
+    permissionMode: approve-all
+  - id: cursor
+    type: cursor
+    displayName: Cursor
+    permissionMode: approve-all
+  - id: hermes
+    type: hermes
+    displayName: Hermes
+    permissionMode: approve-all
+plugins:
+  - package: "@tencent-weixin/openclaw-weixin"
+channels:
+  openclaw-weixin:
+    agentId: pi
+tasks:
+  defaultAgentId: pi

@@ -157,7 +157,7 @@ export const nodeSectionSchema = z
   .default({ enabled: true, name: '', agents: [], gatewayUrl: '', gatewayToken: '' });
 export type NodeSection = z.infer<typeof nodeSectionSchema>;
 
-/** 三进程共享配置文件 config.yaml 的新结构（gateway / weixin / node 三段） */
+/** 三进程有效配置结构（启动前 yaml：单文件 config.yaml 或 gateway/weixin/node 三文件合并） */
 export const sharedConfigSchema = z.object({
   gateway: gatewaySectionSchema,
   weixin: weixinSectionSchema,

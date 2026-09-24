@@ -5,6 +5,8 @@ nohup.out
 .DS_Store
 .env
 backend/config/gateway.yaml
+backend/config/weixin.yaml
+backend/config/node.yaml
 backend/config/config.yaml
 .runtime-state/
 .tmp/

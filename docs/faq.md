@@ -51,7 +51,7 @@ pnpm --filter @linkagent/backend test
 
 - 错误返回遵循网关既有结构（OpenAI 端点用 `openaiError(...)`，管理接口用 `errBody(...)`）。
 - 不提交明文密钥；密码用 scrypt + 随机 salt 哈希（见 `users/store.ts`）。
-- `.runtime-state/`、`backend/config/config.yaml` 等本地运行态不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
+- `.runtime-state/`、`backend/config/*.yaml`（含 `gateway.yaml` / `weixin.yaml` / `node.yaml` / `config.yaml`）等本地配置不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
 
 ## Pi 安装与模型配置
 

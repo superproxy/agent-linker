@@ -39,7 +39,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 |---|---|
 | `login-users/<username>/openclaw-weixin/accounts/<botId>-im-bot.json` | 该用户扫码后插件写入的 **ilink 机器人登录态**（token、游标 `.sync.json` 等） |
 | `login-users/<username>/openclaw-weixin/bindings/<username>.json` | **绑定表**：该登录用户 → 指向本目录下哪个 `*-im-bot` 文件（`weixin-binding.ts`，KV store） |
-| `config.yaml` → `weixin.accounts` | 哪些登录用户需要维护 **`weixin:<username>`** 进程（扫码成功后写入，`mode: external`） |
+| 运行时 overlay → `weixin.accounts` | 哪些登录用户需要维护 **`weixin:<username>`** 进程（扫码成功后写入，`mode: external`；不再写 yaml） |
 
 遗留的共享 `plugins/openclaw-weixin/accounts/` 仅 status 聚合展示；新扫码只写对应用户的 `login-users/<username>/`。
 
@@ -69,7 +69,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 - **单向分层**：`api → service → store`；共享契约放 `shared/src`，不重复定义；持久化复用 `gateway/store/` KV，不新造裸文件读写。
 - **鉴权**统一走 `users/auth.ts` 的 `AuthGuard`，不在 handler 内另判凭据；新增凭据类型需同步 auth/me、store/api、shared、测试（凭据分级见 `docs/architecture.md`）。
 - 错误用 `openaiError(...)`（/v1）或 `errBody(...)`（管理接口）；密码 scrypt 加盐，不提交明文密钥。
-- `.runtime-state/`、`backend/config/config.yaml` 不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
+- 启动前配置：推荐 `backend/config/` 下 **`gateway.yaml` / `weixin.yaml` / `node.yaml`**（有 `gateway.yaml` 则忽略同目录 `config.yaml`）；`.runtime-state/` 与上述 yaml 不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
 - **新增功能必须补测试**，重构后保持全量通过。
 
 ## 开发流程（强制）

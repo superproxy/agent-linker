@@ -55,6 +55,16 @@ test('dist 形态：有 .linkagent-root 时 kind=dist，配置/入口/页面走�
   assert.match(layout.restartWeixinHint, /start\.sh restart weixin/);
 });
 
+test('configFile：split 时选中 gateway.yaml', () => {
+  const root = tmpRoot();
+  mkdirSync(join(root, 'backend', 'config'), { recursive: true });
+  writeFileSync(join(root, 'backend', 'config', 'gateway.yaml'), 'server:\n  port: 8788\n');
+  writeFileSync(join(root, 'backend', 'config', 'config.yaml'), 'gateway:\n  server:\n    port: 8787\n');
+  const layout = createInstallLayout(root);
+  assert.equal(layout.configMode, 'split');
+  assert.equal(layout.configFile, join(root, 'backend', 'config', 'gateway.yaml'));
+});
+
 test('configFile：存在时选中形态优先的真实文件（dist 选中 server/config）', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');

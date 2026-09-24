@@ -15,7 +15,7 @@
 
 后端源码 `backend/src/`：
 
-- `gateway/` —— 网关核心。`index.ts`（Fastify 装配 + `/v1` handler）、`config.ts`；子目录：
+- `gateway/` —— 网关核心。`index.ts`（Fastify 装配 + `/v1` handler）、`config/`（yaml 加载、运行时 persist、鉴权 token、子进程回连；`config.ts` 为兼容 re-export）；子目录：
   - `agents/` agent/ACP 引擎管理；`nodes/` 节点注册与审批；`tasks/` 多任务路由（api→service→store）；
   - `users/` 登录账号、会话、`AuthGuard`、渠道用户凭据（`ct_`）、个人 API token（`pat_`）、机器 token（`nt_`）；
   - `plugins/` 渠道插件运行时；`pm/` 进程管理；`prefs/` 用户偏好；`store/` 通用 KV（原子写/损坏隔离）。
@@ -31,7 +31,7 @@
 - 单向分层：`api → service → store`，不要反向依赖或跨层。
 - 鉴权统一走 `users/auth.ts` 的 `AuthGuard`，不要在 handler 内另写凭据判断。
 - 持久化优先复用 `gateway/store/` 的通用 KV（JSON 原子写、损坏隔离），落盘到 `.runtime-state/`；不要新造裸文件读写。
-- **启动前 vs 运行时配置**：`config.yaml` 仅启动前模板；API 改动的 agent 启停、默认任务 agent、微信账号列表、子进程回连网关等走 **运行时层**（`gateway/store/runtime/`：`GatewayRuntimeRepository` + `applyRuntimeOverlay` 合并进有效配置）。当前默认后端为 `json-overlay`（`.runtime-state/gateway/overlay.json`）；环境变量 `LINKAGENT_RUNTIME_STORE=sqlite` 预留 SQLite 实现（同语义 schema，见 `sqlite-repository.ts` 注释），便于后续与其它运行态数据统一入库。
+- **启动前 vs 运行时配置**：启动前 yaml 推荐 **按进程拆分**：同目录 `gateway.yaml`（网关）、`weixin.yaml`（微信）、`node.yaml`（节点连接器）；存在 `gateway.yaml` 时优先于旧版单文件 `config.yaml`。运行时 API 改动（agent 启停、默认任务 agent、微信账号、子进程回连网关等）走 **运行时层**（`gateway/store/runtime/` + overlay/SQLite 预留），不改上述 yaml。
 - 前后端共享契约放 `shared/src`，经 `@linkagent/shared` 引用，不要两端重复定义。
 
 ## 鉴权与凭据模型（改动时务必对齐）

@@ -1,0 +1,10 @@
+# node 连接器进程（pm start node / 独立节点包）
+enabled: true
+agents:
+  - opencode
+  - pi
+  - workbuddy
+  - trace-cli
+  - id: cursor
+    permissionMode: approve-all
+  - hermes
