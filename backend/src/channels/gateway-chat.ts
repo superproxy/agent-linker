@@ -157,6 +157,8 @@ export interface RunChatSessionOptions {
   /** 网关静态 token（开启 auth 时由独立 bot 进程透传 Authorization） */
   gatewayToken?: string;
   traceId?: string;
+  /** 派发来源，写入 channels.v1.request */
+  source?: string;
   /** 底层发送一条消息（已切块）。重试由本模块处理 */
   send: (chunk: string) => Promise<void>;
   /** 切块策略：返回分段（微信按字符，企微按字节） */
@@ -232,7 +234,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
         channel: opts.channel,
         userId: opts.userId,
         owner: opts.ownerUsername,
-        source: 'weixin-bot',
+        source: opts.source ?? 'weixin-bot',
       });
     }
     let textReceived = false;

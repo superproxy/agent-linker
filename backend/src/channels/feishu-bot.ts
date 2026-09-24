@@ -3,7 +3,8 @@
  * 飞书用户 → WSClient → runChatSession → 网关 /v1 → im.v1.message.reply。
  */
 import { createRequire } from 'node:module';
-import { runChatSession } from './gateway-chat.js';
+import { GatewayUnauthorizedError, runChatSession } from './gateway-chat.js';
+import { emitChannelDispatchTrace, newDispatchTraceId } from '../store/dispatch-trace.js';
 import type { UserTokenProvider } from './user-token.js';
 
 const require = createRequire(import.meta.url);
@@ -135,28 +136,71 @@ export async function startFeishuBot(opts: FeishuBotOptions): Promise<FeishuBotH
         log(`[feishu] 跳过无文本或无 open_id message=${messageId}`);
         return;
       }
+      const traceId = newDispatchTraceId();
       log(`[feishu] inbound open_id=${openId} text="${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"`);
+      emitChannelDispatchTrace('channels.inbound', {
+        traceId,
+        source: 'feishu-bot',
+        channel: 'feishu',
+        userId: openId,
+        owner: opts.ownerUsername,
+        textLen: text.length,
+      });
       const send = async (chunk: string) => {
         await client.im.v1.message.reply({
           path: { message_id: messageId },
           data: { msg_type: 'text', content: JSON.stringify({ text: chunk }) },
         });
       };
-      // 长连接回调要尽快返回，对话放到后台
-      void (async () => {
-        const gatewayToken = await bearerFor(opts, openId, false, log);
-        await runChatSession({
+      const runOnce = async (forceToken: boolean) => {
+        const gatewayToken = await bearerFor(opts, openId, forceToken, log);
+        return runChatSession({
           gatewayUrl: opts.gatewayUrl,
           model: opts.model,
-          gatewayToken,
           channel: 'feishu',
           userId: openId,
           ...(opts.ownerUsername ? { ownerUsername: opts.ownerUsername } : {}),
           message: text,
+          traceId,
+          source: 'feishu-bot',
+          ...(gatewayToken ? { gatewayToken } : {}),
           send,
           split: splitText,
+          maxTextChars: 512,
           log,
         });
+      };
+      // 长连接回调要尽快返回，对话放到后台
+      void (async () => {
+        let out;
+        try {
+          out = await runOnce(false);
+        } catch (err) {
+          if (err instanceof GatewayUnauthorizedError && opts.userTokenProvider) {
+            log(`[feishu] 用户 token 401，刷新后重试 open_id=${openId}`);
+            out = await runOnce(true);
+          } else {
+            throw err;
+          }
+        }
+        if (out.text.trim()) {
+          log(`[feishu] outbound open_id=${openId} len=${out.text.length}`);
+          emitChannelDispatchTrace('channels.reply', {
+            traceId,
+            channel: 'feishu',
+            userId: openId,
+            delivered: true,
+            replyChars: out.text.length,
+          });
+        } else if (!out.reasoning.trim()) {
+          log(`[feishu] 网关无输出 open_id=${openId}`);
+          emitChannelDispatchTrace('channels.reply', {
+            traceId,
+            channel: 'feishu',
+            userId: openId,
+            delivered: false,
+          });
+        }
       })().catch((err: unknown) => {
         errLog('[feishu] 处理消息失败:', err instanceof Error ? err.message : err);
       });
