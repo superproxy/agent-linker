@@ -65,7 +65,7 @@ export interface NavGroup {
 /**
  * 侧栏信息架构（自上而下）：
  * - 首页：总览
- * - 我的：登录用户日常 — 任务 → 三类 Key → 微信 → 企业微信 / 飞书（管理员）→ 对话
+ * - 我的：登录用户日常 — 任务 → 三类 Key → 微信 / 企业微信 / 飞书 → 对话
  * - 本机 / 远程：管理员或运维的机器、网关、agent
  * - 系统：用户管理（登录账号）
  */
@@ -82,8 +82,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'my-token', label: '用户 Key', icon: <SafetyCertificateOutlined /> },
       { id: 'node-key', label: '节点 Key', icon: <ClusterOutlined /> },
       { id: 'weixin', label: '微信', icon: <MessageOutlined /> },
-      { id: 'wecom', label: '企业微信', icon: <MessageOutlined />, adminOnly: true },
-      { id: 'feishu', label: '飞书', icon: <MessageOutlined />, adminOnly: true },
+      { id: 'wecom', label: '企业微信', icon: <MessageOutlined /> },
+      { id: 'feishu', label: '飞书', icon: <MessageOutlined /> },
       { id: 'chat', label: '对话', icon: <MessageOutlined /> },
     ],
   },

@@ -15,10 +15,13 @@ type FormValues = {
   connectionMode: 'websocket' | 'webhook';
 };
 
-export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler }) {
+export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler; isAdmin?: boolean }) {
   const base = processApiBase();
   const client = useMemo(() => new WecomConfigClient(base, () => props.token), [base, props.token]);
-  const pm = useMemo(() => new PmClient(base, () => props.token), [base, props.token]);
+  const pm = useMemo(
+    () => (props.isAdmin ? new PmClient(base, () => props.token) : null),
+    [base, props.token, props.isAdmin],
+  );
   const { tick } = useRefreshTick();
   const [form] = Form.useForm<FormValues>();
   const [cfg, setCfg] = useState<WecomChannelConfig | null>(null);
@@ -72,6 +75,7 @@ export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler 
   };
 
   const pmAct = async (op: 'start' | 'restart' | 'stop') => {
+    if (!pm) return;
     setBusy(true);
     try {
       if (op === 'start') await pm.start(['channels']);
@@ -99,6 +103,7 @@ export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler 
 
       {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} /> : null}
 
+      {props.isAdmin ? (
       <Card
         title={
           <Space>
@@ -180,6 +185,14 @@ export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler 
           />
         ) : null}
       </Card>
+      ) : cfg ? (
+        <Alert
+          type={running ? 'success' : 'warning'}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={running ? 'channels 运行中' : 'channels 未运行；点「保存并重启 channels」即可拉起'}
+        />
+      ) : null}
 
       <Card title="OpenClaw 企微配置">
         <Form form={form} layout="vertical" requiredMark={false}>
@@ -220,11 +233,13 @@ export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler 
         </Form>
       </Card>
 
-      <ChannelGatewayLogPanel
-        token={props.token}
-        title="channels 远程日志（企微调试）"
-        hint="端到端追踪：channels 侧 step=channels.*（入站/token/v1/回执），gateway 侧 step=gateway.*；用同一 traceId 串起来。重启 gateway + channels 后生效。"
-      />
+      {props.isAdmin ? (
+        <ChannelGatewayLogPanel
+          token={props.token}
+          title="channels 远程日志（企微调试）"
+          hint="端到端追踪：channels 侧 step=channels.*（入站/token/v1/回执），gateway 侧 step=gateway.*；用同一 traceId 串起来。重启 gateway + channels 后生效。"
+        />
+      ) : null}
     </div>
   );
 }

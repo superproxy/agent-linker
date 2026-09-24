@@ -111,19 +111,20 @@ export function resolveAgentRoute(params: {
   const dmScope = params.dmScope ?? section?.session?.dmScope ?? (cfg?.session as { dmScope?: string } | undefined)?.dmScope ?? 'per-account-channel-peer';
   const groupScope = params.groupScope ?? section?.session?.groupScope ?? (cfg?.session as { groupScope?: string } | undefined)?.groupScope ?? 'per-group';
   const peer = params.peer?.id ? { kind: params.peer.kind, id: params.peer.id } : null;
-  if (channel === 'wecom') {
-    const stripped = peer?.id ? stripChannelPeer(channel, peer.id) : null;
+  if (channel === 'wecom' || channel === 'feishu' || channel === 'lark') {
+    const logical = channel === 'lark' ? 'feishu' : channel;
+    const stripped = peer?.id ? stripChannelPeer(logical, peer.id) : null;
     const kind = peer?.kind === 'group' || stripped?.kind === 'group' ? 'group' : 'direct';
     const id = stripped?.id ?? '';
-    const sessionKey = id ? (kind === 'group' ? `wecom:group:${id}` : `wecom:${id}`) : 'wecom:unknown';
+    const sessionKey = id ? (kind === 'group' ? `${logical}:group:${id}` : `${logical}:${id}`) : `${logical}:unknown`;
     return {
       agentId: '',
-      channel,
+      channel: logical,
       accountId,
       dmScope,
       groupScope,
       sessionKey,
-      mainSessionKey: 'wecom:main',
+      mainSessionKey: `${logical}:main`,
       // 非 default：插件动态路由不会把 agent:<id> 写回 sessionKey。
       matchedBy: id ? 'binding.peer' : 'channel-user',
     };

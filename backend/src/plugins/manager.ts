@@ -183,11 +183,12 @@ export class PluginManager {
     try {
       return await import(pkg);
     } catch (err) {
-      const first = err;
       try {
         return await import(`${pkg}/dist/index.js`);
-      } catch {
-        throw first;
+      } catch (distErr) {
+        const distMsg = distErr instanceof Error ? distErr.message : String(distErr);
+        const missingDist = /Cannot find (module|package)/i.test(distMsg) && distMsg.includes(`${pkg}/dist/index.js`);
+        throw missingDist ? err : distErr;
       }
     }
   }
@@ -209,32 +210,38 @@ export class PluginManager {
 
     for (const pluginPackage of pluginPackages) {
       this.logger.info(`[plugins] 加载插件包 ${pluginPackage} ...`);
-      const mod = (await PluginManager.importPlugin(pluginPackage)) as { default?: unknown; [key: string]: unknown };
-      const plugin = (mod.default ?? mod) as {
-        id?: string;
-        name?: string;
-        description?: string;
-        version?: string;
-        register(api: OpenClawPluginApi): void;
-      };
-      if (typeof plugin.register !== 'function') {
-        throw new Error(`插件包 ${pluginPackage} 无 register() 入口（default export 应为插件对象）`);
-      }
+      try {
+        const mod = (await PluginManager.importPlugin(pluginPackage)) as { default?: unknown; [key: string]: unknown };
+        const plugin = (mod.default ?? mod) as {
+          id?: string;
+          name?: string;
+          description?: string;
+          version?: string;
+          register(api: OpenClawPluginApi): void;
+        };
+        if (typeof plugin.register !== 'function') {
+          throw new Error(`插件包 ${pluginPackage} 无 register() 入口（default export 应为插件对象）`);
+        }
 
-      const api = createPluginApi({
-        pluginId: plugin.id ?? 'plugin',
-        name: plugin.name ?? 'plugin',
-        version: plugin.version ?? '0.0.0',
-        description: plugin.description,
-        config: pluginConfig,
-        runtime,
-        logger: this.runtimeLogger(),
-        collector,
-      });
-      plugin.register(api);
-      this.logger.info(
-        `[plugins] ${plugin.id ?? 'plugin'} 注册完成：${collector.channels.size} 渠道 / ${collector.httpRoutes.length} 路由 / ${collector.tools.length} 工具 / ${collector.hooks.length} hooks`,
-      );
+        const api = createPluginApi({
+          pluginId: plugin.id ?? 'plugin',
+          name: plugin.name ?? 'plugin',
+          version: plugin.version ?? '0.0.0',
+          description: plugin.description,
+          config: pluginConfig,
+          runtime,
+          logger: this.runtimeLogger(),
+          collector,
+        });
+        await plugin.register(api);
+        this.logger.info(
+          `[plugins] ${plugin.id ?? 'plugin'} 注册完成：${collector.channels.size} 渠道 / ${collector.httpRoutes.length} 路由 / ${collector.tools.length} 工具 / ${collector.hooks.length} hooks`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `[plugins] 加载插件包 ${pluginPackage} 失败: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // 启动每个注册渠道的账号

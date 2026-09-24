@@ -296,12 +296,18 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
     channel,
     accountId,
     peer: peerId ? { kind: peerKind, id: peerId } : null,
-    defaultAgentId: channel === 'wecom' ? undefined : typeof ctx.AgentId === 'string' ? ctx.AgentId : undefined,
+    defaultAgentId:
+      channel === 'wecom' || channel === 'feishu' || channel === 'lark'
+        ? undefined
+        : typeof ctx.AgentId === 'string'
+          ? ctx.AgentId
+          : undefined,
   });
-  // 企微会话键由 resolveAgentRoute 生成（wecom:<userid>），忽略插件写入的 agent:pi SessionKey。
-  const sessionKey = channel === 'wecom' ? route.sessionKey : String(ctx.SessionKey ?? route.sessionKey);
+  // 企微/飞书会话键由 resolveAgentRoute 生成（channel:<userid>），忽略插件写入的 agent:pi。
+  const taskPeer = channel === 'wecom' || channel === 'feishu' || channel === 'lark';
+  const sessionKey = taskPeer ? route.sessionKey : String(ctx.SessionKey ?? route.sessionKey);
   const agentId =
-    channel === 'wecom'
+    taskPeer
       ? ''
       : typeof ctx.AgentId === 'string' && ctx.AgentId.trim()
         ? ctx.AgentId.trim()

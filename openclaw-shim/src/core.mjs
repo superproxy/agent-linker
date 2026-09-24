@@ -19,6 +19,36 @@ function normalizeStringEntries(entries) {
 }
 
 /** 通配 allowFrom：保证包含 "*"（插件 pairing/allowFrom 共用） */
+export const DEFAULT_ACCOUNT_ID = 'default';
+
+export function buildChannelConfigSchema(schema) {
+  return { schema: schema ?? {} };
+}
+
+export function createActionGate(actions) {
+  return (name, defaultOn = false) => {
+    if (!actions || typeof actions !== 'object') return defaultOn;
+    if (actions[name] === false) return false;
+    if (actions[name] === true) return true;
+    return defaultOn;
+  };
+}
+
+export function createDedupeCache() {
+  const seen = new Set();
+  return {
+    check(key) {
+      return seen.has(key);
+    },
+    set(key) {
+      seen.add(key);
+    },
+    peek(key) {
+      return seen.has(key);
+    },
+  };
+}
+
 export function addWildcardAllowFrom(allowFrom) {
   const next = normalizeStringEntries(allowFrom ?? []);
   if (!next.includes('*')) next.push('*');

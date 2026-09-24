@@ -286,9 +286,9 @@ function PageRouter(props: {
     case 'weixin':
       return <WeixinPage base={base} token={token} onAuthError={onAuthError} username={username} isAdmin={isAdmin} />;
     case 'wecom':
-      return isAdmin ? <WecomPage token={token} onAuthError={onAuthError} /> : null;
+      return <WecomPage token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'feishu':
-      return isAdmin ? <FeishuPage token={token} onAuthError={onAuthError} /> : null;
+      return <FeishuPage token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'accounts':
       return isAdmin ? <AccountsPage base={base} token={token} onAuthError={onAuthError} /> : null;
     case 'processes':

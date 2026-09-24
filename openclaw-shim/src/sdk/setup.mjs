@@ -1,9 +1,4 @@
-/**
- * openclaw/plugin-sdk/setup shim
- * 插件只从这里取 addWildcardAllowFrom（缺失时 catch 降级），完整实现见 core。
- */
-export { addWildcardAllowFrom, mergeAllowFromEntries } from './core.mjs';
-export { DEFAULT_ACCOUNT_ID, normalizeAccountId } from './account-id.mjs';
+export const DEFAULT_ACCOUNT_ID = 'default';
 
 export function createSetupTranslator(def) {
   return def ?? {};
@@ -15,6 +10,10 @@ export function formatDocsLink(path) {
 
 export function hasConfiguredSecretInput(value) {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function mergeAllowFromEntries(...lists) {
+  return lists.flat().filter(Boolean);
 }
 
 export function patchScopedAccountConfig(params) {
@@ -36,5 +35,3 @@ export function setSetupChannelEnabled(cfg) {
 export function splitSetupEntries(value) {
   return Array.isArray(value) ? value : [];
 }
-
-export default { addWildcardAllowFrom, mergeAllowFromEntries, DEFAULT_ACCOUNT_ID, normalizeAccountId };

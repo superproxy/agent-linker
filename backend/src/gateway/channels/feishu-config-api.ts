@@ -23,17 +23,8 @@ export interface FeishuConfigApiDeps {
 export function registerFeishuConfigApi(app: FastifyInstance, deps: FeishuConfigApiDeps): void {
   const { authGuard, configPath, pm, reloadConfig } = deps;
 
-  const admin = (request: { ip?: string }, reply: { code: (n: number) => { send: (b: unknown) => unknown } }): boolean => {
-    if (!authGuard.isAdmin(request as never)) {
-      void reply.code(403).send({ error: '仅管理员可配置飞书' });
-      return false;
-    }
-    return true;
-  };
-
   app.get('/api/channels/feishu', async (request, reply) => {
     if (!authGuard.checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    if (!admin(request, reply)) return;
     const config = reloadConfig();
     const view = readFeishuConfigView(configPath);
     const cred = readFeishuCredentials(view.feishu);
@@ -59,7 +50,6 @@ export function registerFeishuConfigApi(app: FastifyInstance, deps: FeishuConfig
 
   app.put('/api/channels/feishu', async (request, reply) => {
     if (!authGuard.checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    if (!admin(request, reply)) return;
 
     const body = (request.body ?? {}) as Record<string, unknown>;
     const enabled = body.enabled === true;

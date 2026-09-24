@@ -18,10 +18,13 @@ type FormValues = {
   encryptKey: string;
 };
 
-export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler }) {
+export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler; isAdmin?: boolean }) {
   const base = processApiBase();
   const client = useMemo(() => new FeishuConfigClient(base, () => props.token), [base, props.token]);
-  const pm = useMemo(() => new PmClient(base, () => props.token), [base, props.token]);
+  const pm = useMemo(
+    () => (props.isAdmin ? new PmClient(base, () => props.token) : null),
+    [base, props.token, props.isAdmin],
+  );
   const { tick } = useRefreshTick();
   const [form] = Form.useForm<FormValues>();
   const [cfg, setCfg] = useState<FeishuChannelConfig | null>(null);
@@ -81,6 +84,7 @@ export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler
   };
 
   const pmAct = async (op: 'start' | 'restart' | 'stop') => {
+    if (!pm) return;
     setBusy(true);
     try {
       if (op === 'start') await pm.start(['channels']);
@@ -109,6 +113,7 @@ export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler
 
       {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} /> : null}
 
+      {props.isAdmin ? (
       <Card
         title={
           <Space>
@@ -200,6 +205,14 @@ export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler
           />
         ) : null}
       </Card>
+      ) : cfg ? (
+        <Alert
+          type={running ? 'success' : 'warning'}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={running ? 'channels 运行中' : 'channels 未运行；点「保存并重启 channels」即可拉起'}
+        />
+      ) : null}
 
       <Card title="OpenClaw 飞书配置">
         <Form form={form} layout="vertical" requiredMark={false}>
@@ -249,7 +262,7 @@ export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler
         </Form>
       </Card>
 
-      <ChannelGatewayLogPanel token={props.token} title="channels 远程日志（飞书调试）" />
+      {props.isAdmin ? <ChannelGatewayLogPanel token={props.token} title="channels 远程日志（飞书调试）" /> : null}
     </div>
   );
 }

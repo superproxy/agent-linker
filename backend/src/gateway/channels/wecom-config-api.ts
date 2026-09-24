@@ -56,17 +56,8 @@ export function registerWecomConfigApi(app: FastifyInstance, deps: WecomConfigAp
     return { ok: true };
   });
 
-  const admin = (request: { ip?: string }, reply: { code: (n: number) => { send: (b: unknown) => unknown } }): boolean => {
-    if (!authGuard.isAdmin(request as never)) {
-      void reply.code(403).send({ error: '仅管理员可配置企业微信' });
-      return false;
-    }
-    return true;
-  };
-
   app.get('/api/channels/wecom', async (request, reply) => {
     if (!authGuard.checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    if (!admin(request, reply)) return;
     const config = reloadConfig();
     const view = readWecomConfigView(configPath);
     const secret = maskSecret(view.wecom.secret);
@@ -89,7 +80,6 @@ export function registerWecomConfigApi(app: FastifyInstance, deps: WecomConfigAp
 
   app.put('/api/channels/wecom', async (request, reply) => {
     if (!authGuard.checkAuth(request)) return reply.code(401).send({ error: 'unauthorized' });
-    if (!admin(request, reply)) return;
 
     const body = (request.body ?? {}) as Record<string, unknown>;
     const enabled = body.enabled === true;
