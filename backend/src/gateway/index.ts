@@ -126,7 +126,12 @@ export async function buildServer(options?: {
   port: number;
   authEnabled: boolean;
 }> {
-  const { config: sharedConfig, path: configPath } = loadSharedConfig(options?.configPath);
+  const layout = options?.stateRoot ? createInstallLayout(options.stateRoot) : getLayout();
+  const runtimeGatewayDir = layout.state('gateway');
+  const { config: sharedConfig, path: configPath } = loadSharedConfig(
+    options?.configPath,
+    runtimeGatewayDir,
+  );
   const config: SharedConfig = sharedConfig;
   // 便捷别名：gateway 段（原扁平配置整体收敛于此）
   const gw = config.gateway;
@@ -140,8 +145,6 @@ export async function buildServer(options?: {
 
   // 安装布局：形态判定（dev/dist）与所有运行态路径的唯一来源
   // 测试可传 stateRoot 把运行态指到临时根（createInstallLayout 可传任意 root），避免集成测试污染真实 .runtime-state
-  const layout = options?.stateRoot ? createInstallLayout(options.stateRoot) : getLayout();
-
   // ── 鉴权：local/token/open；gateway token 配置优先，空则自动生成落盘（三进程共享）──
   const auth = resolveGatewayAuth(config, layout.gatewayTokenFile);
   const authEnabled = auth.mode !== 'open';
@@ -247,7 +250,7 @@ export async function buildServer(options?: {
   registerUserApi(app, userStore, authGuard, personalTokenStore, nodeTokenStore, nodeClaimStore, async (username) => {
     taskService.deleteOwnedBy(username);
     try {
-      const next = persistRemoveWeixinAccount(configPath, username);
+      const next = persistRemoveWeixinAccount(configPath, username, runtimeGatewayDir);
       config.weixin = { ...config.weixin, accounts: next };
       await pm.stop([`weixin:${username}` as ProcessInstanceId]);
     } catch {
@@ -274,7 +277,7 @@ export async function buildServer(options?: {
       hasRoutingAgent: (nodeId, agentId) => manager.hasRoutingAgent(nodeId, agentId),
       // 原子化运行时：先改内存再落盘 config.yaml；落盘抛错时接口层回滚内存值
       persistDefaultAgent: (agentId) => {
-        persistDefaultTaskAgentId(configPath, agentId);
+        persistDefaultTaskAgentId(configPath, agentId, runtimeGatewayDir);
         // zod default 产出只读代理：整体替换 gateway 段
         config.gateway = { ...config.gateway, tasks: { ...config.gateway.tasks, defaultAgentId: agentId } };
       },
@@ -343,6 +346,7 @@ export async function buildServer(options?: {
     pm,
     authGuard,
     configPath,
+    runtimeGatewayDir,
     onChildGatewayChanged: (section, target) => {
       // zod default 产出只读代理：整体替换对应顶层段，保持网关内存与落盘一致
       if (section === 'weixin') {
@@ -782,9 +786,9 @@ export async function buildServer(options?: {
     };
     try {
       const agent = manager.addAgent(def);
-      const agents = persistAgentEnabled(configPath, kind, true, manager.snapshotDefinitions());
+      const agents = persistAgentEnabled(configPath, kind, true, manager.snapshotDefinitions(), runtimeGatewayDir);
       config.gateway = { ...config.gateway, agents };
-      const nodeAgents = persistNodeAgentRegistered(configPath, kind);
+      const nodeAgents = persistNodeAgentRegistered(configPath, kind, runtimeGatewayDir);
       config.node = { ...config.node, agents: nodeAgents };
       return { agent };
     } catch (err) {
@@ -835,7 +839,13 @@ export async function buildServer(options?: {
       const agent = manager.updateAgent(request.params.id, patch);
       if (patch.enabled !== undefined) {
         try {
-          const agents = persistAgentEnabled(configPath, request.params.id, patch.enabled, manager.snapshotDefinitions());
+          const agents = persistAgentEnabled(
+            configPath,
+            request.params.id,
+            patch.enabled,
+            manager.snapshotDefinitions(),
+            runtimeGatewayDir,
+          );
           config.gateway = { ...config.gateway, agents };
         } catch (err) {
           if (prevEnabled !== undefined) manager.updateAgent(request.params.id, { enabled: prevEnabled });
@@ -948,21 +958,21 @@ export async function buildServer(options?: {
         channelTokenStore.revokeForOwner('weixin', accountId);
         weixinLoginService.clearChannelTokenCache(accountId);
         taskService.rotateKeysOnWeixinBind(accountId);
-        const accounts = persistEnsureWeixinAccount(configPath, accountId);
+        const accounts = persistEnsureWeixinAccount(configPath, accountId, runtimeGatewayDir);
         config.weixin = { ...config.weixin, accounts, mode: 'external' };
         if (weixinBot) await weixinBot.stop().catch(() => {});
         // start 遇已运行会跳过，旧进程内存里仍持有 ct_；必须重启才能丢掉缓存
         await pm.restart([`weixin:${accountId}` as ProcessInstanceId]);
       },
       async restartAccount(accountId) {
-        const accounts = persistEnsureWeixinAccount(configPath, accountId);
+        const accounts = persistEnsureWeixinAccount(configPath, accountId, runtimeGatewayDir);
         config.weixin = { ...config.weixin, accounts, mode: 'external' };
         if (weixinBot) await weixinBot.stop().catch(() => {});
         await pm.restart([`weixin:${accountId}` as ProcessInstanceId]);
       },
       async onUnbound(accountId) {
         channelTokenStore.revokeForOwner('weixin', accountId);
-        const next = persistRemoveWeixinAccount(configPath, accountId);
+        const next = persistRemoveWeixinAccount(configPath, accountId, runtimeGatewayDir);
         config.weixin = { ...config.weixin, accounts: next };
         await pm.stop([`weixin:${accountId}` as ProcessInstanceId]);
         if (weixinBot) await weixinBot.stop().catch(() => {});

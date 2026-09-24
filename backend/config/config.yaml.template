@@ -114,7 +114,7 @@ weixin:
 # pm start node 拉起的本机节点：agents 只认本段（LINKAGENT_NODE_AGENTS 被 supervisor 置空）。
 # 独立节点包仍可用环境变量 LINKAGENT_NODE_AGENTS 覆盖。
 # 列表须与本机已安装 CLI 一致；任务路由到 n_xxx 时只认此处（及握手）注册的 id。
-# permissionMode / permissionPolicy 不在本段配置：连接器从同文件 gateway.agents 按 id 合并，hello 时上报给网关。
+# node.agents：节点连接器自报清单；ACP 权限（permissionMode / permissionPolicy）只在此段配置，hello 上报。
 node:
   enabled: true
   # name: ""                # 节点展示名（缺省 node-<hostname>）
@@ -123,7 +123,10 @@ node:
     - pi
     - workbuddy
     - trace-cli
-    - cursor
+    - id: cursor
+      permissionMode: approve-all
+      # permissionPolicy:
+      #   defaultAction: approve
     - hermes
   # gatewayUrl: ""          # 缺省由 gateway.server 推导
   # gatewayToken: ""        # 缺省取 gateway.auth.token 或 gateway-token 文件

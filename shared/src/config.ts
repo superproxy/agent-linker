@@ -126,6 +126,17 @@ export const weixinSectionSchema = z
   });
 export type WeixinSection = z.infer<typeof weixinSectionSchema>;
 
+/** node.agents 单项：字符串 id 或带 ACP 权限的对象（仅节点连接器 / 远程执行生效） */
+export const nodeAgentEntrySchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().optional(),
+  permissionMode: z.enum(ACP_PERMISSION_MODES).optional(),
+  permissionPolicy: permissionPolicySchema,
+});
+export type NodeAgentConfigEntry = z.infer<typeof nodeAgentEntrySchema>;
+export const nodeAgentListItemSchema = z.union([z.string().min(1), nodeAgentEntrySchema]);
+export type NodeAgentListItem = z.infer<typeof nodeAgentListItemSchema>;
+
 /** node（executor）执行器进程段：本机/远程节点连接器 */
 export const nodeSectionSchema = z
   .object({
@@ -133,8 +144,11 @@ export const nodeSectionSchema = z
     enabled: z.boolean().default(true),
     /** 节点展示名（缺省 node-<hostname>） */
     name: z.string().default(''),
-    /** 上报的 agent id 列表（空 = 网关默认：opencode/pi/workbuddy/trace-cli/cursor） */
-    agents: z.array(z.string()).default([]),
+    /**
+     * 节点自报 agent 清单（空 = 内置默认 id 列表）。
+     * 可为 id 字符串，或 { id, permissionMode?, permissionPolicy?, displayName? }（ACP 权限只在此段配置）。
+     */
+    agents: z.array(nodeAgentListItemSchema).default([]),
     /** 网关地址；缺省由 gateway.server 推导 */
     gatewayUrl: z.string().default(''),
     /** 回连网关的永久 token；缺省取 gateway.auth.token 或自动生成的 gateway-token */
@@ -184,7 +198,7 @@ const legacyConfigSchema = z
       .object({
         enabled: z.boolean().optional(),
         name: z.string().optional(),
-        agents: z.array(z.string()).optional(),
+        agents: z.array(nodeAgentListItemSchema).optional(),
         gatewayUrl: z.string().optional(),
         gatewayToken: z.string().optional(),
       })

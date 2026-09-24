@@ -14,7 +14,7 @@ export const LOCAL_NODE_NAME = '本机（网关）';
 export interface NodeAgentInfo {
   id: string;
   displayName?: string;
-  /** 自报 ACP 权限模式（来自执行机 config gateway.agents，hello 时上报） */
+  /** 自报 ACP 权限模式（来自执行机 config node.agents，hello 时上报） */
   permissionMode?: AcpPermissionMode;
   permissionPolicy?: PermissionPolicySpec;
 }

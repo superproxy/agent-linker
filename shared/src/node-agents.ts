@@ -1,20 +1,34 @@
 import { normalizeAgentId } from './adapter.js';
-import type { SharedConfig } from './config.js';
+import type { NodeAgentListItem } from './config.js';
 import type { NodeAgentInfo } from './node.js';
 
+/** 从 node.agents 配置项解析 agent id */
+export function nodeAgentEntryId(item: NodeAgentListItem): string {
+  return normalizeAgentId(typeof item === 'string' ? item : item.id);
+}
+
 /**
- * 节点连接器自报清单：id 来自 node.agents / 环境变量，权限与展示名来自同机 config 的 gateway.agents。
- * 远程执行机须在本机 config.yaml 的 gateway.agents 里为对应 id 写好 permissionMode / permissionPolicy。
+ * 按 node.agents 配置 + 实际上线 id 列表，生成 hello 自报清单（含 permissionMode / permissionPolicy）。
+ * 权限只读 node 段，不读 gateway.agents。
  */
-export function buildNodeAgentInfos(config: SharedConfig, agentIds: string[]): NodeAgentInfo[] {
-  const defs = new Map(config.gateway.agents.map((d) => [normalizeAgentId(d.id), d] as const));
-  return agentIds.map((rawId) => {
-    const id = normalizeAgentId(rawId);
-    const def = defs.get(id);
-    const info: NodeAgentInfo = { id };
-    if (def?.displayName?.trim()) info.displayName = def.displayName.trim();
-    if (def?.permissionMode) info.permissionMode = def.permissionMode;
-    if (def?.permissionPolicy) info.permissionPolicy = def.permissionPolicy;
-    return info;
+export function resolveNodeAgentInfos(nodeAgents: NodeAgentListItem[], agentIds: string[]): NodeAgentInfo[] {
+  const byId = new Map<string, NodeAgentInfo>();
+  for (const item of nodeAgents) {
+    if (typeof item === 'string') {
+      const id = normalizeAgentId(item);
+      if (!byId.has(id)) byId.set(id, { id });
+      continue;
+    }
+    const id = normalizeAgentId(item.id);
+    byId.set(id, {
+      id,
+      ...(item.displayName?.trim() ? { displayName: item.displayName.trim() } : {}),
+      ...(item.permissionMode ? { permissionMode: item.permissionMode } : {}),
+      ...(item.permissionPolicy ? { permissionPolicy: item.permissionPolicy } : {}),
+    });
+  }
+  return agentIds.map((raw) => {
+    const id = normalizeAgentId(raw);
+    return byId.get(id) ?? { id };
   });
 }

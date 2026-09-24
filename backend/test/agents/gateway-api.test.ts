@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
-import { migrateConfig } from '@linkagent/shared';
 import { buildServer } from '../../src/gateway/index.js';
+import { createInstallLayout } from '../../src/install/layout.js';
+import { loadSharedConfig } from '../../src/gateway/config.js';
 
 type Built = Awaited<ReturnType<typeof buildServer>>;
 
@@ -147,12 +148,13 @@ test('POST /api/agents：未知类型 400；重复 409；合法添加 200 且模
   }
 });
 
-test('POST /api/agents：添加 hermes 写入 config.yaml，重启配置仍含该 agent', async () => {
+test('POST /api/agents：添加 hermes 写入 overlay，重启配置仍含该 agent', async () => {
   const stateRoot = mkdtempSync(join(tmpdir(), 'linkagent-agents-persist-'));
   TMP_ROOTS.push(stateRoot);
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
   TMP_ROOTS.push(dir);
   const configPath = join(dir, 'config.yaml');
+  const runtimeGatewayDir = createInstallLayout(stateRoot).state('gateway');
   writeFileSync(
     configPath,
     'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n  agents:\n    - id: opencode\n      type: opencode\n      enabled: true\n',
@@ -166,13 +168,15 @@ test('POST /api/agents：添加 hermes 写入 config.yaml，重启配置仍含�
   try {
     const ok = await app.inject({ method: 'POST', url: '/api/agents', payload: { type: 'hermes' } });
     assert.equal(ok.statusCode, 200);
-    const cfg = migrateConfig(parse(readFileSync(configPath, 'utf8')));
+    assert.doesNotMatch(readFileSync(configPath, 'utf8'), /hermes/);
+    const cfg = loadSharedConfig(configPath, runtimeGatewayDir).config;
     const hermes = cfg.gateway.agents.find((a) => a.id === 'hermes');
     assert.ok(hermes);
     assert.equal(hermes.type, 'hermes');
     assert.equal(hermes.enabled !== false, true);
-    const cfgNode = migrateConfig(parse(readFileSync(configPath, 'utf8')));
-    assert.ok(cfgNode.node.agents.map((a) => a.toLowerCase()).includes('hermes'));
+    assert.ok(
+      cfg.node.agents.map((a) => (typeof a === 'string' ? a : a.id).toLowerCase()).includes('hermes'),
+    );
   } finally {
     await pluginManager?.dispose().catch(() => {});
     await manager.dispose().catch(() => {});

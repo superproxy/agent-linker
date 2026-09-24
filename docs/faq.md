@@ -64,4 +64,5 @@ pnpm --filter @linkagent/backend test
 ## 已知遗留 / 待办
 
 - 个人 token（`pat_`）后端、接口与「我的 Token」界面已完成；遗留 `pat_` 经 Chatbox 等第三方客户端直连 `/v1` 的端到端回归联调。
+- 网关运行时配置：当前默认 `json-overlay`（`.runtime-state/gateway/overlay.json`）；`LINKAGENT_RUNTIME_STORE=sqlite` 与 `gateway/store/runtime/sqlite-repository.ts` 已预留接口与 schema 注释，**尚未实现**，后续与其它运行态统一入库时再补。
 - Agent 管理已按机器（节点）分组（本机可编辑、远程只读）；节点连接器侧的开通项仍需在各机器本地用 `LINKAGENT_NODE_AGENTS` 维护，后台暂无远程下发能力（产品上刻意只读）。

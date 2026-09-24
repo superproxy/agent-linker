@@ -31,6 +31,7 @@
 - 单向分层：`api → service → store`，不要反向依赖或跨层。
 - 鉴权统一走 `users/auth.ts` 的 `AuthGuard`，不要在 handler 内另写凭据判断。
 - 持久化优先复用 `gateway/store/` 的通用 KV（JSON 原子写、损坏隔离），落盘到 `.runtime-state/`；不要新造裸文件读写。
+- **启动前 vs 运行时配置**：`config.yaml` 仅启动前模板；API 改动的 agent 启停、默认任务 agent、微信账号列表、子进程回连网关等走 **运行时层**（`gateway/store/runtime/`：`GatewayRuntimeRepository` + `applyRuntimeOverlay` 合并进有效配置）。当前默认后端为 `json-overlay`（`.runtime-state/gateway/overlay.json`）；环境变量 `LINKAGENT_RUNTIME_STORE=sqlite` 预留 SQLite 实现（同语义 schema，见 `sqlite-repository.ts` 注释），便于后续与其它运行态数据统一入库。
 - 前后端共享契约放 `shared/src`，经 `@linkagent/shared` 引用，不要两端重复定义。
 
 ## 鉴权与凭据模型（改动时务必对齐）

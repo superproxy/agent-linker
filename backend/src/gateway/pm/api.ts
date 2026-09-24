@@ -13,16 +13,14 @@
  * web 与网关同端口，打开哪台机器的后台（/）就管哪台机器上的进程。
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { readFileSync, existsSync } from 'node:fs';
-import { parse } from 'yaml';
-import { migrateConfig } from '@linkagent/shared';
+import { loadSharedConfig, persistChildGatewayTarget } from '../config.js';
 import {
   ProcessManager,
   instOf,
   isKnownTargetId,
   type ProcessInstanceId,
 } from '../../supervisor/manager.js';
-import { persistChildGatewayTarget, type ChildSectionId, type ChildGatewayTarget } from '../config.js';
+import type { ChildSectionId, ChildGatewayTarget } from '../config.js';
 import type { AuthGuard } from '../users/auth.js';
 
 /** 回环来源判定（未开启 trustProxy，反向代理来源不会被当成本机） */
@@ -54,6 +52,7 @@ export interface PmApiDeps {
   pm: ProcessManager;
   authGuard: AuthGuard;
   configPath: string;
+  runtimeGatewayDir: string;
   /** 落盘成功后同步网关内存配置；不落内存不影响重启后的子进程，仅为保持本进程读到的一致 */
   onChildGatewayChanged?: (section: ChildSectionId, target: ChildGatewayTarget) => void;
   server: { host: string; port: number; authEnabled: boolean; authMode?: string; sessionTtlDays: number };
@@ -146,11 +145,11 @@ export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
 
   /** 读取 weixin/node 挂载网关：url 缺省即本机网关；token 只回是否已配置，不回明文 */
   const readTargets = (): Record<ChildSectionId, { url: string; local: boolean; tokenConfigured: boolean }> => {
-    const cfg = existsSync(deps.configPath) ? migrateConfig(parse(readFileSync(deps.configPath, 'utf8'))) : null;
+    const cfg = loadSharedConfig(deps.configPath, deps.runtimeGatewayDir).config;
     const out = {} as Record<ChildSectionId, { url: string; local: boolean; tokenConfigured: boolean }>;
     for (const section of ['weixin', 'node'] as ChildSectionId[]) {
-      const url = cfg?.[section].gatewayUrl?.replace(/\/+$/, '') ?? '';
-      out[section] = { url, local: !url, tokenConfigured: !!cfg?.[section].gatewayToken };
+      const url = cfg[section].gatewayUrl?.replace(/\/+$/, '') ?? '';
+      out[section] = { url, local: !url, tokenConfigured: !!cfg[section].gatewayToken };
     }
     return out;
   };
@@ -172,7 +171,7 @@ export function registerPmApi(app: FastifyInstance, deps: PmApiDeps): void {
     }
     const target: ChildGatewayTarget = { url: body.url, token: body.token ?? '' };
     try {
-      persistChildGatewayTarget(deps.configPath, id, target);
+      persistChildGatewayTarget(deps.configPath, id, target, deps.runtimeGatewayDir);
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

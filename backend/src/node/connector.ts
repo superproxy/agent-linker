@@ -3,7 +3,12 @@ import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import type { GatewayToNode, NodeAgentInfo, NodeToGateway, NodeTurnEvent } from '@linkagent/shared';
-import { buildNodeAgentInfos, defaultAgentDefinitions, normalizeAgentId } from '@linkagent/shared';
+import {
+  defaultAgentDefinitions,
+  nodeAgentEntryId,
+  normalizeAgentId,
+  resolveNodeAgentInfos,
+} from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import {
@@ -54,7 +59,7 @@ interface ConnectorOptions {
   secret?: string;
   /** 匿名申请时的 nu_ 归属申明码（hello.claimToken，非 Upgrade Bearer） */
   claimToken?: string;
-  /** hello 自报清单（含 config gateway.agents 解析出的权限） */
+  /** hello 自报清单（含 config node.agents 解析出的权限） */
   agents: NodeAgentInfo[];
   stateDir: string;
 }
@@ -362,9 +367,9 @@ function main(): void {
   const agentIds =
     envAgents ??
     (config.node.agents.length > 0
-      ? config.node.agents.map((id) => normalizeAgentId(id))
+      ? config.node.agents.map(nodeAgentEntryId)
       : defaultAgentDefinitions().map((d) => d.id));
-  const agents = buildNodeAgentInfos(config, agentIds);
+  const agents = resolveNodeAgentInfos(config.node.agents, agentIds);
 
   const rawToken = runtime.gatewayToken.trim();
   const token = rawToken || undefined;

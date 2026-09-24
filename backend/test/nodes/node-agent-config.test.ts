@@ -1,26 +1,41 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildNodeAgentInfos, defaultSharedConfig } from '@linkagent/shared';
+import { migrateConfig } from '@linkagent/shared/config';
+import { nodeAgentEntryId, resolveNodeAgentInfos } from '@linkagent/shared';
 
-test('buildNodeAgentInfos：从 gateway.agents 合并 permissionMode 到自报清单', () => {
-  const cfg = defaultSharedConfig();
-  cfg.gateway.agents = [
+test('resolveNodeAgentInfos：从 node.agents 对象项合并 permissionMode', () => {
+  const nodeAgents = [
     {
       id: 'cursor',
-      type: 'cursor',
-      permissionMode: 'approve-all',
-      permissionPolicy: { defaultAction: 'approve' },
+      permissionMode: 'approve-all' as const,
+      permissionPolicy: { defaultAction: 'approve' as const },
     },
-    { id: 'pi', type: 'pi', permissionMode: 'approve-reads' },
+    'pi',
   ];
-  const infos = buildNodeAgentInfos(cfg, ['cursor', 'pi', 'unknown']);
+  const infos = resolveNodeAgentInfos(nodeAgents, ['cursor', 'pi', 'unknown']);
   const cursor = infos.find((a) => a.id === 'cursor');
   assert.ok(cursor);
   assert.equal(cursor.permissionMode, 'approve-all');
   assert.deepEqual(cursor.permissionPolicy, { defaultAction: 'approve' });
   const pi = infos.find((a) => a.id === 'pi');
-  assert.equal(pi?.permissionMode, 'approve-reads');
-  const unknown = infos.find((a) => a.id === 'unknown');
-  assert.ok(unknown);
-  assert.equal(unknown.permissionMode, undefined);
+  assert.equal(pi?.permissionMode, undefined);
+  assert.equal(infos.find((a) => a.id === 'unknown')?.permissionMode, undefined);
+});
+
+test('nodeAgentEntryId：字符串与对象项', () => {
+  assert.equal(nodeAgentEntryId('Pi'), 'pi');
+  assert.equal(nodeAgentEntryId({ id: 'cursor' }), 'cursor');
+});
+
+test('migrateConfig：node.agents 对象项含 permissionMode', () => {
+  const cfg = migrateConfig({
+    gateway: { server: { host: '127.0.0.1', port: 8787 }, auth: { mode: 'local', token: '' }, agents: [] },
+    weixin: { enabled: false },
+    node: {
+      agents: [{ id: 'cursor', permissionMode: 'approve-all' }, 'pi'],
+    },
+  });
+  const cursor = cfg.node.agents.find((a) => nodeAgentEntryId(a) === 'cursor');
+  assert.ok(cursor && typeof cursor === 'object');
+  if (typeof cursor === 'object') assert.equal(cursor.permissionMode, 'approve-all');
 });

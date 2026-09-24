@@ -23,6 +23,12 @@ function tmpRoot(): string {
   return mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
 }
 
+function runtimeDirFor(dir: string): string {
+  const rt = join(dir, 'runtime-gateway');
+  mkdirSync(rt, { recursive: true });
+  return rt;
+}
+
 function writeConfig(dir: string, content: string, kind: 'dev' | 'dist' = 'dev'): string {
   const cfgDir = kind === 'dist' ? join(dir, 'server', 'config') : join(dir, 'backend', 'config');
   mkdirSync(cfgDir, { recursive: true });
@@ -108,8 +114,20 @@ test('defaultAgentDefinitions：pi 不绑死外机模型，沿用本机 pi 默�
 
 // ── loadSharedConfig：文件 / 缺省回退 ───────────────────────────────────────
 
-test('loadSharedConfig：显式路径文件不存在抛错', () => {
-  assert.throws(() => loadSharedConfig(join(tmpRoot(), 'nope.yaml')), /配置文件不存在/);
+test('loadSharedConfig：GATEWAY_CONFIG_PATH 指向缺失文件抛错；pathArg 缺失则回退默认+运行时', () => {
+  const prev = process.env.GATEWAY_CONFIG_PATH;
+  const missing = join(tmpRoot(), 'nope.yaml');
+  process.env.GATEWAY_CONFIG_PATH = missing;
+  try {
+    assert.throws(() => loadSharedConfig(), /配置文件不存在/);
+  } finally {
+    if (prev === undefined) delete process.env.GATEWAY_CONFIG_PATH;
+    else process.env.GATEWAY_CONFIG_PATH = prev;
+  }
+  const rt = join(tmpRoot(), 'rt');
+  const loaded = loadSharedConfig(missing, rt);
+  assert.equal(loaded.source, 'defaults');
+  assert.equal(loaded.path, missing);
 });
 
 test('loadSharedConfig：候选文件存在则加载旧扁平格式并迁移', () => {
@@ -289,43 +307,49 @@ node:
   assert.equal(cfg.gateway.auth.mode, 'local');
 });
 
-test('persistEnsureWeixinAccount：写入 accounts 并切 external；remove 去掉该 id', () => {
+test('persistEnsureWeixinAccount：写入 overlay accounts 并切 external；remove 去掉该 id', () => {
   const dir = tmpRoot();
+  const rt = runtimeDirFor(dir);
   const file = join(dir, 'config.yaml');
   writeFileSync(file, 'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n');
-  const ids = persistEnsureWeixinAccount(file, 'alice');
+  const ids = persistEnsureWeixinAccount(file, 'alice', rt);
   assert.deepEqual(ids, ['alice']);
-  const cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
+  let cfg = loadSharedConfig(file, rt).config;
   assert.equal(cfg.weixin.mode, 'external');
   assert.equal(cfg.weixin.enabled, true);
   assert.deepEqual(cfg.weixin.accounts, ['alice']);
-  persistEnsureWeixinAccount(file, 'alice');
-  persistEnsureWeixinAccount(file, 'bob');
-  assert.deepEqual(migrateConfig(parse(readFileSync(file, 'utf8'))).weixin.accounts, ['alice', 'bob']);
-  assert.deepEqual(persistRemoveWeixinAccount(file, 'alice'), ['bob']);
+  persistEnsureWeixinAccount(file, 'alice', rt);
+  persistEnsureWeixinAccount(file, 'bob', rt);
+  cfg = loadSharedConfig(file, rt).config;
+  assert.deepEqual(cfg.weixin.accounts, ['alice', 'bob']);
+  assert.deepEqual(persistRemoveWeixinAccount(file, 'alice', rt), ['bob']);
+  assert.doesNotMatch(readFileSync(file, 'utf8'), /accounts:/);
 });
 
 test('persistNodeAgentRegistered：追加 node.agents id，不重复', () => {
   const dir = tmpRoot();
+  const rt = runtimeDirFor(dir);
   const file = join(dir, 'config.yaml');
   writeFileSync(file, 'node:\n  enabled: true\n  agents:\n    - pi\n');
-  persistNodeAgentRegistered(file, 'hermes');
-  let cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
-  assert.deepEqual(cfg.node.agents, ['pi', 'hermes']);
-  persistNodeAgentRegistered(file, 'hermes');
-  cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
-  assert.deepEqual(cfg.node.agents, ['pi', 'hermes']);
+  persistNodeAgentRegistered(file, 'hermes', rt);
+  let cfg = loadSharedConfig(file, rt).config;
+  assert.deepEqual(cfg.node.agents.map((a) => (typeof a === 'string' ? a : a.id)), ['pi', 'hermes']);
+  persistNodeAgentRegistered(file, 'hermes', rt);
+  cfg = loadSharedConfig(file, rt).config;
+  assert.deepEqual(cfg.node.agents.map((a) => (typeof a === 'string' ? a : a.id)), ['pi', 'hermes']);
 });
 
-test('persistAgentEnabled：写入 agents[].enabled，缺列表时整表落下', () => {
+test('persistAgentEnabled：写入 overlay agents.enabled，缺 yaml 列表时整表落下', () => {
   const dir = tmpRoot();
+  const rt = runtimeDirFor(dir);
   const file = join(dir, 'config.yaml');
   writeFileSync(file, 'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n');
   const defs = defaultAgentDefinitions();
-  persistAgentEnabled(file, 'pi', false, defs);
-  const cfg = migrateConfig(parse(readFileSync(file, 'utf8')));
+  persistAgentEnabled(file, 'pi', false, defs, rt);
+  let cfg = loadSharedConfig(file, rt).config;
   assert.equal(cfg.gateway.agents.find((a) => a.id === 'pi')?.enabled, false);
   assert.ok(cfg.gateway.agents.some((a) => a.id === 'opencode' && a.enabled !== false));
-  persistAgentEnabled(file, 'pi', true, cfg.gateway.agents);
-  assert.equal(migrateConfig(parse(readFileSync(file, 'utf8'))).gateway.agents.find((a) => a.id === 'pi')?.enabled, true);
+  persistAgentEnabled(file, 'pi', true, cfg.gateway.agents, rt);
+  cfg = loadSharedConfig(file, rt).config;
+  assert.equal(cfg.gateway.agents.find((a) => a.id === 'pi')?.enabled, true);
 });

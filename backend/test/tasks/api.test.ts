@@ -662,8 +662,9 @@ test('TaskService: 默认任务固定本机 pi；setDefaultAgentId 只改空列�
   assert.throws(() => svc.setTaskAgent(before, 'default', 'opencode'), /固定使用本机 pi/);
 });
 
-test('persistDefaultTaskAgentId: 就地改值并保留注释/其他键，重启重载可见', async () => {
+test('persistDefaultTaskAgentId: 写入 overlay，yaml 注释与其它键不变，重启重载可见', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
+  const rt = join(dir, 'runtime-gateway');
   const cfgPath = join(dir, 'config.yaml');
   writeFileSync(
     cfgPath,
@@ -680,38 +681,39 @@ test('persistDefaultTaskAgentId: 就地改值并保留注释/其他键，重启�
     'utf8',
   );
 
-  const written = persistDefaultTaskAgentId(cfgPath, 'pi');
+  const written = persistDefaultTaskAgentId(cfgPath, 'pi', rt);
   assert.equal(written, cfgPath);
   const out = readFileSync(cfgPath, 'utf8');
   assert.match(out, /# 顶部注释应保留/);
   assert.match(out, /# tasks 段注释/);
-  assert.match(out, /defaultAgentId: pi/);
+  assert.match(out, /defaultAgentId: opencode/);
   assert.match(out, /workspaceDir: \/tmp\/ws/);
-  assert.match(out, /port: 8787/);
-  assert.doesNotMatch(out, /defaultAgentId: opencode/);
 
-  // 重启视角：重新 loadGatewayConfig 读到新值
-  const loaded = loadGatewayConfig(cfgPath);
+  const overlay = JSON.parse(readFileSync(join(rt, 'overlay.json'), 'utf8'));
+  assert.equal(overlay.tasks.defaultAgentId, 'pi');
+
+  const loaded = loadGatewayConfig(cfgPath, rt);
   assert.equal(loaded.config.tasks.defaultAgentId, 'pi');
   assert.equal(loaded.config.tasks.workspaceDir, '/tmp/ws');
 });
 
-test('persistDefaultTaskAgentId: tasks 段缺失则补齐；文件不存在则创建最小段', () => {
+test('persistDefaultTaskAgentId: tasks 段缺失可写 overlay；config 不存在时不创建 yaml', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
+  const rt = join(dir, 'runtime-gateway');
 
-  // 只有 server 段
   const p1 = join(dir, 'a.yaml');
   writeFileSync(p1, 'server:\n  port: 9000\n', 'utf8');
-  persistDefaultTaskAgentId(p1, 'codex');
-  assert.match(readFileSync(p1, 'utf8'), /defaultAgentId: codex/);
+  persistDefaultTaskAgentId(p1, 'codex', rt);
+  assert.doesNotMatch(readFileSync(p1, 'utf8'), /defaultAgentId: codex/);
+  assert.equal(loadGatewayConfig(p1, rt).config.tasks.defaultAgentId, 'codex');
 
-  // 文件不存在（此前纯默认配置运行）
   const p2 = join(dir, 'nested', 'config.yaml');
   assert.ok(!existsSync(p2));
-  persistDefaultTaskAgentId(p2, 'pi');
-  assert.match(readFileSync(p2, 'utf8'), /defaultAgentId: pi/);
+  persistDefaultTaskAgentId(p2, 'pi', rt);
+  assert.ok(!existsSync(p2));
+  assert.equal(loadGatewayConfig(p2, rt).config.tasks.defaultAgentId, 'pi');
 
-  assert.throws(() => persistDefaultTaskAgentId(p2, '  '), /不能为空/);
+  assert.throws(() => persistDefaultTaskAgentId(p2, '  ', rt), /不能为空/);
 });
 
 test('PUT /api/tasks/default-agent: 校验 agent、调用持久化回调、内存即时生效', async () => {
