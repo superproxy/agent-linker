@@ -22,16 +22,48 @@ export function normalizeStringEntries(value) {
   return value.map((item) => String(item));
 }
 
-export function readStringValue(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+/** 飞书事件字段（message_id、chat_id）是字符串，空串视为缺失。 */
+export function readStringValue(value) {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 
-export function asOptionalRecord(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+export function asOptionalRecord(value) {
+  return isRecord(value) ? value : undefined;
+}
 
-export function hasNonEmptyString(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+export function hasNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
-export function asBoolean(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+export function asBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
 
-export function asNullableRecord(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+export function asNullableRecord(value) {
+  return isRecord(value) ? value : null;
+}
 
-export function normalizeNullableString(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+export function normalizeNullableString(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
 
-export function uniqueStrings(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+export function uniqueStrings(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}

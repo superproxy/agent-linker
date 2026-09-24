@@ -22,7 +22,6 @@ import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, enrichAgentInfos, type AcpAgentKind } from './agents/acpWrapper.js';
 import { AgentInstallError, runAgentInstall } from './agents/installCli.js';
 import { collectModelCandidates } from './modelcandidates.js';
-import { PluginManager } from '../plugins/manager.js';
 import { createJsonStore } from './tasks/store.js';
 import { TaskService } from './tasks/service.js';
 import { readTaskSkillMarkdown } from './tasks/skill-files.js';
@@ -129,7 +128,8 @@ export async function buildServer(options?: {
 }): Promise<{
   app: FastifyInstance;
   manager: AgentManager;
-  pluginManager: PluginManager | null;
+  /** 渠道插件不在网关进程加载，恒为 null */
+  pluginManager: null;
   /** 任务公共能力（多渠道共享，/v1 命令/路由 + /api/tasks 管理） */
   taskService: TaskService;
   /** 远程节点管理（WebSocket 连接、心跳、turn 多路复用） */
@@ -1007,37 +1007,8 @@ export async function buildServer(options?: {
   } else if (weixinViaChannels) {
     app.log.info('已登记微信账号：请确保 channels.yaml 中 channelGateway.enabled=true（绑定会自动写入）');
   }
-  const plugins = gw.plugins.filter(
-    (p: { package: string; enabled: boolean }) => p.package !== '@tencent-weixin/openclaw-weixin',
-  );
-  // 插件运行时读取扁平 config.channels / config.plugins：用 gateway 段构造等价视图
-  const effectiveConfig = { ...gw, plugins };
-
-  // ── openclaw 插件运行时（企业微信 / 个人微信渠道）──
-  // 配置了 channels.<id> 或 plugins[] 时加载插件包；插件缺失 / 加载失败仅告警，不影响 /v1
-  let pluginManager: PluginManager | null = null;
-  if (!channelGatewayEnabled && (Object.keys(gw.channels).length > 0 || plugins.length > 0)) {
-    const stateDir = layout.pluginsState;
-    // 微信插件读 OPENCLAW_STATE_DIR 定位 accounts.json / openclaw.json
-    process.env.OPENCLAW_STATE_DIR = stateDir;
-    pluginManager = new PluginManager({
-      manager,
-      config: effectiveConfig as unknown as Record<string, unknown>,
-      stateDir,
-      logger: app.log as never,
-    });
-    try {
-      await pluginManager.start(app);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      app.log.error({ err }, `插件运行时启动失败（/v1 不受影响）：${message}`);
-      await pluginManager.dispose().catch(() => {});
-      pluginManager = null;
-    }
-  } else {
-    app.log.info('未配置 channels/plugins，跳过网关内插件运行时（企微/微信请走 channel-gateway）');
-  }
-
+  app.log.info('网关不加载渠道插件（微信 / 企微 / 飞书只在 channels 进程）');
+  const pluginManager = null;
   const weixinBot = null;
 
   // ── 微信登录管理 API（web 后台扫码登录 / 状态 / 热重启）──
@@ -1102,11 +1073,10 @@ export async function buildServer(options?: {
 }
 
 async function main(): Promise<void> {
-  const { app, manager, nodeManager, pluginManager, weixinBot, host, port, authEnabled } = await buildServer();
+  const { app, manager, nodeManager, host, port, authEnabled } = await buildServer();
 
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'shutting down');
-    await pluginManager?.dispose().catch(() => {});
     await nodeManager.dispose().catch(() => {});
     await manager.dispose().catch(() => {});
     await app.close().catch(() => {});

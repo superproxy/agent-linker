@@ -9,7 +9,7 @@ LinkAgent 把**渠道收发**与**对话/任务/鉴权**拆开：终端消息在
 | 本文 | 总览、配置、后台、进程、迁移 |
 | [`channel-gateway.md`](channel-gateway.md) | channel-gateway 进程细节、健康检查、开发命令 |
 | [`channel-gateway-integration.md`](channel-gateway-integration.md) | 薄 adapter 契约、`ct_`、任务路由、调试 |
-| [`feishu-channel-gateway.md`](feishu-channel-gateway.md) | 飞书 OpenClaw 插件安装、yaml、加载流程与使用 |
+| [`feishu-channel-gateway.md`](feishu-channel-gateway.md) | 飞书官方长连接、yaml、与网关进程边界 |
 
 ---
 
@@ -20,8 +20,8 @@ Chatbox / 企微用户 / 微信用户
         │
         ▼
 ┌─────────────────── channels（可选，8790 默认）───────────────────┐
-│  方案 A：weixin-bot × N（ilink）                                   │
-│  方案 B：OpenClaw PluginManager（企微 / 飞书 HTTP 回调）            │
+│  weixin-bot × N（ilink）                                          │
+│  企微 / 飞书：官方 SDK 长连接（不加载 OpenClaw 渠道插件）            │
 └────────────────────────────▲───────────────────────────────────────┘
                              │ SSE /v1
 ┌────────────────────────────┴───────────────────────────────────────┐

@@ -1,5 +1,4 @@
-import type { PluginManager } from '../plugins/manager.js';
-import type { ChannelGatewayRuntimeReport } from '../store/channel-gateway-runtime-report.js';
+import type { ChannelGatewayPluginAccountReport, ChannelGatewayRuntimeReport } from '../store/channel-gateway-runtime-report.js';
 import { snapshotChannelGatewayLogs } from './channel-gateway-log-buffer.js';
 
 export interface ChannelGatewayPushOptions {
@@ -9,22 +8,14 @@ export interface ChannelGatewayPushOptions {
   exposePluginRoutes: boolean;
   listen: string;
   weixinBotCount: number;
-  pluginManager: PluginManager | null;
+  /** 企微 / 飞书 bot 运行态（字段名沿用 pluginAccounts，后台不用改） */
+  channelAccounts: ChannelGatewayPluginAccountReport[];
   log: (...args: unknown[]) => void;
   errLog: (...args: unknown[]) => void;
 }
 
 function buildReport(opts: ChannelGatewayPushOptions): ChannelGatewayRuntimeReport {
-  const pluginAccounts: ChannelGatewayRuntimeReport['pluginAccounts'] = [];
-  if (opts.pluginManager) {
-    for (const [key, st] of opts.pluginManager.accountStatus.entries()) {
-      pluginAccounts.push({
-        key,
-        running: st.running,
-        lastError: st.lastError,
-      });
-    }
-  }
+  const pluginAccounts = opts.channelAccounts.map((item) => ({ ...item }));
   return {
     reportedAt: Date.now(),
     service: 'channel-gateway',

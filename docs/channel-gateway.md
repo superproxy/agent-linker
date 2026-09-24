@@ -1,8 +1,8 @@
 # Channel Gateway 进程
 
-独立 **channel-gateway** 进程：统一拉起个人微信（weixin-bot）、企业微信（OpenClaw 插件）、飞书（可选 OpenClaw 插件），对话后端一律 **HTTP SSE → 主网关 `/v1/chat/completions`**。
+独立 **channel-gateway** 进程：统一拉起个人微信（weixin-bot）、企业微信智能机器人（官方 SDK 长连接）、飞书（官方 SDK 长连接）。对话后端一律 **HTTP SSE → 主网关 `/v1/chat/completions`**。
 
-主 **gateway** 进程只保留 OpenAI API、任务、鉴权、节点、管理后台；不再内嵌微信 bot、不再挂载渠道插件。
+主 **gateway** 进程只保留 OpenAI API、任务、鉴权、节点、管理后台。网关进程不加载任何渠道插件。
 
 ## 架构
 
@@ -13,19 +13,21 @@
                     └──────────────────▲──────────────────┘
                                        │ POST /v1 stream
 ┌──────────────┐  ilink    ┌──────────┴──────────────────────────┐
-│ 个人微信用户  │◀────────▶│  channel-gateway（8790 默认）          │
-└──────────────┘          │  · weixin-bot × N（weixin.yaml 账号）  │
-┌──────────────┐  插件回调 │  · PluginManager（wecom / feishu）    │
-│ 企微 / 飞书   │◀─ WS ────▶│  · 无 HTTP（默认）· 推运行态→gateway   │
-└──────────────┘          └───────────────────────────────────────┘
+│ 个人微信用户  │◀────────▶│  channel-gateway                     │
+└──────────────┘          │  · weixin-bot × N                      │
+┌──────────────┐  官方长连接 │  · 企微 WSClient（botId + secret）   │
+│ 企微 / 飞书   │◀─────────▶│  · 飞书 WSClient（appId + appSecret） │
+└──────────────┘          │  · 无插件 HTTP · 推运行态→gateway       │
+                          └───────────────────────────────────────┘
 ```
 
 | 组件 | 职责 |
 |------|------|
 | gateway | 任务路由、`decideTaskRouting`、`ct_` 签发（管理 API）、ACP |
-| channel-gateway | 渠道收发、OpenClaw 插件 HTTP 回调、映射 ctx → `/v1` |
-| weixin-bot 模块 | 仍 `startWeixinBot()`，由 channel-gateway 按账号拉起 |
-| PluginManager | 仅运行在 channel-gateway；`agentDispatch` = V1 SSE |
+| channel-gateway | 渠道收发，映射到 `/v1`。不加载 OpenClaw 渠道插件 |
+| weixin-bot | `startWeixinBot()`，按微信账号拉起 |
+| wecom-aibot | `@wecom/aibot-node-sdk` 的 `WSClient`，读 `channels.wecom.botId/secret` |
+| feishu-bot | `@larksuiteoapi/node-sdk` 的 `WSClient`，读 `channels.feishu` 的 appId/appSecret |
 
 ## 两套渠道方案 · 单进程托管
 
@@ -34,9 +36,10 @@
 | 方案 | 典型实现 | 配置开关 | 回连网关 |
 |------|----------|----------|----------|
 | 个人微信 | 薄 adapter `weixin-bot`（ilink 轮询/收发） | `weixin.yaml` 账号 + `channelGateway.weixin: true` | 直打 `/v1`，带 `channel` / `userId` / `ct_` |
-| 企业微信 | OpenClaw 插件（HTTP 回调 + `sessionKey`） | `channels.yaml` → `channelGateway.channels.wecom` + `plugins` | 插件 → `V1ChannelAgentDispatch` → `/v1` SSE |
+| 企业微信 | 官方 SDK 长连接 `wecom-aibot` | `channels.yaml` → `channelGateway.wecom` + `channels.wecom.botId/secret` | 直打 `/v1`，`channel=wecom` |
+| 飞书 | 官方 SDK 长连接 `feishu-bot` | `channels.yaml` → `channelGateway.feishu` + `channels.feishu` appId/appSecret | 直打 `/v1`，`channel=feishu` |
 
-也可只开其中一种（`channelGateway.weixin: false` 或 `wecom: false`）。个人微信与企微插件的**生产路径**均在 `channels`；CLI 的 `weixin` / `weixin:<id>` 会 expand 到 `channels`。独立 `wecom-bot` / 直接跑 `weixin-bot` 仅调试用。
+也可只开其中一种（`channelGateway.weixin: false`、`wecom: false` 或 `feishu: false`）。三条生产路径都在 `channels`。CLI 的 `weixin` / `weixin:<id>` 会 expand 到 `channels`。`wecom-bot.ts` 仍是自建应用 HTTP 回调，只给 `bot:wecom` 调试，和生产用的智能机器人长连接不是同一套凭证。
 
 对接契约见 [`channel-gateway-integration.md`](channel-gateway-integration.md)。
 
