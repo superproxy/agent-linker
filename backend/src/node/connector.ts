@@ -3,7 +3,7 @@ import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import type { GatewayToNode, NodeAgentInfo, NodeToGateway, NodeTurnEvent } from '@linkagent/shared';
-import { defaultAgentDefinitions, normalizeAgentId } from '@linkagent/shared';
+import { buildNodeAgentInfos, defaultAgentDefinitions, normalizeAgentId } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import {
@@ -54,7 +54,8 @@ interface ConnectorOptions {
   secret?: string;
   /** 匿名申请时的 nu_ 归属申明码（hello.claimToken，非 Upgrade Bearer） */
   claimToken?: string;
-  agents: string[];
+  /** hello 自报清单（含 config gateway.agents 解析出的权限） */
+  agents: NodeAgentInfo[];
   stateDir: string;
 }
 
@@ -162,7 +163,9 @@ class NodeConnector {
           agents: this.agentInfos(),
         };
         ws.send(JSON.stringify(hello));
-        console.log(`[node] 已连接网关 ${url}，节点名=${this.opts.name}，agents=${this.opts.agents.join(',')}`);
+        console.log(
+          `[node] 已连接网关 ${url}，节点名=${this.opts.name}，agents=${this.opts.agents.map((a) => a.id).join(',')}`,
+        );
       });
 
       ws.on('message', (raw) => {
@@ -239,10 +242,13 @@ class NodeConnector {
   }
 
   private agentInfos(): NodeAgentInfo[] {
-    return this.opts.agents.map((id) => ({
-      id,
-      ...(DEFAULT_LABELS[id as AcpAgentKind] ? { displayName: DEFAULT_LABELS[id as AcpAgentKind].displayName } : {}),
-    }));
+    return this.opts.agents.map((a) => {
+      const label = DEFAULT_LABELS[a.id as AcpAgentKind];
+      return {
+        ...a,
+        displayName: a.displayName ?? label?.displayName,
+      };
+    });
   }
 
   private engineFor(agentId: string): AcpEngine {
@@ -257,12 +263,15 @@ class NodeConnector {
       } else {
         console.log(`[node] engine init agentId=${agentId} command=${cmd}`);
       }
+      const meta = this.opts.agents.find((a) => normalizeAgentId(a.id) === normalizeAgentId(agentId));
       engine = new AcpEngine({
         id: agentId,
         agentName: kind,
         stateDir: join(this.opts.stateDir, 'acpx', agentId),
         verbose: this.verbose,
         skipProbe: true,
+        ...(meta?.permissionMode ? { permissionMode: meta.permissionMode } : {}),
+        ...(meta?.permissionPolicy ? { permissionPolicy: meta.permissionPolicy } : {}),
       });
       this.engines.set(agentId, engine);
     }
@@ -296,7 +305,6 @@ class NodeConnector {
         ...(msg.sessionKey ? { sessionKey: msg.sessionKey } : {}),
         ...(taskCwd ? { cwd: taskCwd } : {}),
         ...(msg.model ? { model: msg.model } : {}),
-        ...(msg.permissionMode ? { permissionMode: msg.permissionMode } : {}),
         signal: controller.signal,
         onEvent: emit,
       });
@@ -351,11 +359,12 @@ function main(): void {
         .map((s) => normalizeAgentId(s))
         .filter(Boolean)
     : null;
-  const agents =
+  const agentIds =
     envAgents ??
     (config.node.agents.length > 0
       ? config.node.agents.map((id) => normalizeAgentId(id))
       : defaultAgentDefinitions().map((d) => d.id));
+  const agents = buildNodeAgentInfos(config, agentIds);
 
   const rawToken = runtime.gatewayToken.trim();
   const token = rawToken || undefined;

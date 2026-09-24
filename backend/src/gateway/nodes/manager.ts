@@ -2,13 +2,15 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import type {
-  GatewayToNode,
-  NodeAdmissionStatus,
-  NodeInfo,
-  NodeToGateway,
-  NodeTurnEvent,
-  NodeTurnResult,
+import {
+  normalizeAgentId,
+  type GatewayToNode,
+  type NodeAdmissionStatus,
+  type NodeAgentInfo,
+  type NodeInfo,
+  type NodeToGateway,
+  type NodeTurnEvent,
+  type NodeTurnResult,
 } from '@linkagent/shared';
 import { RemoteNodeAdapter } from '../agents/remoteWrapper.js';
 import { isPersonalTokenShape } from '../users/personal-token-store.js';
@@ -354,10 +356,10 @@ export class NodeManager {
   }
 
   /** 为已准入在线节点的每个自报 agent 创建远程适配器 */
-  createAdapters(nodeId: string, factory: (agentId: string, link: NodeLink, displayName?: string) => RemoteNodeAdapter): RemoteNodeAdapter[] {
+  createAdapters(nodeId: string, factory: (agentId: string, link: NodeLink, meta?: NodeAgentInfo) => RemoteNodeAdapter): RemoteNodeAdapter[] {
     const conn = this.connections.get(nodeId);
     if (!conn || !conn.approved) return [];
-    return conn.agents.map((a) => factory(a.id, conn, a.displayName));
+    return conn.agents.map((a) => factory(a.id, conn, a));
   }
 
   private checkHeartbeats(): void {
@@ -741,6 +743,9 @@ export class NodeManager {
         reject(new Error('请求已取消'));
         return;
       }
+      const agentMeta = conn.agents.find((a) => normalizeAgentId(a.id) === normalizeAgentId(req.agentId));
+      const permissionMode = req.permissionMode ?? agentMeta?.permissionMode;
+      const permissionPolicy = req.permissionPolicy ?? agentMeta?.permissionPolicy;
       const message: GatewayToNode = {
         type: 'turn',
         requestId,
@@ -749,7 +754,8 @@ export class NodeManager {
         ...(req.model ? { model: req.model } : {}),
         ...(req.cwd ? { cwd: req.cwd } : {}),
         ...(req.sessionKey ? { sessionKey: req.sessionKey } : {}),
-        ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
+        ...(permissionPolicy ? { permissionPolicy } : {}),
       };
       const cleanup = () => signal?.removeEventListener('abort', onAbort);
       const onAbort = () => {

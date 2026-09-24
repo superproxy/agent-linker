@@ -103,7 +103,7 @@ test('GET /api/agents/by-node：本机分组含完整可编辑运行态 + 默认
     assert.deepEqual(online?.agents, [{ id: 'codex', displayName: 'Codex' }]);
     const offline = nodes.find((n) => n.nodeId === 'n_bbb');
     assert.equal(offline?.online, false);
-    assert.deepEqual(offline?.agents, [{ id: 'pi' }]);
+    assert.deepEqual(offline?.agents, [{ id: 'pi', displayName: 'Pi' }]);
 
     // 本机停用一个 agent 后，by-node 的本机分组应反映（可编辑运行态）
     manager.updateAgent('opencode', { enabled: false });

@@ -1,4 +1,4 @@
-import type { NodeTurnEvent, NodeTurnResult } from '@linkagent/shared';
+import type { AcpPermissionMode, NodeTurnEvent, NodeTurnResult, PermissionPolicySpec } from '@linkagent/shared';
 
 /** 网关侧发给某个在线节点的一轮对话请求（编码为 WS turn 消息） */
 export interface RemoteTurnRequest {
@@ -8,7 +8,8 @@ export interface RemoteTurnRequest {
   /** 持久会话 key（渠道多轮）；缺省一次性会话 */
   sessionKey?: string;
   text: string;
-  permissionMode?: 'approve-all' | 'approve-reads' | 'deny-all';
+  permissionMode?: AcpPermissionMode;
+  permissionPolicy?: PermissionPolicySpec;
 }
 
 /**

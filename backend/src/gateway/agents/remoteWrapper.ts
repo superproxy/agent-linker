@@ -1,4 +1,13 @@
-import type { AgentAdapter, AgentDescriptor, ChatRequest, ChatResult, StreamCallbacks } from '@linkagent/shared';
+import type {
+  AgentAdapter,
+  AgentDescriptor,
+  AcpPermissionMode,
+  ChatRequest,
+  ChatResult,
+  NodeAgentInfo,
+  PermissionPolicySpec,
+  StreamCallbacks,
+} from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
 import { NodeOfflineError, type NodeLink } from '../nodes/link.js';
 
@@ -13,13 +22,17 @@ export class RemoteNodeAdapter implements AgentAdapter {
   private readonly link: NodeLink;
   private readonly displayName: string;
   private readonly description: string;
+  private readonly permissionMode?: AcpPermissionMode;
+  private readonly permissionPolicy?: PermissionPolicySpec;
 
-  constructor(nodeId: string, agentId: string, link: NodeLink, displayName?: string, description?: string) {
+  constructor(nodeId: string, agentId: string, link: NodeLink, meta?: NodeAgentInfo) {
     this.nodeId = nodeId;
     this.id = agentId;
     this.link = link;
-    this.displayName = displayName || agentId;
-    this.description = description || `远程节点 ${nodeId} 上的 ${agentId}`;
+    this.displayName = meta?.displayName?.trim() || agentId;
+    this.description = `远程节点 ${nodeId} 上的 ${this.displayName}`;
+    this.permissionMode = meta?.permissionMode;
+    this.permissionPolicy = meta?.permissionPolicy;
   }
 
   descriptor(): AgentDescriptor {
@@ -36,7 +49,10 @@ export class RemoteNodeAdapter implements AgentAdapter {
         text,
         ...(req.sessionKey?.trim() ? { sessionKey: req.sessionKey.trim() } : {}),
         ...(req.cwd?.trim() ? { cwd: req.cwd } : {}),
-        ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+        ...(req.permissionMode ?? this.permissionMode
+          ? { permissionMode: req.permissionMode ?? this.permissionMode }
+          : {}),
+        ...(this.permissionPolicy ? { permissionPolicy: this.permissionPolicy } : {}),
       },
       (ev) => {
         if (ev.kind === 'text') cb.onText(ev.text);

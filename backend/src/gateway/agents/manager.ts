@@ -102,7 +102,7 @@ export class AgentManager {
     for (const agentId of this.nodeManager.onlineAgentIds(nodeId)) {
       const info = this.nodeManager.list().find((n) => n.nodeId === nodeId);
       const meta = info?.agents.find((a) => a.id === agentId);
-      map.set(agentId, new RemoteNodeAdapter(nodeId, agentId, link, meta?.displayName));
+      map.set(agentId, new RemoteNodeAdapter(nodeId, agentId, link, meta));
     }
     this.remote.set(nodeId, map);
   }

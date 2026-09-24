@@ -1,3 +1,5 @@
+import type { AcpPermissionMode, PermissionPolicySpec } from './adapter.js';
+
 /**
  * 远程节点（node）：其他机器运行 node 连接器，经 WebSocket 连入网关并在本机拉起 ACP agent。
  * 任务绑定 nodeId + agentId，始终在同一台机器执行；持久会话与 cwd 都落在该节点。
@@ -12,6 +14,9 @@ export const LOCAL_NODE_NAME = '本机（网关）';
 export interface NodeAgentInfo {
   id: string;
   displayName?: string;
+  /** 自报 ACP 权限模式（来自执行机 config gateway.agents，hello 时上报） */
+  permissionMode?: AcpPermissionMode;
+  permissionPolicy?: PermissionPolicySpec;
 }
 
 /** 节点准入状态：approved=已批准可路由；pending=等待管理员审批；blocked=已拒绝（持静态令牌仍可直连上线） */
@@ -61,6 +66,8 @@ export interface LocalAgentView {
 export interface RemoteAgentView {
   id: string;
   displayName?: string;
+  permissionMode?: AcpPermissionMode;
+  permissionPolicy?: PermissionPolicySpec;
 }
 
 /** 本机分组：agent 来自 gateway.agents 配置，可在后台启停/切模型/设默认 */
@@ -155,7 +162,8 @@ export type GatewayToNode =
       /** 持久会话 key：相同 key 在节点侧复用同一 agent 会话；缺省为一次性会话 */
       sessionKey?: string;
       text: string;
-      permissionMode?: 'approve-all' | 'approve-reads' | 'deny-all';
+      permissionMode?: AcpPermissionMode;
+      permissionPolicy?: PermissionPolicySpec;
     }
   | { type: 'cancel'; requestId: string }
   | { type: 'closeSession'; sessionKey: string };

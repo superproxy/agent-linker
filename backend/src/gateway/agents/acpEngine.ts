@@ -6,7 +6,7 @@ import { ensureTaskCwdExists, expandHome, resolveCwd } from '../../util/task-pat
 
 export { ensureTaskCwdExists, expandHome, resolveCwd } from '../../util/task-paths.js';
 import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntimeError, type AcpxRuntime } from 'acpx/runtime';
-import type { AgentDefinition, AgentDescriptor, PermissionPolicySpec } from '@linkagent/shared';
+import type { AgentDefinition, AgentDescriptor, NodeAgentInfo, PermissionPolicySpec } from '@linkagent/shared';
 import { ACP_AGENT_KINDS } from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
 import { collectModelCandidates } from '../modelcandidates.js';
@@ -122,8 +122,13 @@ export function agentDisplayName(agentId: string, hint?: string): string {
   return label?.displayName ?? agentId;
 }
 
-export function enrichAgentInfos(agents: { id: string; displayName?: string }[]): { id: string; displayName: string }[] {
-  return agents.map((a) => ({ id: a.id, displayName: agentDisplayName(a.id, a.displayName) }));
+export function enrichAgentInfos(agents: NodeAgentInfo[]): NodeAgentInfo[] {
+  return agents.map((a) => ({
+    id: a.id,
+    displayName: agentDisplayName(a.id, a.displayName),
+    ...(a.permissionMode ? { permissionMode: a.permissionMode } : {}),
+    ...(a.permissionPolicy ? { permissionPolicy: a.permissionPolicy } : {}),
+  }));
 }
 
 /** 本机安装指引：命令框展示用；argv 存在才允许网关代执行（固定白名单，不跑用户改写的文本） */
