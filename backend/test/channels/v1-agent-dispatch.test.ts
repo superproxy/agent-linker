@@ -25,6 +25,9 @@ test('parseSessionRouting：legacy wecom 前缀', () => {
   assert.equal(r.channel, 'wecom');
   assert.equal(r.userId, 'zhangsan');
   assert.equal(r.legacySessionKey, 'wecom:zhangsan');
+  const g = parseSessionRouting('wecom:group:room1');
+  assert.equal(g.channel, 'wecom');
+  assert.equal(g.userId, 'room1');
 });
 
 test('parseSessionRouting：未知格式回落 legacy', () => {

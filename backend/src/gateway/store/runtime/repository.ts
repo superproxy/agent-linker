@@ -1,4 +1,4 @@
-import type { AgentDefinition, SharedConfig } from '@linkagent/shared';
+import type { AgentDefinition, SharedConfig, WeixinMode } from '@linkagent/shared';
 import type { GatewayRuntimeOverlay } from './overlay.js';
 
 /**
@@ -18,6 +18,7 @@ export interface GatewayRuntimeRepository {
   ensureWeixinAccount(accountId: string): void;
   removeWeixinAccount(accountId: string): void;
   setChildGateway(section: 'weixin' | 'node', url: string, token: string): void;
+  setWeixinMode(mode: WeixinMode): void;
 }
 
 /** @deprecated 旧名，等同 {@link GatewayRuntimeRepository} */

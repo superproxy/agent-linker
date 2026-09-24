@@ -7,6 +7,8 @@ import {
   persistWeixinChannelGatewaySetup,
   readWeixinChannelGatewayView,
 } from '../../config/persist-weixin.js';
+import { persistWeixinReceiveMode } from '../../config/persist.js';
+import { weixinModeFromChannelGateway } from '@linkagent/shared';
 import { buildChannelGatewayStatus } from './channel-gateway-status.js';
 
 export interface WeixinConfigApiDeps {
@@ -57,8 +59,10 @@ export function registerWeixinConfigApi(app: FastifyInstance, deps: WeixinConfig
     const cgRec =
       cgBody && typeof cgBody === 'object' && !Array.isArray(cgBody) ? (cgBody as Record<string, unknown>) : {};
 
-    const weixin = cgRec.weixin === true || body.weixinEnabled === true;
-    const weixinPlugin = cgRec.weixinPlugin === true || body.weixinPlugin === true;
+    let weixin = cgRec.weixin === true || body.weixinEnabled === true;
+    let weixinPlugin = cgRec.weixinPlugin === true || body.weixinPlugin === true;
+    if (weixinPlugin && !weixin) weixin = true;
+    if (!weixin) weixinPlugin = false;
     const enableCg = cgRec.enabled === true || weixin || weixinPlugin;
     const model = typeof cgRec.model === 'string' ? cgRec.model : undefined;
     const restart = body.restart !== false;
@@ -67,10 +71,14 @@ export function registerWeixinConfigApi(app: FastifyInstance, deps: WeixinConfig
     try {
       persistWeixinChannelGatewaySetup(configPath, {
         enabled: enableCg,
-        weixin: weixin || weixinPlugin,
+        weixin,
         weixinPlugin,
         model,
       });
+      const receiveMode = weixinModeFromChannelGateway(weixin, weixinPlugin);
+      if (receiveMode) {
+        persistWeixinReceiveMode(configPath, receiveMode);
+      }
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

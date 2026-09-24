@@ -6,11 +6,13 @@ import { join } from 'node:path';
 import {
   claimWeixinBinding,
   forceClaimWeixinBinding,
+  isWeixinUserBound,
   loadBoundWeixinAccount,
   normalizeBotAccountId,
   readWeixinBinding,
   removeWeixinBinding,
 } from '../../src/channels/weixin-binding.js';
+import { weixinLoginStateDir } from '../../src/channels/weixin-login-state.js';
 
 test('normalizeBotAccountId：@im.bot → -im-bot', () => {
   assert.equal(normalizeBotAccountId('89b53341f048@im.bot'), '89b53341f048-im-bot');
@@ -70,4 +72,15 @@ test('removeWeixinBinding：去掉指向，保留 *-im-bot.json', () => {
   removeWeixinBinding(stateDir, 'admin');
   assert.equal(readWeixinBinding(stateDir, 'admin'), null);
   assert.equal(JSON.parse(readFileSync(join(dir, 'x-im-bot.json'), 'utf8')).token, 't');
+});
+
+test('isWeixinUserBound：绑定在 login-users/<用户>，不在插件根目录', () => {
+  const pluginsRoot = mkdtempSync(join(tmpdir(), 'linkagent-wx-login-'));
+  const userDir = weixinLoginStateDir(pluginsRoot, 'local');
+  const dir = join(userDir, 'openclaw-weixin', 'accounts');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'bot-im-bot.json'), JSON.stringify({ token: 't', savedAt: '2026-01-01' }));
+  assert.equal(claimWeixinBinding(userDir, 'local', 'bot-im-bot'), 'ok');
+  assert.equal(isWeixinUserBound(pluginsRoot, 'local'), false);
+  assert.equal(isWeixinUserBound(userDir, 'local'), true);
 });

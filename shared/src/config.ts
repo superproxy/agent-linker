@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import { ACP_AGENT_KINDS, ACP_PERMISSION_MODES, ACP_PERMISSION_POLICY_ACTIONS } from './adapter.js';
+import { normalizeWeixinMode, type WeixinMode } from './weixin-mode.js';
+
+export type { WeixinMode } from './weixin-mode.js';
+export { normalizeWeixinMode, weixinModeUsesPlugin, channelGatewayFromWeixinMode, weixinModeFromChannelGateway } from './weixin-mode.js';
+
+const weixinModeSchema = z.preprocess(
+  (v) => (typeof v === 'string' ? normalizeWeixinMode(v) : v),
+  z.enum(['raw', 'claw']).default('raw'),
+);
 import type { AgentDefinition } from './adapter.js';
 
 export type { AcpPermissionMode, NonInteractivePermissionPolicy, PermissionPolicySpec, PermissionPolicyAction, AgentDefinition } from './adapter.js';
@@ -96,11 +105,11 @@ export const weixinSectionSchema = z
     enabled: z.boolean().default(true),
     /**
      * 个人微信一律由 channel-gateway（channels 进程）托管，gateway 不内嵌 bot。
-     * external：channels 内 weixin-bot（ilink，默认）
-     * openclaw-weixin-plugin：channels 内 @tencent-weixin/openclaw-weixin 插件收发
-     * weixin-bot：兼容旧 yaml，等同 external
+     * raw：channels 内 weixin-bot（ilink，默认）
+     * claw：channels 内 @tencent-weixin/openclaw-weixin 插件收发
+     * 兼容旧值 external / weixin-bot → raw，openclaw-weixin-plugin → claw
      */
-    mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).default('external'),
+    mode: weixinModeSchema,
     /** 登录态账号 id（缺省取 accounts/ 下第一个） */
     accountId: z.string().default(''),
     /** 多账号：登录用户名列表；channel-gateway 进程内按账号拉起 bot/插件（非 weixin:<id> 多进程）。 */
@@ -114,7 +123,7 @@ export const weixinSectionSchema = z
   })
   .default({
     enabled: true,
-    mode: 'external',
+    mode: 'raw',
     accountId: '',
     accounts: [],
     model: 'agent:pi',
@@ -262,7 +271,7 @@ const legacyConfigSchema = z
     tasks: z.object({ defaultAgentId: z.string().optional(), workspaceDir: z.string().optional() }).optional(),
     weixin: z
       .object({
-        mode: z.enum(['weixin-bot', 'openclaw-weixin-plugin', 'external']).optional(),
+        mode: weixinModeSchema.optional(),
         accountId: z.string().optional(),
         model: z.string().optional(),
         gatewayUrl: z.string().optional(),
@@ -450,7 +459,7 @@ export function defaultConfig(): GatewayConfig {
     agents: defaultAgentDefinitions(),
     channels: {},
     plugins: [],
-    weixin: { mode: 'weixin-bot' },
+    weixin: { mode: 'raw' },
     tasks: { defaultAgentId: 'pi' },
     defaultCwd: '',
   };

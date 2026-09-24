@@ -132,6 +132,15 @@ export interface WeixinBotOptions {
    * （用 gatewayToken 调 /api/bot/channel-token 换取），再退化为全局静态 token。
    */
   userTokenProvider?: UserTokenProvider;
+  /**
+   * 任务空间 owner。缺省为绑定登录用户名。
+   * auth.mode=local 时由 channel-gateway 传入 `local`。
+   */
+  ownerUsername?: string;
+  /**
+   * 为 true 时只用 gatewayToken 调 /v1，不签发/换取 ct_（local 模式）。
+   */
+  gatewayTokenOnly?: boolean;
   /** 日志回调（缺省 console.log） */
   log?: (...args: unknown[]) => void;
   /** 错误日志回调（缺省 console.error） */
@@ -182,15 +191,16 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));
   const errLog = options.errLog ?? ((...args: unknown[]) => console.error(new Date().toISOString(), ...args));
   const account = bindUsername ? loadBoundWeixinAccount(stateDir, bindUsername) : loadLatestWeixinAccount(pluginsRoot);
-  /** 任务空间 / ct_ 归属登录用户，不是 ilink 机器人 id */
-  const ownerUsername = bindUsername ?? account.id;
+  /** 任务空间归属：显式 owner（local 模式）优先，否则绑定登录用户，不是 ilink 机器人 id */
+  const ownerUsername = options.ownerUsername?.trim() || bindUsername || account.id;
 
-  // 用户级 token：内嵌模式用网关注入的签发器；external 独立进程用静态 token 经引导接口换取（落盘缓存）
-  const tokenProvider: UserTokenProvider | undefined =
-    options.userTokenProvider ??
-    (gatewayToken
-      ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: ownerUsername, log })
-      : undefined);
+  // 用户级 token：local/gatewayTokenOnly 只用静态 token；否则内嵌签发或 HTTP 引导换 ct_
+  const tokenProvider: UserTokenProvider | undefined = options.gatewayTokenOnly
+    ? undefined
+    : (options.userTokenProvider ??
+      (gatewayToken
+        ? new HttpUserTokenProvider({ gatewayUrl, gatewayToken, stateDir, accountId: ownerUsername, log })
+        : undefined));
 
   const syncBufPathOf = (id: string) => join(stateDir, 'openclaw-weixin', 'accounts', `${id}.sync.json`);
 

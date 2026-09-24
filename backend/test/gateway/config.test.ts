@@ -69,13 +69,13 @@ test('migrateConfig：旧顶层字段收进 gateway 段；旧 weixin.* 映射到
     server: { host: '0.0.0.0', port: 9000 },
     defaultCwd: '/tmp/ws',
     tasks: { defaultAgentId: 'pi' },
-    weixin: { mode: 'external', accountId: 'acc-1', model: 'agent:pi' },
+    weixin: { mode: 'raw', accountId: 'acc-1', model: 'agent:pi' },
   });
   assert.equal(cfg.gateway.server.host, '0.0.0.0');
   assert.equal(cfg.gateway.server.port, 9000);
   assert.equal(cfg.gateway.defaultCwd, '/tmp/ws');
   assert.equal(cfg.gateway.tasks.defaultAgentId, 'pi');
-  assert.equal(cfg.weixin.mode, 'external');
+  assert.equal(cfg.weixin.mode, 'raw');
   assert.equal(cfg.weixin.accountId, 'acc-1');
   assert.equal(cfg.weixin.model, 'agent:pi');
   // 旧扁平无 node 段 → 缺省启用
@@ -333,7 +333,7 @@ test('persistEnsureWeixinAccount：写入 overlay accounts 并切 external；rem
   const ids = persistEnsureWeixinAccount(file, 'alice', rt);
   assert.deepEqual(ids, ['alice']);
   let cfg = loadSharedConfig(file, rt).config;
-  assert.equal(cfg.weixin.mode, 'external');
+  assert.equal(cfg.weixin.mode, 'raw');
   assert.equal(cfg.weixin.enabled, true);
   assert.deepEqual(cfg.weixin.accounts, ['alice']);
   assert.equal(cfg.channelGateway.enabled, true);

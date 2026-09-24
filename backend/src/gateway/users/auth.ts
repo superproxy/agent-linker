@@ -1,4 +1,4 @@
-import type { UserRecord } from '@linkagent/shared';
+import { DEFAULT_ADMIN_USERNAME, type UserRecord } from '@linkagent/shared';
 import type { AuthMode } from '@linkagent/shared';
 import type { UserStore } from './store.js';
 import type { ChannelTokenRecord, ChannelTokenStore } from './channel-token-store.js';
@@ -111,8 +111,10 @@ export class AuthGuard {
 
     const token = AuthGuard.bearer(req);
 
-    // 永久 gateway token：local 模式映射为「本机默认用户」，token 模式为管理员级机器凭据
+    // 永久 gateway token：用户库已有 admin 时即该账号；否则 local 为本机用户，token 模式仍是无账号的机器凭据
     if (token && this.opts.staticToken !== '' && token === this.opts.staticToken) {
+      const admin = this.store.get(DEFAULT_ADMIN_USERNAME);
+      if (admin) return { status: 'session', user: admin };
       return this.opts.mode === 'local'
         ? { status: 'local', user: LOCAL_DEFAULT_USER }
         : { status: 'token' };

@@ -257,7 +257,7 @@ export class ProcessManager {
     const spec = instOf(id);
     switch (spec.base) {
       case 'gateway': {
-        const env: Record<string, string> = { LINKAGENT_WEIXIN_MODE: 'external' };
+        const env: Record<string, string> = { LINKAGENT_WEIXIN_MODE: 'raw' };
         if (this.gw.shared.channelGateway?.enabled) env.LINKAGENT_CHANNEL_GATEWAY = '1';
         return env;
       }

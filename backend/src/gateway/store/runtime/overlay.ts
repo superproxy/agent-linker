@@ -1,5 +1,5 @@
 import type { AgentDefinition, SharedConfig } from '@linkagent/shared';
-import { nodeAgentEntryId, normalizeAgentId } from '@linkagent/shared';
+import { nodeAgentEntryId, normalizeAgentId, normalizeWeixinMode } from '@linkagent/shared';
 
 /** 运行时层相对 config.yaml 的覆盖快照（JSON 文件或 SQLite 行集的等价物） */
 export interface GatewayRuntimeOverlay {
@@ -14,7 +14,7 @@ export interface GatewayRuntimeOverlay {
   tasks?: { defaultAgentId?: string };
   weixin?: {
     accounts?: string[];
-    mode?: 'weixin-bot' | 'openclaw-weixin-plugin' | 'external';
+    mode?: 'raw' | 'claw';
     enabled?: boolean;
   };
   childGateway?: {
@@ -52,7 +52,9 @@ export function applyRuntimeOverlay(base: SharedConfig, overlay: GatewayRuntimeO
 
   let weixin = { ...base.weixin };
   if (overlay.weixin?.accounts !== undefined) weixin = { ...weixin, accounts: [...overlay.weixin.accounts] };
-  if (overlay.weixin?.mode !== undefined) weixin = { ...weixin, mode: overlay.weixin.mode };
+  if (overlay.weixin?.mode !== undefined) {
+    weixin = { ...weixin, mode: normalizeWeixinMode(overlay.weixin.mode) };
+  }
   if (overlay.weixin?.enabled !== undefined) weixin = { ...weixin, enabled: overlay.weixin.enabled };
 
   let node = { ...base.node };

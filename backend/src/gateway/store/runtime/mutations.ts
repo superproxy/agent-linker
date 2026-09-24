@@ -1,5 +1,5 @@
-import type { AgentDefinition } from '@linkagent/shared';
-import { normalizeAgentId } from '@linkagent/shared';
+import type { AgentDefinition, WeixinMode } from '@linkagent/shared';
+import { normalizeAgentId, normalizeWeixinMode } from '@linkagent/shared';
 import type { GatewayRuntimeOverlay } from './overlay.js';
 import { emptyRuntimeOverlay } from './overlay.js';
 
@@ -26,10 +26,11 @@ export function overlayFromYaml(yamlConfig: {
     dirty = true;
   }
 
-  if (yamlConfig.weixin.accounts.length > 0 || yamlConfig.weixin.mode === 'external') {
+  const wxMode = normalizeWeixinMode(yamlConfig.weixin.mode);
+  if (yamlConfig.weixin.accounts.length > 0 || wxMode === 'raw') {
     overlay.weixin = {
       accounts: [...yamlConfig.weixin.accounts],
-      mode: yamlConfig.weixin.mode as 'weixin-bot' | 'openclaw-weixin-plugin' | 'external',
+      mode: wxMode,
       enabled: yamlConfig.weixin.enabled,
     };
     dirty = true;
@@ -112,8 +113,14 @@ export function applyEnsureWeixinAccount(o: GatewayRuntimeOverlay, accountId: st
   const w = o.weixin ?? {};
   const accounts = w.accounts ?? [];
   if (!accounts.includes(id)) w.accounts = [...accounts, id];
-  w.mode = 'external';
+  w.mode = 'raw';
   w.enabled = true;
+  o.weixin = w;
+}
+
+export function applySetWeixinMode(o: GatewayRuntimeOverlay, mode: WeixinMode): void {
+  const w = o.weixin ?? {};
+  w.mode = normalizeWeixinMode(mode);
   o.weixin = w;
 }
 

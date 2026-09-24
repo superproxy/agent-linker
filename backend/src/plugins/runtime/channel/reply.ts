@@ -129,19 +129,25 @@ export interface DispatchReplyParams {
   [key: string]: unknown;
 }
 
+/** 企微 replyStream 串行等 ACK；token 级推送会把队列堵死（对齐 wxwork-workers 0.5s）。 */
+const WECOM_STREAM_FLUSH_MS = 500;
+const EMPTY_WECOM_REPLY = '没有生成回复，请重试。';
+
 /**
- * 思考过程累积器：正文首块输出前，把完整思考以「🤔」标记的消息块先交付，
- * 避免与正文混流/刷屏（思考流先于正文到达，一次收集、一次发送）。
+ * 思考过程累积器：正文首块输出前一次性交付。
+ * 个人微信用「🤔」前缀；企微必须包在闭合 `<think>` 里，客户端才会渲染「已完成思考」。
  */
 function createReasoningCollector(
   deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>,
+  wrap: 'emoji' | 'think' = 'emoji',
 ): {
   push(delta: string): void;
   flushBeforeText(): void;
-  flush(): void;
+  flush(): Promise<void>;
 } {
   let buf = '';
   let sent = false;
+  let pending: Promise<void> = Promise.resolve();
   const CHUNK = 2000;
   const emit = (): void => {
     if (!buf) return;
@@ -150,7 +156,9 @@ function createReasoningCollector(
     do {
       const chunk = rest.slice(0, CHUNK);
       rest = rest.slice(CHUNK);
-      void deliver({ text: `🤔 ${chunk}` }, DELIVER_BLOCK);
+      const text = wrap === 'think' ? `<think>${chunk}</think>` : `🤔 ${chunk}`;
+      const job = Promise.resolve(deliver({ text }, DELIVER_BLOCK)).then(() => undefined);
+      pending = pending.then(() => job);
     } while (rest.length > 0);
   };
   return {
@@ -168,35 +176,47 @@ function createReasoningCollector(
         sent = true;
         emit();
       }
+      return pending;
     },
   };
 }
 
 /**
- * 流式把 agent 输出切成块交付：24ms 时间窗 + 512 字符上限，
- * 兼顾「流式刷新」体验与 deliver 调用开销（agent 每 token 一次回调）。
+ * 流式把 agent 输出切成块交付：时间窗 + 512 字符上限。
+ * 企微用 500ms，避免 replyStream 串行 ACK 被 token 级推送堵死；首块立即发出。
  */
 function createTextStreamDeliverer(
   deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>,
-): { push(delta: string): void; flush(): void } {
+  opts?: { intervalMs?: number; flushFirst?: boolean },
+): { push(delta: string): void; flush(): Promise<void> } {
   let buf = '';
   let timer: NodeJS.Timeout | null = null;
+  let pending: Promise<void> = Promise.resolve();
+  let flushedOnce = false;
+  const intervalMs = opts?.intervalMs ?? 24;
+  const flushFirst = opts?.flushFirst ?? false;
   const send = (): void => {
     if (!buf) return;
     const chunk = buf;
     buf = '';
-    void deliver({ text: chunk }, DELIVER_BLOCK);
+    flushedOnce = true;
+    const job = Promise.resolve(deliver({ text: chunk }, DELIVER_BLOCK)).then(() => undefined);
+    pending = pending.then(() => job);
   };
   const schedule = (): void => {
     if (timer) return;
     timer = setTimeout(() => {
       timer = null;
       send();
-    }, 24);
+    }, intervalMs);
   };
   return {
     push(delta) {
       buf += delta;
+      if (flushFirst && !flushedOnce) {
+        send();
+        return;
+      }
       if (buf.length >= 512) send();
       else schedule();
     },
@@ -206,6 +226,7 @@ function createTextStreamDeliverer(
         timer = null;
       }
       send();
+      return pending;
     },
   };
 }
@@ -218,7 +239,7 @@ function createTextStreamDeliverer(
  */
 function createBufferedTextDeliverer(
   deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>,
-): { push(delta: string): void; flush(): void } {
+): { push(delta: string): void; flush(): Promise<void> } {
   let buf = '';
   let flushed = false;
   const CHUNK = 2000;
@@ -227,16 +248,18 @@ function createBufferedTextDeliverer(
       buf += delta;
     },
     flush() {
-      if (flushed) return;
+      if (flushed) return Promise.resolve();
       flushed = true;
-      if (!buf) return;
+      if (!buf) return Promise.resolve();
       let rest = buf;
       buf = '';
+      const jobs: Promise<void>[] = [];
       do {
         const chunk = rest.slice(0, CHUNK);
         rest = rest.slice(CHUNK);
-        void deliver({ text: chunk }, DELIVER_BLOCK);
+        jobs.push(Promise.resolve(deliver({ text: chunk }, DELIVER_BLOCK)).then(() => undefined));
       } while (rest.length > 0);
+      return Promise.all(jobs).then(() => undefined);
     },
   };
 }
@@ -273,11 +296,16 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
     channel,
     accountId,
     peer: peerId ? { kind: peerKind, id: peerId } : null,
-    defaultAgentId: typeof ctx.AgentId === 'string' ? ctx.AgentId : undefined,
+    defaultAgentId: channel === 'wecom' ? undefined : typeof ctx.AgentId === 'string' ? ctx.AgentId : undefined,
   });
+  // 企微会话键由 resolveAgentRoute 生成（wecom:<userid>），忽略插件写入的 agent:pi SessionKey。
+  const sessionKey = channel === 'wecom' ? route.sessionKey : String(ctx.SessionKey ?? route.sessionKey);
   const agentId =
-    typeof ctx.AgentId === 'string' && ctx.AgentId.trim() ? ctx.AgentId.trim() : route.agentId;
-  const sessionKey = String(ctx.SessionKey ?? route.sessionKey);
+    channel === 'wecom'
+      ? ''
+      : typeof ctx.AgentId === 'string' && ctx.AgentId.trim()
+        ? ctx.AgentId.trim()
+        : route.agentId;
   const attachments = (ctx.Attachments as Array<{ name: string; mimeType: string; url: string }> | undefined) ?? [];
 
   const traceId = newDispatchTraceId();
@@ -291,9 +319,22 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
     textLen: text.length,
   });
 
-  const stream = createTextStreamDeliverer(deliver);
-  const reasoning = createReasoningCollector(deliver);
+  const wecom = channel === 'wecom';
+  const onReplyStart = dispatcherOptions.onReplyStart;
+  if (typeof onReplyStart === 'function') {
+    await onReplyStart();
+  }
+
+  let deliverQueue: Promise<void> = Promise.resolve();
+  const queuedDeliver = (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo): Promise<void> => {
+    const job = deliverQueue.then(() => Promise.resolve(deliver(payload, info)).then(() => undefined));
+    deliverQueue = job;
+    return job;
+  };
+  const stream = createTextStreamDeliverer(queuedDeliver, wecom ? { intervalMs: WECOM_STREAM_FLUSH_MS, flushFirst: true } : undefined);
+  const reasoning = createReasoningCollector(queuedDeliver, wecom ? 'think' : 'emoji');
   let delivered = false;
+  let sawReasoning = false;
   let replyChunks = 0;
   try {
     await agentDispatch.chat(
@@ -306,6 +347,7 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
           stream.push(delta);
         },
         onReasoning(delta) {
+          if (delta) sawReasoning = true;
           reasoning.push(delta);
         },
         onToolActivity(name) {
@@ -314,8 +356,12 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
         },
       },
     );
-    stream.flush();
-    reasoning.flush(); // 兜底：仅有思考无正文时也要让用户看到
+    await stream.flush();
+    await reasoning.flush(); // 兜底：仅有思考无正文时也要让用户看到
+    if (wecom && !delivered && !sawReasoning) {
+      await queuedDeliver({ text: EMPTY_WECOM_REPLY }, DELIVER_BLOCK);
+      delivered = true;
+    }
     emitChannelDispatchTrace('channels.reply', {
       traceId,
       channel,
@@ -325,8 +371,13 @@ export async function dispatchReplyWithBufferedBlockDispatcher(
     });
     return { delivered };
   } catch (err) {
-    stream.flush();
-    reasoning.flush();
+    await stream.flush();
+    await reasoning.flush();
+    if (wecom && !delivered && !sawReasoning) {
+      const msg = err instanceof Error ? err.message.trim() : String(err).trim();
+      await queuedDeliver({ text: msg || EMPTY_WECOM_REPLY }, DELIVER_BLOCK);
+      delivered = true;
+    }
     emitChannelDispatchTrace('channels.reply.fail', {
       traceId,
       channel,
@@ -516,12 +567,12 @@ export async function dispatchReplyFromConfig(
         },
       },
     );
-    stream.flush();
-    reasoning.flush(); // 兜底：仅有思考无正文时也要让用户看到
+    await stream.flush();
+    await reasoning.flush(); // 兜底：仅有思考无正文时也要让用户看到
     return { delivered };
   } catch (err) {
-    stream.flush();
-    reasoning.flush();
+    await stream.flush();
+    await reasoning.flush();
     if (dispatcher.onError) {
       await dispatcher.onError(err, { kind: 'agent' });
       return { delivered };

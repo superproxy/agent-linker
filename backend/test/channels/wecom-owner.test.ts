@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveWecomOwnerUsername } from '../../src/channels/wecom-owner.js';
+import { LOCAL_CHANNEL_OWNER, resolveWecomOwnerUsername } from '../../src/channels/wecom-owner.js';
 
 const noopLog = {
   debug: () => {},
@@ -8,6 +8,17 @@ const noopLog = {
   warn: () => {},
   error: () => {},
 };
+
+test('resolveWecomOwnerUsername：auth.mode=local 固定 owner=local', () => {
+  const prev = process.env.LINKAGENT_ACCOUNT_ID;
+  process.env.LINKAGENT_ACCOUNT_ID = 'env-user';
+  try {
+    assert.equal(resolveWecomOwnerUsername(['a', 'b'], 'alice', noopLog, 'local'), LOCAL_CHANNEL_OWNER);
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_ACCOUNT_ID;
+    else process.env.LINKAGENT_ACCOUNT_ID = prev;
+  }
+});
 
 test('resolveWecomOwnerUsername：显式 wecomOwner 优先', () => {
   const prev = process.env.LINKAGENT_ACCOUNT_ID;

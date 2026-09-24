@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentDefinition, SharedConfig } from '@linkagent/shared';
+import type { AgentDefinition, SharedConfig, WeixinMode } from '@linkagent/shared';
 import type { GatewayRuntimeOverlay } from './overlay.js';
 import type { GatewayRuntimeRepository } from './repository.js';
 import {
@@ -10,6 +10,7 @@ import {
   applySetAgentEnabled,
   applySetChildGateway,
   applySetDefaultTaskAgentId,
+  applySetWeixinMode,
   mutateOverlay,
   overlayFromYaml,
 } from './mutations.js';
@@ -80,5 +81,9 @@ export class JsonOverlayGatewayRuntimeRepository implements GatewayRuntimeReposi
 
   setChildGateway(section: 'weixin' | 'node', url: string, token: string): void {
     this.persistMutation((o) => applySetChildGateway(o, section, url, token));
+  }
+
+  setWeixinMode(mode: WeixinMode): void {
+    this.persistMutation((o) => applySetWeixinMode(o, mode));
   }
 }

@@ -43,12 +43,15 @@ function setup() {
   return { dir, users, channelTokens, personalTokens, guard };
 }
 
-test('静态 token → token 态；无凭据 → none；checkAuth 仅放行 token/session', () => {
+test('静态 token 关联 admin；无凭据 → none；checkAuth 放行 gateway token', () => {
   const { guard } = setup();
-  assert.equal(guard.resolve(req('Bearer static-secret')).status, 'token');
+  const state = guard.resolve(req('Bearer static-secret'));
+  assert.equal(state.status, 'session');
+  if (state.status === 'session') assert.equal(state.user.username, 'admin');
   assert.equal(guard.resolve(req()).status, 'none');
   assert.equal(guard.checkAuth(req('Bearer static-secret')), true);
   assert.equal(guard.checkAuth(req()), false);
+  assert.equal(guard.sessionUser(req('Bearer static-secret'))?.username, 'admin');
 });
 
 test('resolveChat：Bearer 任务 key → task 态并锁定任务', () => {
@@ -181,8 +184,15 @@ test('local 模式：无凭据即本机管理员，不区分访问地址；gatew
   assert.equal(guard.isAdmin(req(undefined, '127.0.0.1')), true);
   assert.equal(guard.sessionUser(req(undefined, '127.0.0.1'))?.username, 'local');
 
-  // gateway token 同样映射为默认用户（任意来源）
+  // 尚无 admin 账号时，gateway token 仍映射为默认用户
   assert.equal(guard.resolve(req('Bearer gw-secret', '10.0.0.9')).status, 'local');
+
+  users.ensureDefaultAdmin();
+  const asAdmin = guard.resolve(req('Bearer gw-secret', '10.0.0.9'));
+  assert.equal(asAdmin.status, 'session');
+  if (asAdmin.status === 'session') assert.equal(asAdmin.user.username, 'admin');
+  // 无凭据的本机访问仍是 local，不因 admin 存在而改变
+  assert.equal(guard.resolve(req(undefined, '127.0.0.1')).status, 'local');
 
   // 非回环无 token 仍按运行模式为本机管理员
   const lan = guard.resolve(req(undefined, '10.0.0.9'));

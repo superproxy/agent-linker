@@ -37,3 +37,31 @@ test('persistWeixinChannelGatewaySetup：写入 weixinPlugin 与插件包', () =
   const wx = channels['openclaw-weixin'] as Record<string, unknown>;
   assert.equal(wx.agentId, 'pi');
 });
+
+test('persistWeixinChannelGatewaySetup：ilink 与插件互斥字段', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'la-weixin-cg-'));
+  writeSplit(dir);
+  const gatewayFile = join(dir, 'gateway.yaml');
+  persistWeixinChannelGatewaySetup(gatewayFile, {
+    enabled: true,
+    weixin: true,
+    weixinPlugin: false,
+  });
+  let chRaw = parse(readFileSync(join(dir, 'channels.yaml'), 'utf8')) as Record<string, unknown>;
+  let cg = chRaw.channelGateway as Record<string, unknown>;
+  assert.equal(cg.weixin, true);
+  assert.equal(cg.weixinPlugin, false);
+  const pluginsOff = cg.plugins as Array<{ package: string; enabled?: boolean }>;
+  const wxPkg = pluginsOff.find((p) => p.package.includes('openclaw-weixin'));
+  assert.equal(wxPkg?.enabled, false);
+
+  persistWeixinChannelGatewaySetup(gatewayFile, {
+    enabled: true,
+    weixin: false,
+    weixinPlugin: false,
+  });
+  chRaw = parse(readFileSync(join(dir, 'channels.yaml'), 'utf8')) as Record<string, unknown>;
+  cg = chRaw.channelGateway as Record<string, unknown>;
+  assert.equal(cg.weixin, false);
+  assert.equal(cg.weixinPlugin, false);
+});

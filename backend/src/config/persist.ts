@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import type { AgentDefinition, SharedConfig } from '@linkagent/shared';
+import type { AgentDefinition, SharedConfig, WeixinMode } from '@linkagent/shared';
+import { normalizeWeixinMode, weixinModeUsesPlugin } from '@linkagent/shared';
 import { nodeAgentEntryId, normalizeAgentId } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import {
@@ -91,10 +92,7 @@ export function persistEnsureWeixinAccount(path: string, accountId: string, runt
   if (!effective.weixin.accounts.includes(id)) {
     throw new Error(`持久化校验失败：weixin.accounts 未包含 ${id}`);
   }
-  const mode = effective.weixin.mode;
-  if (mode !== 'external' && mode !== 'weixin-bot' && mode !== 'openclaw-weixin-plugin') {
-    throw new Error(`持久化校验失败：weixin.mode 非法 ${mode}`);
-  }
+  const mode = normalizeWeixinMode(effective.weixin.mode);
   if (effective.weixin.enabled !== true) {
     throw new Error('持久化校验失败：weixin.enabled 未打开');
   }
@@ -102,7 +100,7 @@ export function persistEnsureWeixinAccount(path: string, accountId: string, runt
     persistWeixinChannelGatewaySetup(path, {
       enabled: true,
       weixin: true,
-      weixinPlugin: mode === 'openclaw-weixin-plugin',
+      weixinPlugin: weixinModeUsesPlugin(mode),
     });
   }
   return [...effective.weixin.accounts];
@@ -111,12 +109,25 @@ export function persistEnsureWeixinAccount(path: string, accountId: string, runt
 /** 已有 overlay 账号但 channels.yaml 未开时，补齐 channel-gateway（启动/ pm all 用）。 */
 export function persistEnsureWeixinChannelGateway(path: string, mode: string): void {
   if (resolveConfigPaths(path).mode !== 'split') return;
-  const plugin = mode === 'openclaw-weixin-plugin';
+  const normalized = normalizeWeixinMode(mode);
   persistWeixinChannelGatewaySetup(path, {
     enabled: true,
     weixin: true,
-    weixinPlugin: plugin,
+    weixinPlugin: weixinModeUsesPlugin(normalized),
   });
+}
+
+/** 管理员切换 ilink/claw 时写入 overlay weixin.mode（raw | claw） */
+export function persistWeixinReceiveMode(path: string, mode: WeixinMode, runtimeGatewayDir?: string): WeixinMode {
+  const normalized = normalizeWeixinMode(mode);
+  const effective = persistViaRuntime(path, runtimeGatewayDir, (store) => {
+    store.setWeixinMode(normalized);
+  });
+  const got = normalizeWeixinMode(effective.weixin.mode);
+  if (got !== normalized) {
+    throw new Error(`持久化校验失败：weixin.mode 未更新为 ${normalized}`);
+  }
+  return got;
 }
 
 /** 从运行时 KV 的 weixin.accounts 去掉账号 id。 */

@@ -25,6 +25,7 @@ export function WeixinPage(props: {
   const [status, setStatus] = useState<WeixinStatus | null>(null);
   const [cgCfg, setCgCfg] = useState<WeixinChannelConfig | null>(null);
   const [cgBusy, setCgBusy] = useState(false);
+  const [useIlink, setUseIlink] = useState(false);
   const [usePlugin, setUsePlugin] = useState(false);
   const [cgEnabled, setCgEnabled] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -49,7 +50,9 @@ export function WeixinPage(props: {
       try {
         const c = await wxCg.get();
         setCgCfg(c);
-        setUsePlugin(c.channelGateway.weixinPlugin);
+        const plugin = c.channelGateway.weixinPlugin;
+        setUsePlugin(plugin);
+        setUseIlink(c.channelGateway.weixin && !plugin);
         setCgEnabled(c.channelGateway.enabled);
       } catch {
         /* 非管理员或 channels 未配置时忽略 */
@@ -169,20 +172,21 @@ export function WeixinPage(props: {
     }
   };
 
-  const startPluginWeixin = async (restart = true) => {
+  const weixinPersonalOn = useIlink || usePlugin;
+
+  const saveChannelGateway = async (restart = true) => {
     if (!wxCg) return;
     setCgBusy(true);
     try {
       await wxCg.save({
         channelGateway: {
-          enabled: true,
-          weixin: true,
+          enabled: cgEnabled || weixinPersonalOn,
+          weixin: weixinPersonalOn,
           weixinPlugin: usePlugin,
         },
         restart,
-        startOnly: !restart,
       });
-      notify.success(restart ? '已保存并重启 channels（插件微信）' : '已启动 channels');
+      notify.success(restart ? '已保存并重启 channels' : '已保存');
       await refresh();
     } catch (e) {
       notify.error(e instanceof Error ? e.message : String(e));
@@ -222,43 +226,47 @@ export function WeixinPage(props: {
             title={
               <Space>
                 <CloudServerOutlined />
-                <span>插件微信 · channel-gateway</span>
+                <span>个人微信 · channel-gateway</span>
                 {channelsRunning ? <Tag color="success">channels 运行中</Tag> : <Tag>channels 已停止</Tag>}
               </Space>
             }
             style={{ marginBottom: 0 }}
           >
             <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-              在 channels 进程内托管个人微信：默认 <code>weixin-bot</code>（ilink）；开启「OpenClaw 插件收发」则加载{' '}
-              <code>@tencent-weixin/openclaw-weixin</code>（需先在本页扫码绑定，并执行 <code>pnpm setup:channels</code>）。
+              个人微信有两种收发实现（二选一，扫码绑定共用）。企微/飞书仍由同一 <code>channels</code>{' '}
+              进程托管；下方开关只控制个人微信走哪条链路。
             </Typography.Paragraph>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Space wrap>
-                <span>启用 channel-gateway</span>
+              <Space wrap align="center">
+                <span>启用 channel-gateway 进程</span>
                 <Switch checked={cgEnabled} onChange={setCgEnabled} disabled={cgBusy} />
-                <span style={{ marginLeft: 16 }}>OpenClaw 插件收发</span>
-                <Switch checked={usePlugin} onChange={setUsePlugin} disabled={cgBusy} />
+              </Space>
+              <Space wrap align="center">
+                <span>raw · ilink（weixin-bot）</span>
+                <Switch
+                  checked={useIlink}
+                  disabled={cgBusy}
+                  onChange={(on) => {
+                    setUseIlink(on);
+                    if (on) setUsePlugin(false);
+                  }}
+                />
+                <span style={{ marginLeft: 8 }}>claw · OpenClaw 插件收发</span>
+                <Switch
+                  checked={usePlugin}
+                  disabled={cgBusy}
+                  onChange={(on) => {
+                    setUsePlugin(on);
+                    if (on) setUseIlink(false);
+                  }}
+                />
+                {!useIlink && !usePlugin ? (
+                  <Typography.Text type="secondary">个人微信收发已关闭（仍可仅跑企微/飞书）</Typography.Text>
+                ) : null}
               </Space>
               <Space wrap>
-                <Button
-                  type="primary"
-                  loading={cgBusy}
-                  onClick={() =>
-                    void wxCg
-                      .save({
-                        channelGateway: { enabled: cgEnabled, weixin: true, weixinPlugin: usePlugin },
-                        restart: true,
-                      })
-                      .then(() => refresh())
-                      .then(() => notify.success('已保存'))
-                      .catch((e) => notify.error(e instanceof Error ? e.message : String(e)))
-                      .finally(() => setCgBusy(false))
-                  }
-                >
+                <Button type="primary" loading={cgBusy} onClick={() => void saveChannelGateway(true)}>
                   保存并重启 channels
-                </Button>
-                <Button loading={cgBusy} disabled={!usePlugin && !cgEnabled} onClick={() => void startPluginWeixin(true)}>
-                  启动插件微信
                 </Button>
                 <Button disabled={cgBusy || channelsRunning} onClick={() => void pmAct('start')}>
                   启动 channels
@@ -310,7 +318,7 @@ export function WeixinPage(props: {
             type="info"
             showIcon
             style={{ marginBottom: 14 }}
-            message="个人微信统一由 channel-gateway（channels 进程）托管：扫码绑定后会写入 channels.yaml 并重启 channels。收发可选 weixin-bot（ilink）或 OpenClaw 插件（见上方卡片）。"
+            message="个人微信由 channels 进程托管：weixin.mode 为 raw（ilink/weixin-bot）或 claw（OpenClaw 插件），扫码绑定共用；保存开关会写入 channels.yaml 与 overlay.mode。"
           />
 
           <Descriptions

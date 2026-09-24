@@ -74,7 +74,7 @@ test('未携带凭据访问受保护接口 → 401；静态 token 与会话 toke
   assert.equal(sessionAuth.statusCode, 200);
 });
 
-test('GET /api/auth/me：无凭据 401；会话返回用户；静态 token 返回 tokenAuth', async () => {
+test('GET /api/auth/me：无凭据 401；会话与静态 gateway token 都返回 admin', async () => {
   assert.equal((await app.inject({ method: 'GET', url: '/api/auth/me' })).statusCode, 401);
 
   const token = ((await login('admin', initialAdminPassword)).json() as { token: string }).token;
@@ -85,9 +85,10 @@ test('GET /api/auth/me：无凭据 401；会话返回用户；静态 token 返�
   assert.equal(meBody.user?.username, 'admin');
 
   const tm = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: 'Bearer test-static-token' } });
-  const tmBody = tm.json() as { tokenAuth?: boolean; user: null };
-  assert.equal(tmBody.tokenAuth, true);
-  assert.equal(tmBody.user, null);
+  const tmBody = tm.json() as { tokenAuth?: boolean; user: { username: string; role: string } | null };
+  assert.equal(tmBody.tokenAuth, undefined);
+  assert.equal(tmBody.user?.username, 'admin');
+  assert.equal(tmBody.user?.role, 'admin');
 });
 
 test('改密：原密码错误 401；弱密码 400；成功后用新密码登录、mustChangePassword 解除', async () => {
@@ -258,13 +259,17 @@ test('个人 API token：未登录 401；ensure 幂等；rotate 换发；DELETE 
   assert.equal((after.json() as { token: null }).token, null);
 });
 
-test('个人 API token：静态 gateway token 无账号实体，不能管理个人 token', async () => {
+test('个人 API token：静态 gateway token 关联 admin，可签发 pat_', async () => {
   const res = await app.inject({
     method: 'POST',
     url: '/api/personal-tokens/ensure',
     headers: { authorization: 'Bearer test-static-token' },
   });
-  assert.equal(res.statusCode, 401);
+  assert.equal(res.statusCode, 200, res.body);
+  const token = (res.json() as { token: string }).token;
+  assert.ok(token.startsWith('pat_'));
+  const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${token}` } });
+  assert.equal((me.json() as { user: { username: string } }).user.username, 'admin');
 });
 
 test('未开启鉴权模式：登录接口返回 400 auth_disabled（登录无意义）', async () => {

@@ -23,7 +23,7 @@ test('loadSharedConfig：split 三文件合并为有效配置', () => {
   assert.equal(loaded.mode, 'split');
   assert.equal(loaded.config.gateway.server.port, 9001);
   assert.equal(loaded.config.gateway.auth.mode, 'token');
-  assert.equal(loaded.config.weixin.mode, 'external');
+  assert.equal(loaded.config.weixin.mode, 'raw');
   assert.deepEqual(
     loaded.config.node.agents.map((a) => (typeof a === 'string' ? a : a.id)),
     ['codex'],

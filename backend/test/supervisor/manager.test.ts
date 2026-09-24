@@ -163,7 +163,7 @@ test('ProcessManager：dev 形态路径/命令/环境变量正确（无 .linkage
   assert.ok(gw.args[2].endsWith(join('backend', 'src', 'gateway', 'index.ts')));
   // gateway 被强制 external
   const gwEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('gateway');
-  assert.equal(gwEnv.LINKAGENT_WEIXIN_MODE, 'external');
+  assert.equal(gwEnv.LINKAGENT_WEIXIN_MODE, 'raw');
 });
 
 test('ProcessManager：dist 形态用 node 跑 server/*.mjs；子进程自读共享配置，supervisor 置空屏蔽 URL/token 环境变量', () => {

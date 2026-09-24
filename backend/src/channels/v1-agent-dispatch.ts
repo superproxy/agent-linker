@@ -87,7 +87,8 @@ export function parseSessionRouting(sessionKey: string): {
 
     const channel = head === 'lark' ? 'feishu' : head;
 
-    const userId = sk.slice(head.length + 1).trim();
+    let userId = sk.slice(head.length + 1).trim();
+    if (/^group:/i.test(userId)) userId = userId.slice('group:'.length).trim();
 
     if (userId) return { channel, userId, legacySessionKey: sk };
 

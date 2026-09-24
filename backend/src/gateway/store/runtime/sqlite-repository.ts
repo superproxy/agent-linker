@@ -64,4 +64,8 @@ export class SqliteGatewayRuntimeRepository implements GatewayRuntimeRepository 
   setChildGateway(_section: 'weixin' | 'node', _url: string, _token: string): void {
     this.notReady();
   }
+
+  setWeixinMode(_mode: import('@linkagent/shared').WeixinMode): void {
+    this.notReady();
+  }
 }

@@ -16,6 +16,7 @@ import {
   deriveGatewayBase,
 } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
+import { normalizeWeixinMode } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, enrichAgentInfos, type AcpAgentKind } from './agents/acpWrapper.js';
@@ -147,11 +148,11 @@ export async function buildServer(options?: {
   const config: SharedConfig = sharedConfig;
   // 便捷别名：gateway 段（原扁平配置整体收敛于此）
   const gw = config.gateway;
-  // 进程管理器托管微信时注入 LINKAGENT_WEIXIN_MODE=external：gateway 不内嵌 bot，改由独立进程运行。
+  // 进程管理器可注入 LINKAGENT_WEIXIN_MODE=raw|claw（兼容 external / weixin-bot / openclaw-weixin-plugin）。
   // 注意：zod default() 产出的对象嵌套属性是只读代理，直接赋 config.weixin.mode 会被静默忽略，必须整体替换。
-  const envWeixinMode = process.env.LINKAGENT_WEIXIN_MODE;
-  if (envWeixinMode === 'external' || envWeixinMode === 'weixin-bot' || envWeixinMode === 'openclaw-weixin-plugin') {
-    config.weixin = { ...config.weixin, mode: envWeixinMode };
+  const envWeixinMode = process.env.LINKAGENT_WEIXIN_MODE?.trim();
+  if (envWeixinMode) {
+    config.weixin = { ...config.weixin, mode: normalizeWeixinMode(envWeixinMode) };
   }
   /** 个人微信仅 channel-gateway；gateway 不内嵌 weixin-bot */
   if ((config.weixin.accounts?.length ?? 0) > 0 && !config.channelGateway.enabled) {
@@ -165,9 +166,6 @@ export async function buildServer(options?: {
   const channelGatewayEnabled = config.channelGateway.enabled;
   const weixinViaChannels =
     channelGatewayEnabled || ((config.weixin.accounts?.length ?? 0) > 0 && config.weixin.enabled !== false);
-  if (weixinViaChannels && config.weixin.mode === 'weixin-bot') {
-    config.weixin = { ...config.weixin, mode: 'external' };
-  }
   const definitions = options?.definitions ?? (gw.agents.length > 0 ? gw.agents : defaultAgentDefinitions());
 
   // 安装布局：形态判定（dev/dist）与所有运行态路径的唯一来源
@@ -1060,13 +1058,15 @@ export async function buildServer(options?: {
         weixinLoginService.clearChannelTokenCache(accountId);
         taskService.rotateKeysOnWeixinBind(accountId);
         const accounts = persistEnsureWeixinAccount(configPath, accountId, runtimeGatewayDir);
-        config.weixin = { ...config.weixin, accounts, mode: 'external' };
-        config.channelGateway = loadSharedConfig(configPath, runtimeGatewayDir).config.channelGateway;
+        const reloaded = loadSharedConfig(configPath, runtimeGatewayDir).config;
+        config.weixin = { ...config.weixin, accounts, mode: reloaded.weixin.mode };
+        config.channelGateway = reloaded.channelGateway;
         await pm.restart(['channels']);
       },
       async restartAccount(accountId) {
         const accounts = persistEnsureWeixinAccount(configPath, accountId, runtimeGatewayDir);
-        config.weixin = { ...config.weixin, accounts, mode: 'external' };
+        const reloaded = loadSharedConfig(configPath, runtimeGatewayDir).config;
+        config.weixin = { ...config.weixin, accounts, mode: reloaded.weixin.mode };
         config.channelGateway = loadSharedConfig(configPath, runtimeGatewayDir).config.channelGateway;
         await pm.restart(['channels']);
       },

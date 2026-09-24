@@ -15,7 +15,7 @@ import { weixinLoginStateDir } from './weixin-login-state.js';
 import { DEFAULT_WEIXIN_PLUGIN } from '../config/persist-weixin.js';
 import { HttpUserTokenProvider } from './user-token.js';
 import { createV1AgentDispatch, TASK_ROUTED_MODEL_PLACEHOLDER } from './v1-agent-dispatch.js';
-import { resolveWecomOwnerUsername } from './wecom-owner.js';
+import { LOCAL_CHANNEL_OWNER, resolveWecomOwnerUsername } from './wecom-owner.js';
 import { startRuntimePushLoop } from './channel-gateway-push.js';
 import { appendChannelGatewayLog } from './channel-gateway-log-buffer.js';
 import { setChannelDispatchTraceSink } from '../store/dispatch-trace.js';
@@ -94,8 +94,11 @@ async function main(): Promise<void> {
   const httpApp = exposeHttp ? Fastify({ logger: true }) : null;
 
   const loginAccounts = weixinAccountIds();
+  const authMode = config.gateway.auth.mode;
+  const localChannel = authMode === 'local';
   const ownerTokenProviders = new Map<string, HttpUserTokenProvider>();
-  if (runtime.gatewayToken && cg.wecom) {
+  // local：渠道用户 ≡ local，对接只用 gateway token，不签 ct_
+  if (runtime.gatewayToken && cg.wecom && !localChannel) {
     for (const accountId of loginAccounts) {
       ownerTokenProviders.set(
         accountId,
@@ -114,12 +117,15 @@ async function main(): Promise<void> {
         'weixin.accounts 为空：企微 /v1 将使用静态 gateway token，无 per-user ct_（请在 overlay 登记登录用户）',
       );
     }
+  } else if (cg.wecom && localChannel) {
+    log.info('auth.mode=local：企微 /v1 使用 gateway token，任务 owner=local');
   } else if (cg.wecom && !runtime.gatewayToken) {
     log.warn('未配置 gateway 静态 token：企微 /v1 匿名（auth.mode=open）或鉴权失败');
   }
 
-  const wecomOwner = resolveWecomOwnerUsername(loginAccounts, cg.wecomOwner, log);
-  const wecomUserTokenProvider = wecomOwner ? ownerTokenProviders.get(wecomOwner) : undefined;
+  const wecomOwner = resolveWecomOwnerUsername(loginAccounts, cg.wecomOwner, log, authMode);
+  const wecomUserTokenProvider =
+    !localChannel && wecomOwner ? ownerTokenProviders.get(wecomOwner) : undefined;
 
   const agentDispatch = createV1AgentDispatch({
     gatewayUrl: runtime.gatewayUrl,
@@ -150,7 +156,9 @@ async function main(): Promise<void> {
     cg.wecom || cg.feishu || useWeixinPlugin || Object.keys(openClawChannels).length > 0;
 
   if (needsPluginRuntime) {
-    const boundForPlugin = loginAccounts.filter((id) => isWeixinUserBound(layout.pluginsState, id));
+    const boundForPlugin = loginAccounts.filter((id) =>
+      isWeixinUserBound(weixinLoginStateDir(layout.pluginsState, id), id),
+    );
     if (useWeixinPlugin && boundForPlugin.length > 0) {
       const primary = boundForPlugin[0];
       if (primary === undefined) {
@@ -174,7 +182,11 @@ async function main(): Promise<void> {
     const packages = new Set<string>();
     if (cg.wecom) {
       for (const p of openClawPlugins) {
-        if (p.enabled !== false && p.package) packages.add(p.package);
+        const pkg = p.package?.trim();
+        if (p.enabled === false || !pkg) continue;
+        // weixinPlugin=false 时不随企微加载个人微信插件，收发走 ilink bot
+        if (!useWeixinPlugin && pkg === DEFAULT_WEIXIN_PLUGIN) continue;
+        packages.add(pkg);
       }
       if (packages.size === 0) packages.add('@wecom/wecom-openclaw-plugin');
     }
@@ -214,29 +226,34 @@ async function main(): Promise<void> {
       log.warn('weixin 已启用但 weixin.accounts 为空，跳过个人微信 bot');
     }
     for (const accountId of accounts) {
-      if (!isWeixinUserBound(layout.pluginsState, accountId)) {
+      if (!isWeixinUserBound(weixinLoginStateDir(layout.pluginsState, accountId), accountId)) {
         log.warn(
           `跳过微信 bot：登录用户 ${accountId} 尚未扫码绑定（不影响企微 WebSocket；绑定后重启 channels）`,
         );
         continue;
       }
       try {
-        const tokenProvider = runtime.gatewayToken
-          ? new HttpUserTokenProvider({
-              gatewayUrl: runtime.gatewayUrl,
-              gatewayToken: runtime.gatewayToken,
-              stateDir: layout.pluginsState,
-              accountId,
-              log: (...args: unknown[]) => log.info(args.map(String).join(' ')),
-            })
-          : undefined;
+        const tokenProvider =
+          !localChannel && runtime.gatewayToken
+            ? new HttpUserTokenProvider({
+                gatewayUrl: runtime.gatewayUrl,
+                gatewayToken: runtime.gatewayToken,
+                stateDir: layout.pluginsState,
+                accountId,
+                log: (...args: unknown[]) => log.info(args.map(String).join(' ')),
+              })
+            : undefined;
         const handle = await startWeixinBot({
           gatewayUrl: runtime.gatewayUrl,
           gatewayToken: runtime.gatewayToken,
           model: config.weixin.model || cg.model,
           accountId,
           stateDir: layout.pluginsState,
-          userTokenProvider: tokenProvider,
+          ...(localChannel
+            ? { ownerUsername: LOCAL_CHANNEL_OWNER, gatewayTokenOnly: true }
+            : tokenProvider
+              ? { userTokenProvider: tokenProvider }
+              : {}),
           log: (...args: unknown[]) => log.info(args.map(String).join(' ')),
           errLog: (...args: unknown[]) => log.error(args.map(String).join(' ')),
         });
