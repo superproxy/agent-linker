@@ -113,6 +113,16 @@ export function FeishuPage(props: { token: string; onAuthError: AuthErrorHandler
 
       {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} /> : null}
 
+      {cfg?.taskOwnerUsername ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`任务空间归属：${cfg.taskOwnerUsername}`}
+          description="保存配置时会绑定到当前登录用户；飞书消息的任务路由与 ct_ 使用该用户名。"
+        />
+      ) : null}
+
       {props.isAdmin ? (
       <Card
         title={

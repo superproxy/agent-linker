@@ -716,6 +716,8 @@ export interface WecomChannelConfig {
       pluginAccounts: Array<{ key: string; running: boolean; lastError: string | null }>;
     } | null;
   };
+  /** 任务 / ct_ 归属的 web 登录用户 */
+  taskOwnerUsername?: string | null;
 }
 
 export interface FeishuChannelConfig {
@@ -732,6 +734,7 @@ export interface FeishuChannelConfig {
     server: { host: string; port: number };
   };
   status: WecomChannelConfig['status'];
+  taskOwnerUsername?: string | null;
 }
 
 /** 飞书 + channel-gateway 配置（管理员） */

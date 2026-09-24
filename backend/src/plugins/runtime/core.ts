@@ -100,8 +100,20 @@ export interface PluginRuntime {
         fileName: string;
       }>;
     };
+    debounce: {
+      resolveInboundDebounceMs(): number;
+      createInboundDebouncer<T>(opts: {
+        onFlush: (
+          entries: T[],
+          createFlush: (flush: {
+            dispatch?: (life: { abortSignal: AbortSignal; onAbandoned: () => Promise<void> }) => Promise<void>;
+          }) => unknown,
+        ) => unknown;
+      }): { enqueue(entry: T): Promise<void> };
+    };
     commands: {
       shouldComputeCommandAuthorized(text: string, cfg?: unknown, options?: unknown): boolean;
+      isControlCommandMessage(text: string, cfg?: unknown): boolean;
       hasControlCommand(text: string, cfg?: unknown): boolean;
       resolveCommandAuthorizedFromAuthorizers(params: Record<string, unknown>): boolean;
       resolveControlCommandGate(params: Record<string, unknown>): { commandAuthorized: boolean; shouldBlock: boolean };
@@ -224,8 +236,37 @@ export function createPluginRuntime(deps: PluginRuntimeDeps): PluginRuntime {
         saveMediaBuffer: mediaStore.saveMediaBuffer.bind(mediaStore),
         fetchRemoteMedia: mediaStore.fetchRemoteMedia.bind(mediaStore),
       },
-      commands: {
+      debounce: {
+      resolveInboundDebounceMs() {
+        return 0;
+      },
+      createInboundDebouncer<T>(opts: {
+        onFlush: (
+          entries: T[],
+          createFlush: (flush: {
+            lifecycle?: unknown;
+            dispatch?: (life: { abortSignal: AbortSignal; onAbandoned: () => Promise<void> }) => Promise<void>;
+          }) => unknown,
+        ) => unknown;
+      }) {
+        return {
+          async enqueue(entry: T) {
+            await opts.onFlush([entry], (flush) => {
+              const controller = new AbortController();
+              return flush.dispatch?.({
+                abortSignal: controller.signal,
+                async onAbandoned() {},
+              });
+            });
+          },
+        };
+      },
+    },
+    commands: {
         shouldComputeCommandAuthorized,
+        isControlCommandMessage(text: string) {
+          return typeof text === 'string' && text.trim().startsWith('/');
+        },
         hasControlCommand,
         resolveCommandAuthorizedFromAuthorizers(params) {
           return resolveCommandAuthorizedFromAuthorizers(params as never);

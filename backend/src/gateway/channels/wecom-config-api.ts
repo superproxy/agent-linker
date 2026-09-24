@@ -15,10 +15,15 @@ import {
   type ChannelGatewayRuntimeReport,
 } from './runtime-report-store.js';
 import { buildChannelGatewayStatus } from './channel-gateway-status.js';
+import {
+  bindChannelGatewayTaskOwner,
+  resolveChannelConfigOwnerUsername,
+} from './bind-channel-owner.js';
 
 export interface WecomConfigApiDeps {
   authGuard: AuthGuard;
   configPath: string;
+  runtimeGatewayDir?: string;
   pm: ProcessManager;
   gatewayToken: string;
   authEnabled: boolean;
@@ -74,6 +79,7 @@ export function registerWecomConfigApi(app: FastifyInstance, deps: WecomConfigAp
         model: config.channelGateway.model,
         server: config.channelGateway.server,
       },
+      taskOwnerUsername: config.channelGateway.wecomOwner.trim() || null,
       status: buildChannelGatewayStatus(config, pm),
     };
   });
@@ -102,14 +108,19 @@ export function registerWecomConfigApi(app: FastifyInstance, deps: WecomConfigAp
     const serverPort = typeof serverRec.port === 'number' ? serverRec.port : undefined;
 
     const restart = body.restart !== false;
+    const ownerUsername = resolveChannelConfigOwnerUsername(authGuard, request);
 
     try {
+      if (ownerUsername) {
+        bindChannelGatewayTaskOwner(configPath, ownerUsername, deps.runtimeGatewayDir);
+      }
       persistWecomChannelSetup(
         configPath,
         { enabled, botId, secret, connectionMode, pluginPackage },
         {
           enabled: enableCg,
           wecom: enabled,
+          ...(ownerUsername ? { wecomOwner: ownerUsername } : {}),
           model,
           serverHost,
           serverPort,
@@ -146,6 +157,7 @@ export function registerWecomConfigApi(app: FastifyInstance, deps: WecomConfigAp
       botId: typeof view.wecom.botId === 'string' ? view.wecom.botId : '',
       secret: maskSecret(view.wecom.secret),
       channelGateway: config.channelGateway,
+      taskOwnerUsername: config.channelGateway.wecomOwner.trim() || ownerUsername || null,
       status: buildChannelGatewayStatus(config, pm),
     };
   });

@@ -5,8 +5,8 @@
 export { addWildcardAllowFrom, mergeAllowFromEntries } from './core.mjs';
 export { DEFAULT_ACCOUNT_ID, normalizeAccountId } from './account-id.mjs';
 
-export function createSetupTranslator(def) {
-  return def ?? {};
+export function createSetupTranslator() {
+  return (key) => key ?? '';
 }
 
 export function formatDocsLink(path) {
@@ -36,5 +36,3 @@ export function setSetupChannelEnabled(cfg) {
 export function splitSetupEntries(value) {
   return Array.isArray(value) ? value : [];
 }
-
-export default { addWildcardAllowFrom, mergeAllowFromEntries, DEFAULT_ACCOUNT_ID, normalizeAccountId };

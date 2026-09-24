@@ -22,6 +22,8 @@ export interface WecomChannelPersistInput {
 export interface ChannelGatewayWecomPersistInput {
   enabled: boolean;
   wecom: boolean;
+  /** 企微/插件任务空间归属（登录用户名），对齐 weixin.accounts */
+  wecomOwner?: string;
   model?: string;
   serverHost?: string;
   serverPort?: number;
@@ -146,6 +148,8 @@ export function persistWecomChannelSetup(
     plugins: ensurePluginEntry(prevInner.plugins, pluginPackage, wecom.enabled),
   };
   if (cg.model?.trim()) nextCg.model = cg.model.trim();
+  const owner = cg.wecomOwner?.trim();
+  if (owner) nextCg.wecomOwner = owner;
 
   writeYamlObject(paths.channelsFile, { channelGateway: nextCg });
 
@@ -162,6 +166,9 @@ export function persistWecomChannelSetup(
   }
   if (cg.enabled !== effective.channelGateway.enabled) {
     throw new Error('持久化校验失败：channelGateway.enabled 未更新');
+  }
+  if (owner && effective.channelGateway.wecomOwner !== owner) {
+    throw new Error('持久化校验失败：wecomOwner 未更新');
   }
 
   return { channelsFile: resolve(paths.channelsFile) };

@@ -43,6 +43,19 @@ test('persistWecomChannelSetup：只写 channels.yaml，不改 gateway.yaml', ()
   assert.equal(view.wecom.enabled, true);
 });
 
+test('persistWecomChannelSetup：写入 wecomOwner 任务归属', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'la-wecom-owner-'));
+  writeSplit(dir);
+  const gatewayFile = join(dir, 'gateway.yaml');
+  persistWecomChannelSetup(
+    gatewayFile,
+    { enabled: true, botId: 'b1', secret: 's1', connectionMode: 'websocket' },
+    { enabled: true, wecom: true, wecomOwner: 'alice' },
+  );
+  const view = readWecomConfigView(gatewayFile);
+  assert.equal(view.channelGateway.wecomOwner, 'alice');
+});
+
 test('maskSecret：未配置与已配置', () => {
   assert.equal(maskSecret('').configured, false);
   assert.match(maskSecret('abcdefgh').preview, /^ab…gh$/);

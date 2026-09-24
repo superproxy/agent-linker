@@ -13,3 +13,5 @@ export function createActionGate(actions) {
     return defaultOn;
   };
 }
+
+export function optionalPositiveIntegerSchema(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }

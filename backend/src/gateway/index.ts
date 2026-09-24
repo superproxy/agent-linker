@@ -404,6 +404,7 @@ export async function buildServer(options?: {
   registerWecomConfigApi(app, {
     authGuard,
     configPath,
+    runtimeGatewayDir,
     pm,
     gatewayToken: auth.token,
     authEnabled,
@@ -414,6 +415,7 @@ export async function buildServer(options?: {
   registerFeishuConfigApi(app, {
     authGuard,
     configPath,
+    runtimeGatewayDir,
     pm,
     reloadConfig: reloadSharedConfig,
     onConfigChanged: onChannelGatewayConfigChanged,

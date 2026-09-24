@@ -103,6 +103,16 @@ export function WecomPage(props: { token: string; onAuthError: AuthErrorHandler;
 
       {err ? <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} /> : null}
 
+      {cfg?.taskOwnerUsername ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`任务空间归属：${cfg.taskOwnerUsername}`}
+          description="保存配置时会绑定到当前登录用户（与微信绑定账号槽一致）；企微消息 /task 与任务目录使用该用户名。"
+        />
+      ) : null}
+
       {props.isAdmin ? (
       <Card
         title={

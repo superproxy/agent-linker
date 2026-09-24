@@ -21,3 +21,17 @@ export function normalizeStringEntries(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item));
 }
+
+export function readStringValue(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+
+export function asOptionalRecord(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+
+export function hasNonEmptyString(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+
+export function asBoolean(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+
+export function asNullableRecord(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+
+export function normalizeNullableString(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }
+
+export function uniqueStrings(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }

@@ -27,6 +27,8 @@ export interface ChannelGatewayFeishuPersistInput {
   enabled: boolean;
   feishu: boolean;
   feishuPluginPackage?: string;
+  /** 飞书消息任务空间归属（复用 channelGateway.wecomOwner 字段） */
+  wecomOwner?: string;
   model?: string;
   serverHost?: string;
   serverPort?: number;
@@ -190,6 +192,8 @@ export function persistFeishuChannelSetup(
     plugins: ensurePluginEntry(prevInner.plugins, pluginPackage, feishu.enabled),
   };
   if (cg.model?.trim()) nextCg.model = cg.model.trim();
+  const owner = cg.wecomOwner?.trim();
+  if (owner) nextCg.wecomOwner = owner;
 
   writeYamlObject(paths.channelsFile, { channelGateway: nextCg });
 
@@ -206,6 +210,9 @@ export function persistFeishuChannelSetup(
   }
   if (cg.enabled !== effective.channelGateway.enabled) {
     throw new Error('持久化校验失败：channelGateway.enabled 未更新');
+  }
+  if (owner && effective.channelGateway.wecomOwner !== owner) {
+    throw new Error('持久化校验失败：wecomOwner 未更新');
   }
 
   return { channelsFile: resolve(paths.channelsFile) };

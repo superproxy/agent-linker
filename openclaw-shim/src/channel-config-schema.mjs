@@ -6,17 +6,16 @@
  * 描述性配置（无人深度消费），做轻量转换即可。
  */
 function chainableSchema() {
-  const schema = {
-    optional() {
-      return schema;
+  const schema = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === 'shape') return {};
+        if (typeof prop === 'symbol') return undefined;
+        return () => schema;
+      },
     },
-    default() {
-      return schema;
-    },
-    describe() {
-      return schema;
-    },
-  };
+  );
   return schema;
 }
 

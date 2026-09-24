@@ -1,35 +1,29 @@
-export function asObjectRecord(...args) {
-  const head = args[0];
-  if (head && typeof head === 'object' && !Array.isArray(head)) return { ...head };
-  return undefined;
+const passthrough = {
+  normalize(params) {
+    return { entry: params?.entry, changed: false };
+  },
+};
+
+export function asObjectRecord(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
 }
 
-export function defineChannelAliasMigration(...args) {
-  const head = args[0];
-  if (head && typeof head === 'object' && !Array.isArray(head)) return { ...head };
-  return undefined;
+export function defineChannelAliasMigration() {
+  return { legacyConfigRules: [], config: passthrough };
 }
 
-export function defineKeyMoveMigration(...args) {
-  const head = args[0];
-  if (head && typeof head === 'object' && !Array.isArray(head)) return { ...head };
-  return undefined;
+export function defineKeyMoveMigration() {
+  return { config: passthrough };
 }
 
-export function defineStrayPluginEntryConfigMigration(...args) {
-  const head = args[0];
-  if (head && typeof head === 'object' && !Array.isArray(head)) return { ...head };
-  return undefined;
+export function defineStrayPluginEntryConfigMigration() {
+  return { legacyConfigRule: { path: ['channels', 'feishu'] }, config: passthrough };
 }
 
-export function hasLegacyAccountStreamingAliases(...args) {
-  const head = args[0];
-  if (head && typeof head === 'object' && !Array.isArray(head)) return { ...head };
-  return undefined;
+export function hasLegacyAccountStreamingAliases() {
+  return false;
 }
 
-export function normalizeChannelConfigEntries(...args) {
-  const head = args[0];
-  if (head && typeof head === 'object' && !Array.isArray(head)) return { ...head };
-  return undefined;
+export function normalizeChannelConfigEntries(entries) {
+  return entries ?? [];
 }

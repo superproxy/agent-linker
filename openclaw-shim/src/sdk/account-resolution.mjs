@@ -47,3 +47,5 @@ export function createAccountListHelpers(channel, opts = {}) {
     },
   };
 }
+
+export function resolveMergedAccountConfig(...args) { const head = args[0]; return head && typeof head === 'object' ? { ...head } : undefined; }

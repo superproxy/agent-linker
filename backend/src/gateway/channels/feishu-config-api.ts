@@ -11,10 +11,15 @@ import {
 } from '../../config/persist-feishu.js';
 import type { SharedConfig } from '@linkagent/shared';
 import { buildChannelGatewayStatus } from './channel-gateway-status.js';
+import {
+  bindChannelGatewayTaskOwner,
+  resolveChannelConfigOwnerUsername,
+} from './bind-channel-owner.js';
 
 export interface FeishuConfigApiDeps {
   authGuard: AuthGuard;
   configPath: string;
+  runtimeGatewayDir?: string;
   pm: ProcessManager;
   reloadConfig: () => SharedConfig;
   onConfigChanged?: (patch: Pick<SharedConfig, 'gateway' | 'channelGateway'>) => void;
@@ -44,6 +49,7 @@ export function registerFeishuConfigApi(app: FastifyInstance, deps: FeishuConfig
         model: config.channelGateway.model,
         server: config.channelGateway.server,
       },
+      taskOwnerUsername: config.channelGateway.wecomOwner.trim() || null,
       status: buildChannelGatewayStatus(config, pm),
     };
   });
@@ -73,8 +79,12 @@ export function registerFeishuConfigApi(app: FastifyInstance, deps: FeishuConfig
     const serverPort = typeof serverRec.port === 'number' ? serverRec.port : undefined;
 
     const restart = body.restart !== false;
+    const ownerUsername = resolveChannelConfigOwnerUsername(authGuard, request);
 
     try {
+      if (ownerUsername) {
+        bindChannelGatewayTaskOwner(configPath, ownerUsername, deps.runtimeGatewayDir);
+      }
       persistFeishuChannelSetup(
         configPath,
         { enabled, appId, appSecret, connectionMode, pluginPackage, verificationToken, encryptKey },
@@ -82,6 +92,7 @@ export function registerFeishuConfigApi(app: FastifyInstance, deps: FeishuConfig
           enabled: enableCg,
           feishu: enabled,
           feishuPluginPackage: pluginPackage.trim() || DEFAULT_FEISHU_PLUGIN,
+          ...(ownerUsername ? { wecomOwner: ownerUsername } : {}),
           model,
           serverHost,
           serverPort,
@@ -119,6 +130,7 @@ export function registerFeishuConfigApi(app: FastifyInstance, deps: FeishuConfig
       appId: cred.appId,
       appSecret: maskSecret(cred.appSecret),
       channelGateway: config.channelGateway,
+      taskOwnerUsername: config.channelGateway.wecomOwner.trim() || ownerUsername || null,
       status: buildChannelGatewayStatus(config, pm),
     };
   });
