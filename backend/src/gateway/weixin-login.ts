@@ -62,7 +62,7 @@ export interface WeixinStatus {
   /** 登录用户 → 机器人文件。页面按这个判断是否已绑定，不按 accounts/ 里有没有 <用户名>.json */
   bindings: WeixinUserBinding[];
   activeAccountId?: string;
-  /** 当前登录用户对应的微信账号槽（与进程 weixin:<id> 一致） */
+  /** 当前登录用户对应的微信账号槽（登录用户名） */
   bindAccountId?: string;
   processId?: string;
   processRunning?: boolean;
@@ -516,8 +516,8 @@ export async function qrDataUrlOf(content: string): Promise<string> {
  *  - GET  /api/weixin/status          当前登录态（普通用户只看自己的账号槽）
  *  - POST /api/weixin/qr              发起扫码登录 → { sessionKey, qrContent, qrDataUrl(PNG) }
  *  - GET  /api/weixin/qr/status      轮询扫码结果（loginWithQrWait，阻塞至确认/超时）
- *  - POST /api/weixin/reload          重启该用户的 weixin:<id> 进程或内嵌 adapter
- *  - POST /api/weixin/unbind          取消绑定（删登录态、停 weixin:<id>）
+ *  - POST /api/weixin/reload          重启 channels（个人微信由 channel-gateway 托管）
+ *  - POST /api/weixin/unbind          取消绑定（删登录态、必要时 restart channels）
  */
 export function registerWeixinApi(
   app: FastifyInstance,

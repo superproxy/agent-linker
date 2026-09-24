@@ -35,7 +35,7 @@
 |------|------|
 | `channel` | 渠道 id，如 `weixin`、`wecom` |
 | `userId` | 渠道内终端用户 id（微信 `from_user_id`、企微 `FromUserName`） |
-| `ownerUsername` | 登录用户任务空间（微信多账号：`weixin:<username>` 槽对应的 web 用户名） |
+| `ownerUsername` | 登录用户任务空间（微信多账号：账号槽 = web 用户名） |
 | `agent` / `task` | 可选显式覆盖；adapter 正常不应预查任务再填写 |
 | `taskKey` | 任务直连 key（`k_`），与 `ct_` 互斥场景见鉴权节 |
 | `sessionKey` | legacy 渠道多轮 key；**任务白名单渠道**由网关按激活任务派生，adapter **不要**自设 OpenClaw `agent:…:direct:…` 当最终 session（插件侧 key 仅用于解析 userId） |
@@ -53,8 +53,9 @@
 
 | 场景 | 获取 `ct_` |
 |------|------------|
-| 网关内嵌 bot（`weixin.mode=weixin-bot`） | 网关注入 `InProcessUserTokenProvider`，对 `channelTokenStore.ensure(channel, userId, …, ownerUsername)` |
-| 独立进程（`weixin.mode=external`） | 进程持静态 token，`POST /api/bot/channel-token` `{ channel, userId, ownerUsername }` → `{ token }`，本地缓存 |
+| 网关内嵌 bot（**deprecated**） | 历史路径；现已迁到 `channels` |
+| `channels` 进程内 weixin-bot / 插件 | 进程持静态 token，`POST /api/bot/channel-token` `{ channel, userId, ownerUsername }` → `{ token }`，本地缓存 |
+| 独立调试（直接跑 `weixin-bot`） | 同上 HTTP 引导 |
 
 `ct_` 记录含 `channel`、`userId`、可选 `ownerUsername`（微信绑定登录用户）。网关鉴权后：
 
@@ -65,7 +66,7 @@
 
 ## 个人微信（weixin）要点
 
-- 进程：`backend/src/channels/weixin-bot.ts`；supervisor 实例 `weixin:<登录用户名>`，`LINKAGENT_ACCOUNT_ID` = 登录名。
+- 进程：`backend/src/channels/channel-gateway.ts` 内挂载 `weixin-bot.ts`（或 `weixinPlugin`）；PM 目标为 **`channels`**（`weixin` / `weixin:<登录名>` CLI 别名会 expand 到此）。
 - 每条消息：`channel=weixin`，`userId=<from_user_id>`，`ownerUsername=<登录名>`，`Authorization: Bearer <ct_>`。
 - 任务列表与控制台共用**登录用户**任务空间（非 ilink id）。
 - 实现参考：`docs` 与 `AGENTS.md` 微信多用户绑定章节。
@@ -151,7 +152,7 @@ channelGateway:
 2. 用当前 **owner** 的 provider 调 `POST /api/bot/channel-token` `{ channel, userId, ownerUsername }` 换取 `ct_`（本地缓存）；
 3. `POST /v1` 带 `Bearer ct_…` + body 的 `ownerUsername`（任务落在 `tasks/<owner>/…`，与 web 控制台同一登录用户空间）。
 
-**owner 选取**（任务空间归属，与微信 `weixin:<username>` 的 username 一致）：
+**owner 选取**（任务空间归属，与微信账号槽 username 一致）：
 
 | 优先级 | 来源 |
 |--------|------|

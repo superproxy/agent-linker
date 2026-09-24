@@ -39,9 +39,8 @@ import {
 export type TargetId = ProcessTargetId;
 
 /**
- * 进程实例 id：除三个基目标外，weixin 支持多账号实例 `weixin:<accountId>`
- * （pid/日志独立，启动注入 LINKAGENT_ACCOUNT_ID，账号间互不干扰）。
- * `weixin`（无后缀）是未配置 weixin.accounts 时的默认单实例。
+ * 进程实例 id：基目标 gateway | channels | node | weixin，
+ * 以及兼容别名 `weixin:<accountId>`（expand → `channels`，不再起独立 OS 进程）。
  */
 export type ProcessInstanceId = TargetId | `weixin:${string}`;
 
@@ -52,7 +51,7 @@ const START_ORDER: TargetId[] = ['gateway', 'weixin', 'channels', 'node'];
 /** 停止顺序：反序，先停依赖方 */
 const STOP_ORDER: TargetId[] = ['node', 'weixin', 'channels', 'gateway'];
 
-/** 是否合法进程目标 id（含 weixin:<accountId> 账号实例） */
+/** 是否合法进程目标 id（含 weixin:<accountId> 兼容别名） */
 export function isKnownTargetId(id: string): id is ProcessInstanceId {
   return (ALL_TARGETS as string[]).includes(id) || /^weixin:[A-Za-z0-9._-]+$/.test(id);
 }
@@ -297,17 +296,17 @@ export class ProcessManager {
   }
 
   /**
-   * 配了 weixin.accounts 之后，实例 id 是 weixin:<账号>，pid/日志是 weixin-<账号>.*。
-   * 扫码前用 `pm start weixin` 留下的 weixin.pid / weixin.log 会变成孤儿：
-   * 页面「重启渠道」只操作 weixin:<账号>，旧进程继续用过期 token 打 getUpdates。
+   * 历史默认 `weixin` 单进程遗留的 weixin.pid / weixin.log。
+   * 现已合并进 channels；操作 weixin/channels 时顺带收割孤儿 weixin 进程。
    */
   private async reapOrphanDefaultWeixin(ids: ProcessInstanceId[]): Promise<void> {
-    const mentionsWeixin =
-      ids.some((id) => instOf(id).base === 'weixin') ||
-      this.expand(ids).some((id) => instOf(id).base === 'weixin');
-    if (!mentionsWeixin) return;
+    const expanded = this.expand(ids);
+    const mentionsWeixinOrChannels =
+      ids.some((id) => instOf(id).base === 'weixin' || id === 'channels') ||
+      expanded.some((id) => id === 'channels' || instOf(id).base === 'weixin');
+    if (!mentionsWeixinOrChannels) return;
     if (!readPid(this.pidFile('weixin'))) return;
-    console.log('→ 停止遗留的默认微信进程 weixin（已改为按登录用户 weixin:<账号> 维护）');
+    console.log('→ 停止遗留的默认微信进程 weixin（已合并进 channels）');
     await this.stopOne('weixin');
   }
 
@@ -315,8 +314,13 @@ export class ProcessManager {
     const requestedWeixin = ids.some((id) => instOf(id).base === 'weixin');
     await this.reapOrphanDefaultWeixin(ids);
     const expanded = this.expand(ids);
-    if (requestedWeixin && !expanded.some((id) => instOf(id).base === 'weixin')) {
-      console.log('ℹ️  尚未绑定微信账号，跳过微信进程。请用后台登录账号在「微信登录」扫码绑定后再重启。');
+    if (
+      requestedWeixin &&
+      !expanded.some((id) => id === 'channels' || instOf(id).base === 'weixin')
+    ) {
+      console.log(
+        'ℹ️  尚未绑定微信账号且未启用 channel-gateway，跳过渠道进程。请在「微信登录」扫码绑定或启用 channels.yaml 后再重启。',
+      );
     }
     for (const id of expanded) {
       await this.startOne(id);
@@ -551,7 +555,7 @@ const portFree=()=>new Promise((resolve)=>{
   }
 }
 
-/** 解析目标参数：all/缺省 → 全部基目标；单个目标 → 仅该目标（含 weixin:<accountId> 实例） */
+/** 解析目标参数：all/缺省 → 全部基目标；单个目标 → 仅该目标（weixin / weixin:<id> 为兼容别名） */
 export function parseTargets(input?: string): ProcessInstanceId[] {
   if (!input || input === 'all') return [...ALL_TARGETS];
   if (isKnownTargetId(input)) return [input];

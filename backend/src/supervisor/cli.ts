@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 /**
  * linkagent 单机进程管理器 CLI（仅编排拉起，不常驻守护）：
- *   tsx src/supervisor/cli.ts start   [all|gateway|weixin|weixin:<id>|node]  后台拉起（默认 all）
- *   tsx src/supervisor/cli.ts stop    [all|gateway|weixin|weixin:<id>|node]  停止
- *   tsx src/supervisor/cli.ts restart [all|gateway|weixin|weixin:<id>|node]  重启
- *   tsx src/supervisor/cli.ts status                            查看进程状态（含微信多账号实例）
- *   tsx src/supervisor/cli.ts logs    [all|gateway|weixin|weixin:<id>|node]  跟随日志（默认 all）
+ *   tsx src/supervisor/cli.ts start   [all|gateway|channels|weixin|weixin:<id>|node]  后台拉起（默认 all）
+ *   tsx src/supervisor/cli.ts stop    [all|gateway|channels|weixin|weixin:<id>|node]  停止
+ *   tsx src/supervisor/cli.ts restart [all|gateway|channels|weixin|weixin:<id>|node]  重启
+ *   tsx src/supervisor/cli.ts status                            查看进程状态
+ *   tsx src/supervisor/cli.ts logs    [all|gateway|channels|weixin|weixin:<id>|node]  跟随日志（默认 all）
  *   tsx src/supervisor/cli.ts foreground [target]               前台联调（Ctrl-C 一起退出）
  *
- * weixin 多账号：仅 weixin.accounts（扫码绑定的登录用户）有实例。
- * start/stop/restart weixin 作用于全部已绑定账号；未绑定则跳过微信进程。
- * 也可单独操作 weixin:<accountId>（pid/日志独立）。
- * 启动顺序：gateway 健康检查通过后再起 weixin、node；停止反序。
+ * 个人微信 / 企微 / 飞书由 **channels** 单进程托管。
+ * `weixin` / `weixin:<accountId>` 为兼容别名，expand → `channels`（无独立微信 OS 进程）。
+ * 启动顺序：gateway 健康检查通过后再起 channels、node；停止反序。
  */
 import { watch } from 'node:fs';
 import { readFileSync } from 'node:fs';

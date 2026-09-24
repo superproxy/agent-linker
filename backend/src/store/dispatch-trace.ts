@@ -47,7 +47,7 @@ export function emitGatewayDispatchTrace(
   pushGatewayLine(formatDispatchTraceLine(step, fields));
 }
 
-/** 将 channels 侧追踪行原样写入 gateway 环（内嵌 weixin-bot 调试） */
+/** 将 channels 侧追踪行原样写入 gateway 环（调试用） */
 export function appendGatewayDispatchTraceRaw(line: string): void {
   const trimmed = line.trim();
   if (trimmed) pushGatewayLine(trimmed);

@@ -4,7 +4,7 @@
  * 插件 @tencent-weixin/openclaw-weixin 自己把登录态写成
  * accounts/<ilink_bot_id>.json（如 89b53341f048-im-bot.json）。这里不改插件、不复制那份文件。
  * 绑定只记录「登录用户名 → 机器人文件 id」。一个登录用户一份绑定、一个机器人只属于一个登录用户。
- * 每个已绑定用户由进程管理器单独拉起 weixin:<用户名>，进程用这份绑定去读对应的机器人文件。
+ * channels 进程按 weixin.accounts 拉起各账号 bot，用这份绑定去读对应的机器人文件。
  */
 import { createKvJsonStore } from '../store/kv.js';
 import { loadWeixinAccount, type WeixinAccount } from './ilink-client.js';

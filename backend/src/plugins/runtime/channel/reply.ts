@@ -109,11 +109,18 @@ export interface DispatchDeliverPayload {
   [key: string]: unknown;
 }
 
+/** 企微插件 deliver(payload, info) 会读 info.kind；缺省会抛 TypeError 并打崩 channels。 */
+export interface DispatchDeliverInfo {
+  kind: string;
+}
+
+const DELIVER_BLOCK: DispatchDeliverInfo = { kind: 'block' };
+
 export interface DispatchReplyParams {
   ctx: Record<string, unknown>;
   cfg?: Record<string, unknown>;
   dispatcherOptions: {
-    deliver: (payload: DispatchDeliverPayload) => void | Promise<void>;
+    deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>;
     onError?: (err: unknown) => void | Promise<void>;
     [key: string]: unknown;
   };
@@ -126,7 +133,9 @@ export interface DispatchReplyParams {
  * 思考过程累积器：正文首块输出前，把完整思考以「🤔」标记的消息块先交付，
  * 避免与正文混流/刷屏（思考流先于正文到达，一次收集、一次发送）。
  */
-function createReasoningCollector(deliver: (payload: DispatchDeliverPayload) => void | Promise<void>): {
+function createReasoningCollector(
+  deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>,
+): {
   push(delta: string): void;
   flushBeforeText(): void;
   flush(): void;
@@ -141,7 +150,7 @@ function createReasoningCollector(deliver: (payload: DispatchDeliverPayload) => 
     do {
       const chunk = rest.slice(0, CHUNK);
       rest = rest.slice(CHUNK);
-      void deliver({ text: `🤔 ${chunk}` });
+      void deliver({ text: `🤔 ${chunk}` }, DELIVER_BLOCK);
     } while (rest.length > 0);
   };
   return {
@@ -168,7 +177,7 @@ function createReasoningCollector(deliver: (payload: DispatchDeliverPayload) => 
  * 兼顾「流式刷新」体验与 deliver 调用开销（agent 每 token 一次回调）。
  */
 function createTextStreamDeliverer(
-  deliver: (payload: DispatchDeliverPayload) => void | Promise<void>,
+  deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>,
 ): { push(delta: string): void; flush(): void } {
   let buf = '';
   let timer: NodeJS.Timeout | null = null;
@@ -176,7 +185,7 @@ function createTextStreamDeliverer(
     if (!buf) return;
     const chunk = buf;
     buf = '';
-    void deliver({ text: chunk });
+    void deliver({ text: chunk }, DELIVER_BLOCK);
   };
   const schedule = (): void => {
     if (timer) return;
@@ -208,7 +217,7 @@ function createTextStreamDeliverer(
  * 思考不经过本交付器（走 createReasoningCollector，正文前以 🤔 一次性推送，thinking 可见）。
  */
 function createBufferedTextDeliverer(
-  deliver: (payload: DispatchDeliverPayload) => void | Promise<void>,
+  deliver: (payload: DispatchDeliverPayload, info?: DispatchDeliverInfo) => void | Promise<void>,
 ): { push(delta: string): void; flush(): void } {
   let buf = '';
   let flushed = false;
@@ -226,7 +235,7 @@ function createBufferedTextDeliverer(
       do {
         const chunk = rest.slice(0, CHUNK);
         rest = rest.slice(CHUNK);
-        void deliver({ text: chunk });
+        void deliver({ text: chunk }, DELIVER_BLOCK);
       } while (rest.length > 0);
     },
   };
@@ -371,7 +380,7 @@ export function resolveHumanDelayConfig(cfg: unknown, agentId?: string): number 
 export function createReplyDispatcherWithTyping(params: {
   humanDelay?: number;
   typingCallbacks?: { start(): Promise<void>; stop(): Promise<void> };
-  deliver(payload: DispatchDeliverPayload): void | Promise<void>;
+  deliver(payload: DispatchDeliverPayload, info?: DispatchDeliverInfo): void | Promise<void>;
   onError?(err: unknown, info: { kind: string }): void | Promise<void>;
 }): {
   dispatcher: ReplyDispatcher;
@@ -392,7 +401,7 @@ export function createReplyDispatcherWithTyping(params: {
       // 交付失败（通道 sendMessage 限流/网络错误等）不能向上抛：
       // onText 里的 void deliver(...) 会产生 unhandled rejection，直接崩掉整个 gateway
       try {
-        await deliver(payload);
+        await deliver(payload, { kind: 'block' });
       } catch (err) {
         if (onError) {
           try {

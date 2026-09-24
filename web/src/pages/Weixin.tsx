@@ -147,7 +147,7 @@ export function WeixinPage(props: {
     const ok = await confirmAsync({
       title: '取消绑定微信机器人？',
       content:
-        '会停掉该账号的微信进程，并删除本机登录态。若没有其他用户的账号文件，一并清掉残留的 *-im-bot 登录态，避免页面显示未绑定却扫码提示已绑定。任务空间不会删除。',
+        '会从 channels 停用该账号绑定，并删除本机登录态。若没有其他用户的账号文件，一并清掉残留的 *-im-bot 登录态，避免页面显示未绑定却扫码提示已绑定。任务空间不会删除。',
       okText: status?.configured ? '取消绑定' : '清空登录态',
       okButtonProps: { danger: true },
     });
@@ -336,7 +336,7 @@ export function WeixinPage(props: {
               },
               {
                 key: 'proc',
-                label: '微信进程',
+                label: '渠道进程',
                 children: status ? (
                   <Tag color={status.processRunning ? 'success' : 'default'} style={{ borderRadius: 999 }}>
                     {status.processId ?? 'weixin'} · {status.processRunning ? '运行中' : '未运行'}

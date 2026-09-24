@@ -9,7 +9,7 @@ LinkAgent Gateway —— OpenAI 兼容的本地 Agent 网关：
 ```
 Chatbox / Open WebUI / 任意 OpenAI 客户端 ──▶ /v1 (OpenAI 兼容) ──▶ ACP(acpx) ──▶ 本机 agent
 web 后台 (/ui, React)                        ──┘                   (opencode / pi / workbuddy /
-个人微信 / 企业微信        ──▶ 渠道（插件运行时 or 独立 botAgent）──┘  trace-cli 等 ACP 类型)
+个人微信 / 企业微信 / 飞书 ──▶ channels（channel-gateway）──────────┘  trace-cli 等 ACP 类型)
 ```
 
 - Node `>=22.13`，包管理固定 **pnpm@8.6.5**，ESM、TypeScript 严格模式，`tsx` 直跑源码。
@@ -28,23 +28,32 @@ pnpm --filter @linkagent/backend test # 后端测试（基线 190 passed）
 pnpm --filter @linkagent/web build    # 前端构建
 ```
 
-## 个人微信：多用户绑定与多进程（不改 `@tencent-weixin/openclaw-weixin`）
+## 个人微信：多用户绑定 + channel-gateway（不改 `@tencent-weixin/openclaw-weixin`）
 
-本仓库**只 import 插件**做扫码（`loginWithQrStart` / `loginWithQrWait`），**不改** npm 包源码。消息收发走 **`weixin-bot`**（`backend/src/channels/weixin-bot.ts`）直连 ilink；生产部署用 **`weixin.mode: external`**，由 supervisor 为每个已绑定登录用户单独拉起进程。
+本仓库**只 import 插件**做扫码（`loginWithQrStart` / `loginWithQrWait`），**不改** npm 包源码。
+
+**进程模型（当前）**：个人微信 **不**在 gateway 内嵌；**不**为每登录用户起 `weixin:<username>` 独立进程。PM 统一拉起 **`channels`**（`backend/src/channels/channel-gateway.ts`）。CLI/API 里写 `weixin` / `weixin:<id>` 会 **expand → `channels`**。
+
+收发二选一（或仅开 bot），均在 `channels` 进程内：
+
+| 方式 | 配置 | 说明 |
+|------|------|------|
+| **ilink 薄 adapter** | `channelGateway.weixin: true`，`weixinPlugin: false` | `weixin-bot.ts` 直连 ilink |
+| **OpenClaw 插件收发** | `channelGateway.weixinPlugin: true` | 加载 `@tencent-weixin/openclaw-weixin` |
 
 ### 三类数据（不要混成 `<用户名>.json`）
 
-**与 admin / 普通用户角色无关**：凡 web 登录账号（含 `admin`）扫码、`weixin:<username>` 进程，一律单独设置 **`OPENCLAW_STATE_DIR`** = `<pluginsRoot>/login-users/<username>/`（见 `weixin-login-state.ts`）。共用顶层 `plugins/openclaw-weixin/accounts/` 会导致任意两人 token 串号、`binded_redirect` 错绑，不是「仅普通用户」才需要隔离。
+**与 admin / 普通用户角色无关**：凡 web 登录账号（含 `admin`）扫码，一律单独设置 **`OPENCLAW_STATE_DIR`** = `<pluginsRoot>/login-users/<username>/`（见 `weixin-login-state.ts`）。共用顶层 `plugins/openclaw-weixin/accounts/` 会导致任意两人 token 串号、`binded_redirect` 错绑。
 
 | 位置 | 含义 |
 |---|---|
 | `login-users/<username>/openclaw-weixin/accounts/<botId>-im-bot.json` | 该用户扫码后插件写入的 **ilink 机器人登录态**（token、游标 `.sync.json` 等） |
 | `login-users/<username>/openclaw-weixin/bindings/<username>.json` | **绑定表**：该登录用户 → 指向本目录下哪个 `*-im-bot` 文件（`weixin-binding.ts`，KV store） |
-| 运行时 overlay → `weixin.accounts` | 哪些登录用户需要维护 **`weixin:<username>`** 进程（扫码成功后写入，`mode: external`；不再写 yaml） |
+| 运行时 overlay → `weixin.accounts` | 哪些登录用户需在 **`channels` 进程内**维护 bot/插件账号（扫码成功后写入；并写 `channels.yaml` 启用 `channelGateway`） |
 
 遗留的共享 `plugins/openclaw-weixin/accounts/` 仅 status 聚合展示；新扫码只写对应用户的 `login-users/<username>/`。
 
-规则：**不复制**插件 json 成 `admin.json`；**没有绑定**时页面不算已绑定，`weixin:admin` **启动即失败**，不会借用别的 `*-im-bot`。
+规则：**不复制**插件 json 成 `admin.json`；**没有绑定**时页面不算已绑定，该账号 **不会**被 `channels` 使用，不会借用别的 `*-im-bot`。
 
 ### 端到端流程（每个登录用户一份）
 
@@ -52,17 +61,17 @@ pnpm --filter @linkagent/web build    # 前端构建
 2. **扫码**：`POST /api/weixin/qr` + 轮询 `GET /api/weixin/qr/status`（`accountId` = 当前登录用户名；**不传给插件**，避免插件按用户名另写登录文件）。
 3. **插件落盘**：成功时在 **当前用户的** `login-users/<username>/openclaw-weixin/accounts/` 写入 `89b53341f048-im-bot.json`（回传 id 常为 `89b53341f048@im.bot`，网关侧 `normalizeBotAccountId` 再绑定）。
 4. **写绑定**：`claimWeixinBinding(username, pluginAccountId)`；若微信 `binded_redirect` 不再下发 token，则 `bindNewestUnclaimed` 把**尚未被其他用户占用**的最新 `*-im-bot` 指给当前用户（仍只写 bindings，不复制文件）。
-5. **登记进程**：`onBound` → `persistEnsureWeixinAccount` 把用户名写入 `weixin.accounts`，`pm.restart(['weixin:<username>'])`。
-6. **独立 bot 进程**：supervisor 注入 `LINKAGENT_ACCOUNT_ID=<username>` → `loadBoundWeixinAccount` → 读绑定指向的 `*-im-bot.json` 做 getUpdates/sendMessage。
+5. **登记渠道**：`onBound` → `persistEnsureWeixinAccount` 把用户名写入 `weixin.accounts`，并启用 `channelGateway` / `weixin` → **`pm.restart(['channels'])`**。
+6. **channels 进程内**：按 `weixin.accounts` 拉起各账号 bot（或插件）；`loadBoundWeixinAccount` → 读绑定指向的 `*-im-bot.json` 做 getUpdates/sendMessage。
 7. **任务与目录**：微信联系人 id 仍是 `channel/userId`（会话隔离）；**任务列表、工作目录、`ownerUsername`、`ct_` 缓存**一律用 **登录用户名**：`<tasks.workspaceDir>/<username>/<taskId>`（见 `TaskService.workspaceOwner`）。
 
 ### 多用户并行
 
-- `alice` 与 `admin` 各绑各的微信 → 各有一个 `weixin:alice` / `weixin:admin` 进程（pid/日志隔离）。
+- `alice` 与 `admin` 各绑各的微信 → **同一** `channels` 进程内多账号 bot（pid/日志为 `channels.*`）。
 - 同一 `*-im-bot` **不能**绑两个登录用户（`claim` 返回 `taken`）。
-- **解绑**：删 bindings 项 + 清该用户/对应机器人的 token 缓存 + `notifyBotStop`；插件 json 可留在磁盘，**无绑定则任何进程都不会用**。
+- **解绑**：删 bindings 项 + 清该用户/对应机器人的 token 缓存 + `notifyBotStop` + 必要时 `restart channels`；插件 json 可留在磁盘，**无绑定则不会被使用**。
 
-实现入口：`backend/src/channels/weixin-binding.ts`、`backend/src/gateway/weixin-login.ts`、`backend/src/supervisor/manager.ts`（`weixinInstanceIds`）。
+实现入口：`backend/src/channels/channel-gateway.ts`、`weixin-binding.ts`、`backend/src/gateway/weixin-login.ts`、`backend/src/supervisor/manager.ts`（`expand` / `weixinUsesChannels`）。细节与待办见 [`docs/handoff-channel-gateway.md`](docs/handoff-channel-gateway.md)。
 
 ## 必须遵守的约定
 
@@ -100,6 +109,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 |---|---|
 | [`docs/features.md`](docs/features.md) | 产品功能特性总览（/v1、按机器路由、节点审批、微信渠道、后台、鉴权、运维） |
 | [`docs/channels.md`](docs/channels.md) | 个人微信 + 企微两套方案、channel-gateway 单进程、channels.yaml、后台企微配置 |
+| [`docs/handoff-channel-gateway.md`](docs/handoff-channel-gateway.md) | channel-gateway 交接：已完成项、待办 P0–P2、关键路径（给其他智能体） |
 | [`docs/architecture.md`](docs/architecture.md) | monorepo 结构、后端分层、鉴权与凭据模型 |
 | [`docs/faq.md`](docs/faq.md) | 常用命令、测试方法、TS/ESM 坑、错误与密钥处理、已知遗留 |
 | [`docs/design.md`](docs/design.md) / [`docs/deployment.md`](docs/deployment.md) | 设计记录 / 部署说明 |

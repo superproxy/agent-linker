@@ -32,11 +32,12 @@ Chatbox / 企微用户 / 微信用户
 | PM 目标 | 何时存在 | 说明 |
 |---------|----------|------|
 | `gateway` | 始终 | OpenAI API + 管理后台 |
-| `channels` | `channelGateway.enabled: true` | **一个 OS 进程**托管方案 A + B |
-| `weixin:<用户名>` | `channelGateway.enabled: false` 且已绑定 | 每登录用户独立微信 bot 进程 |
+| `channels` | `channelGateway.enabled` 或已有 `weixin.accounts` | **一个 OS 进程**托管微信 / 企微 / 飞书 |
 | `node` | `node.enabled` | 节点连接器 |
 
-**默认** `channelGateway.enabled: false`：行为与旧版一致（微信 `weixin:*`，企微可在 gateway 内嵌插件或单独 `bot:wecom`）。
+CLI/API 仍接受 `weixin` / `weixin:<用户名>`，**一律 expand → `channels`**（兼容旧脚本，无独立微信进程）。
+
+**推荐** `channelGateway.enabled: true`。有绑定账号但未写 `channels.yaml` 时，扫码路径会 `persistEnsureWeixinChannelGateway` 补齐启用。
 
 ---
 
@@ -139,12 +140,12 @@ OpenClaw 插件（企微/飞书）已列入 `backend/package.json`，执行 **`p
 2. **WebSocket 模式**：完成应用内授权即可，无需公网回调。**Webhook/Agent 模式**：在企微后台配置页面展示的回调 URL。
 3. 插件收消息 → `V1ChannelAgentDispatch` → 主网关 `/v1` SSE。
 
-### 未启用 channel-gateway
+### 未启用 channel-gateway（legacy / deprecated）
 
-| 渠道 | 典型做法 |
-|------|----------|
-| 微信 | `weixin:<用户名>` 独立进程 + `weixin.mode: external` |
-| 企微 | gateway 内嵌 `PluginManager`（legacy `gateway.yaml` 里的 channels/plugins）或 `pnpm bot:wecom` |
+| 渠道 | 说明 |
+|------|------|
+| 微信 | **不再**起 `weixin:<用户>`；有 `weixin.accounts` 时 PM 仍拉 **`channels`** |
+| 企微 | gateway 内嵌 `PluginManager`（legacy `gateway.yaml` 的 channels/plugins）或 `pnpm bot:wecom` — **deprecated**，推荐迁到 `channels.yaml` |
 
 ---
 

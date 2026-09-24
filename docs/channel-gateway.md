@@ -36,7 +36,7 @@
 | 个人微信 | 薄 adapter `weixin-bot`（ilink 轮询/收发） | `weixin.yaml` 账号 + `channelGateway.weixin: true` | 直打 `/v1`，带 `channel` / `userId` / `ct_` |
 | 企业微信 | OpenClaw 插件（HTTP 回调 + `sessionKey`） | `channels.yaml` → `channelGateway.channels.wecom` + `plugins` | 插件 → `V1ChannelAgentDispatch` → `/v1` SSE |
 
-也可只开其中一种（`channelGateway.weixin: false` 或 `wecom: false`）。未启用 channel-gateway 时，两套方案仍可**分别**部署（例如 `weixin:<user>` 独立进程 + 网关内嵌企微插件，或独立 `wecom-bot`），那是运维拆分，不是架构上必须两套进程。
+也可只开其中一种（`channelGateway.weixin: false` 或 `wecom: false`）。个人微信与企微插件的**生产路径**均在 `channels`；CLI 的 `weixin` / `weixin:<id>` 会 expand 到 `channels`。独立 `wecom-bot` / 直接跑 `weixin-bot` 仅调试用。
 
 对接契约见 [`channel-gateway-integration.md`](channel-gateway-integration.md)。
 

@@ -43,7 +43,7 @@ export function AccountsPage(props: { base: string; token: string; onAuthError: 
         role: v.role,
         ...(v.displayName?.trim() ? { displayName: v.displayName.trim() } : {}),
       });
-      notify.success(`已创建用户：${v.username.trim()}。用该账号登录后到「微信登录」扫码，才会启动微信进程。`);
+      notify.success(`已创建用户：${v.username.trim()}。用该账号登录后到「微信登录」扫码，才会在 channels 进程启用微信。`);
       setCreateOpen(false);
       createForm.resetFields();
       await load();
@@ -168,7 +168,7 @@ export function AccountsPage(props: { base: string; token: string; onAuthError: 
       {err ? <Tag color="error" style={{ fontSize: 13, padding: '4px 10px', marginBottom: 12 }}>{err}</Tag> : null}
       <p className="page-desc" style={{ marginBottom: 14 }}>
         管理可登录后台的<strong>系统账号</strong>（admin / user）；个人 API 见侧栏「我的 · 用户 Key（pat_）」。
-        新建账号后，请用该用户登录，在「我的 · 微信」扫码绑定，才会启动 <code>weixin:&lt;用户名&gt;</code> 进程。
+        新建账号后，请用该用户登录，在「我的 · 微信」扫码绑定，才会在 <code>channels</code> 进程内启用该账号。
         微信聊天对象的 <code>ct_</code> 由管理员在「我的 · 用户 Key → 微信终端」管理。
       </p>
       <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>

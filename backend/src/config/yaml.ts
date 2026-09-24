@@ -3,6 +3,7 @@ import { parse } from 'yaml';
 import {
   assembleSharedConfig,
   defaultSharedConfig,
+  migrateConfig,
   normalizeSectionDocument,
   type SharedConfig,
 } from '@linkagent/shared';
@@ -25,9 +26,17 @@ function loadSplitYaml(paths: ResolvedConfigPaths): SharedConfig {
   });
 }
 
-/** 读取 yaml 底稿（不含运行时 overlay）；split 三文件或内置默认 */
+/**
+ * 读取 yaml 底稿（不含运行时 overlay）。
+ * split：同目录 gateway/weixin/channels/node。
+ * 其它已存在的单文件（如测试 fixture gateway.auth.yaml）：按旧扁平格式 migrateConfig。
+ * 文件不存在：内置默认。
+ */
 export function loadYamlSharedConfig(paths: ResolvedConfigPaths): SharedConfig {
   if (paths.mode === 'split') return loadSplitYaml(paths);
+  if (existsSync(paths.primaryPath)) {
+    return migrateConfig(readYamlFile(paths.primaryPath));
+  }
   return defaultSharedConfig();
 }
 

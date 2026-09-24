@@ -130,6 +130,20 @@ test('loadSharedConfig：GATEWAY_CONFIG_PATH 指向缺失文件抛错；pathArg 
   assert.equal(loaded.path, missing);
 });
 
+test('loadSharedConfig：非 gateway.yaml 的旧单文件仍按 migrateConfig 加载（token 鉴权）', () => {
+  const dir = tmpRoot();
+  const file = join(dir, 'gateway.auth.yaml');
+  writeFileSync(
+    file,
+    'server:\n  host: 127.0.0.1\n  port: 8787\nauth:\n  enabled: true\n  token: test-static-token\n',
+  );
+  const loaded = loadSharedConfig(file, runtimeDirFor(dir));
+  assert.equal(loaded.source, 'file');
+  assert.equal(loaded.mode, 'defaults');
+  assert.equal(loaded.config.gateway.auth.mode, 'token');
+  assert.equal(loaded.config.gateway.auth.token, 'test-static-token');
+});
+
 test('loadSharedConfig：gateway.yaml 扁平段加载', () => {
   const dir = tmpRoot();
   const file = writeConfig(

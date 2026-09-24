@@ -176,7 +176,7 @@ export async function startWeixinBot(options: WeixinBotOptions = {}): Promise<We
   const gatewayToken = options.gatewayToken ?? DEFAULT_GATEWAY_TOKEN;
   const model = options.model ?? DEFAULT_GATEWAY_MODEL;
   const pluginsRoot = options.stateDir ?? DEFAULT_PLUGINS_ROOT;
-  /** 登录用户名（weixin:<username> 进程注入）；有值时必须已有绑定，再读该用户插件目录下的 *-im-bot.json */
+  /** 登录用户名（channels 进程内按账号槽加载）；有值时必须已有绑定，再读该用户插件目录下的 *-im-bot.json */
   const bindUsername = (options.accountId ?? DEFAULT_ACCOUNT_ID)?.trim();
   const stateDir = bindUsername ? ensureWeixinLoginStateDir(pluginsRoot, bindUsername) : pluginsRoot;
   const log = options.log ?? ((...args: unknown[]) => console.log(new Date().toISOString(), ...args));

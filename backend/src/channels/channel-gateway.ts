@@ -79,7 +79,10 @@ function consoleLogger(): Logger {
 }
 
 async function main(): Promise<void> {
-  setChannelDispatchTraceSink((line) => appendChannelGatewayLog('trace', line));
+  setChannelDispatchTraceSink((line) => {
+    appendChannelGatewayLog('trace', line);
+    console.log(`[channel-gateway] trace ${line}`);
+  });
 
   if (!cg.enabled) {
     console.error('[channel-gateway] channelGateway.enabled=false，请在 channels.yaml 启用或改用 bot:weixin / gateway 内嵌模式');
@@ -150,13 +153,17 @@ async function main(): Promise<void> {
     const boundForPlugin = loginAccounts.filter((id) => isWeixinUserBound(layout.pluginsState, id));
     if (useWeixinPlugin && boundForPlugin.length > 0) {
       const primary = boundForPlugin[0];
-      process.env.OPENCLAW_STATE_DIR = weixinLoginStateDir(layout.pluginsState, primary);
-      if (boundForPlugin.length > 1) {
-        log.warn(
-          `插件微信 OPENCLAW_STATE_DIR 使用首个已绑定账号 ${primary}（共 ${boundForPlugin.length} 个；多账号请用 weixin-bot 或分实例）`,
-        );
+      if (primary === undefined) {
+        process.env.OPENCLAW_STATE_DIR = layout.pluginsState;
       } else {
-        log.info(`插件微信 OPENCLAW_STATE_DIR=${process.env.OPENCLAW_STATE_DIR}`);
+        process.env.OPENCLAW_STATE_DIR = weixinLoginStateDir(layout.pluginsState, primary);
+        if (boundForPlugin.length > 1) {
+          log.warn(
+            `插件微信 OPENCLAW_STATE_DIR 使用首个已绑定账号 ${primary}（共 ${boundForPlugin.length} 个；多账号请用 weixin-bot 或分实例）`,
+          );
+        } else {
+          log.info(`插件微信 OPENCLAW_STATE_DIR=${process.env.OPENCLAW_STATE_DIR}`);
+        }
       }
     } else {
       process.env.OPENCLAW_STATE_DIR = layout.pluginsState;

@@ -1,16 +1,17 @@
 /**
  * 进程管理 REST（管理员可用，操作的是当前这台网关进程）：
  *   GET  /api/system/info        网关只读信息 + 是否本机回环访问
- *   GET  /api/pm/status          gateway / weixin（含 weixin:<id> 多账号实例）/ node 运行态
- *   POST /api/pm/start           { targets: ['weixin'|'weixin:<id>'|'node'] }（不允许经 web 拉起 gateway）
- *   POST /api/pm/stop            { targets: ['weixin'|'weixin:<id>'|'node'] }（不允许经 web 停止 gateway）
+ *   GET  /api/pm/status          gateway / channels / node 运行态
+ *   POST /api/pm/start           { targets: ['channels'|'weixin'|'node'|…] }（不允许经 web 拉起 gateway）
+ *   POST /api/pm/stop            { targets: ['channels'|'weixin'|'node'|…] }（不允许经 web 停止 gateway）
  *   POST /api/pm/restart         { targets: string[] }（gateway 仅允许 restart，走接力自重启）
- *   GET  /api/pm/logs/:id?tail=  某进程日志尾部文本（id 可为 weixin:<accountId>）
+ *   GET  /api/pm/logs/:id?tail=  某进程日志尾部文本（id 可为 channels；weixin / weixin:<id> 会 expand → channels）
  *   GET  /api/pm/gateway-targets           weixin/node 当前挂载网关（token 只回是否已配置）
  *   PUT  /api/pm/gateway-targets/:id       { url, token? } 落盘后自动重启该进程（url 空串=切回本机）
  *
  * 安全：仅管理员（authGuard.isAdmin：open / 静态 token / local 默认用户 / admin 会话）。
  * web 与网关同端口，打开哪台机器的后台（/）就管哪台机器上的进程。
+ * 兼容：`weixin` / `weixin:<accountId>` 仍可传入，ProcessManager.expand 映射到 `channels`。
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { loadSharedConfig, persistChildGatewayTarget } from '../config.js';
@@ -29,7 +30,7 @@ export function isLoopbackIp(ip: string | undefined): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 }
 
-/** 白名单校验 targets；gateway 不允许 start/stop（只能 restart）；weixin 支持 weixin:<accountId> 实例 */
+/** 白名单校验 targets；gateway 不允许 start/stop（只能 restart）；weixin / weixin:<id> 兼容别名（expand → channels） */
 export function normalizeTargets(input: unknown, opts: { allowGateway?: boolean } = {}): ProcessInstanceId[] {
   const raw = Array.isArray(input) ? input : [input];
   const out: ProcessInstanceId[] = [];
