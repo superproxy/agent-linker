@@ -1,5 +1,7 @@
-# weixin 个人微信进程（gateway 进程内嵌或 pm 独立进程读此文件）
+# weixin 个人微信进程（gateway 内嵌 bot 或 pm weixin:* 读此文件）
+# pm start all 看 enabled；mode=external 时多账号列表在运行时 overlay，不在 yaml。
 enabled: true
+# weixin-bot | openclaw-weixin-plugin | external（supervisor 托管时常为 external）
 mode: weixin-bot
 model: agent:pi
-# gatewayUrl / gatewayToken 缺省由 gateway.yaml 的 server/auth 推导
+# gatewayUrl / gatewayToken 缺省由 gateway.yaml 推导；supervisor 托管时 env 回连被置空，只认本文件段

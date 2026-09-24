@@ -113,7 +113,7 @@ export interface ManagerPaths {
   logDir: string;
 }
 
-/** 从共享 config.yaml 解析网关地址 / 鉴权模式 / 永久 token（供微信/节点进程回连，免单独配置） */
+/** 从有效启动配置（split 三文件或 config.yaml）解析网关地址 / 鉴权 / token，供子进程回连 */
 export interface GatewayRuntimeConfig {
   port: number;
   host: string;
@@ -126,9 +126,9 @@ export interface GatewayRuntimeConfig {
 export function loadGatewayRuntimeConfig(layout: InstallLayout): GatewayRuntimeConfig {
   // 子进程自行读同一配置文件推导回连参数；supervisor 仅需端口做健康检查、enabled 决定是否拉起。
   // token 文件由 gateway 进程首启时生成；supervisor 这里只读（resolveChildRuntime 内部只读不创建）。
-  // 显式按传入 layout 的候选路径加载（测试/多实例隔离），找不到候选文件时回退三段式默认。
-  const configFile = layout.configCandidates.find((p) => existsSync(p));
-  const { config } = loadSharedConfig(configFile);
+  // 与 gateway 一致：split 时用 layout.configFile（gateway.yaml）触发三文件合并，避免误读 stub config.yaml。
+  const configPath = layout.configMode === 'none' ? undefined : layout.configFile;
+  const { config } = loadSharedConfig(configPath);
   const { host: rawHost, port } = config.gateway.server;
   const mode = config.gateway.auth.mode;
   // 透传 layout 的 token 文件路径，确保测试/多实例隔离（不回退读全局安装布局的 token）

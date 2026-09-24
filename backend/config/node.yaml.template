@@ -1,4 +1,5 @@
-# node 连接器进程（pm start node / 独立节点包）
+# node 连接器（pm start node / 独立节点包）；supervisor 拉起时不读 LINKAGENT_NODE_AGENTS
+# ACP permissionMode / permissionPolicy 只在此文件，hello 上报、turn 下发
 enabled: true
 agents:
   - opencode
