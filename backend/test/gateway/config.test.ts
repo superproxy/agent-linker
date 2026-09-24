@@ -32,7 +32,7 @@ function runtimeDirFor(dir: string): string {
 function writeConfig(dir: string, content: string, kind: 'dev' | 'dist' = 'dev'): string {
   const cfgDir = kind === 'dist' ? join(dir, 'server', 'config') : join(dir, 'backend', 'config');
   mkdirSync(cfgDir, { recursive: true });
-  const file = join(cfgDir, 'config.yaml');
+  const file = join(cfgDir, 'gateway.yaml');
   writeFileSync(file, content);
   return file;
 }
@@ -130,15 +130,16 @@ test('loadSharedConfig：GATEWAY_CONFIG_PATH 指向缺失文件抛错；pathArg 
   assert.equal(loaded.path, missing);
 });
 
-test('loadSharedConfig：候选文件存在则加载旧扁平格式并迁移', () => {
+test('loadSharedConfig：gateway.yaml 扁平段加载', () => {
   const dir = tmpRoot();
   const file = writeConfig(
     dir,
-    `server: { host: 127.0.0.1, port: 8642 }\nauth:\n  enabled: false\n`,
+    `server: { host: 127.0.0.1, port: 8642 }\nauth:\n  mode: open\n`,
   );
   const loaded = loadSharedConfig(file);
   assert.equal(loaded.source, 'file');
   assert.equal(loaded.path, file);
+  assert.equal(loaded.mode, 'split');
   assert.equal(loaded.config.gateway.server.port, 8642);
   assert.equal(loaded.config.gateway.auth.mode, 'open');
 });
@@ -310,8 +311,8 @@ node:
 test('persistEnsureWeixinAccount：写入 overlay accounts 并切 external；remove 去掉该 id', () => {
   const dir = tmpRoot();
   const rt = runtimeDirFor(dir);
-  const file = join(dir, 'config.yaml');
-  writeFileSync(file, 'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n');
+  const file = join(dir, 'gateway.yaml');
+  writeFileSync(file, 'server:\n  host: 127.0.0.1\n  port: 8787\n');
   const ids = persistEnsureWeixinAccount(file, 'alice', rt);
   assert.deepEqual(ids, ['alice']);
   let cfg = loadSharedConfig(file, rt).config;
@@ -329,8 +330,9 @@ test('persistEnsureWeixinAccount：写入 overlay accounts 并切 external；rem
 test('persistNodeAgentRegistered：追加 node.agents id，不重复', () => {
   const dir = tmpRoot();
   const rt = runtimeDirFor(dir);
-  const file = join(dir, 'config.yaml');
-  writeFileSync(file, 'node:\n  enabled: true\n  agents:\n    - pi\n');
+  const file = join(dir, 'gateway.yaml');
+  writeFileSync(file, 'server:\n  host: 127.0.0.1\n  port: 8787\n');
+  writeFileSync(join(dir, 'node.yaml'), 'enabled: true\nagents:\n  - pi\n');
   persistNodeAgentRegistered(file, 'hermes', rt);
   let cfg = loadSharedConfig(file, rt).config;
   assert.deepEqual(cfg.node.agents.map((a) => (typeof a === 'string' ? a : a.id)), ['pi', 'hermes']);
@@ -342,8 +344,8 @@ test('persistNodeAgentRegistered：追加 node.agents id，不重复', () => {
 test('persistAgentEnabled：写入 overlay agents.enabled，缺 yaml 列表时整表落下', () => {
   const dir = tmpRoot();
   const rt = runtimeDirFor(dir);
-  const file = join(dir, 'config.yaml');
-  writeFileSync(file, 'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n');
+  const file = join(dir, 'gateway.yaml');
+  writeFileSync(file, 'server:\n  host: 127.0.0.1\n  port: 8787\n');
   const defs = defaultAgentDefinitions();
   persistAgentEnabled(file, 'pi', false, defs, rt);
   let cfg = loadSharedConfig(file, rt).config;

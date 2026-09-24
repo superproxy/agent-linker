@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadSharedConfig } from '../../src/gateway/config.js';
 
-test('loadSharedConfig：split 三文件合并；gateway.yaml 优先于 config.yaml', () => {
+test('loadSharedConfig：split 三文件合并为有效配置', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-split-'));
   writeFileSync(
     join(dir, 'gateway.yaml'),
@@ -13,7 +13,6 @@ test('loadSharedConfig：split 三文件合并；gateway.yaml 优先于 config.y
   );
   writeFileSync(join(dir, 'weixin.yaml'), 'enabled: true\nmode: external\nmodel: agent:pi\n');
   writeFileSync(join(dir, 'node.yaml'), 'enabled: true\nagents:\n  - codex\n');
-  writeFileSync(join(dir, 'config.yaml'), 'gateway:\n  server:\n    port: 8787\n');
 
   const rt = join(dir, 'rt');
   const loaded = loadSharedConfig(join(dir, 'gateway.yaml'), rt);

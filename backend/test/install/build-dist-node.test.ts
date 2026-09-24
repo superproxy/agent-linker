@@ -21,6 +21,10 @@ test('build-dist --target=node --skip-install 产出仅含连接器的独立包'
   assert.ok(existsSync(join(out, 'start.sh')));
   assert.ok(existsSync(join(out, 'start.bat')));
   assert.ok(existsSync(join(out, 'node.env.example')));
+  assert.ok(existsSync(join(out, 'server', 'config', 'gateway.yaml')));
+  assert.ok(existsSync(join(out, 'server', 'config', 'node.yaml')));
+  assert.ok(existsSync(join(out, 'server', 'config', 'pi-agent', 'models.json.template')));
+  assert.equal(existsSync(join(out, 'server', 'config', 'config.yaml')), false);
   assert.equal(existsSync(join(out, 'server', 'gateway.mjs')), false);
   assert.equal(existsSync(join(out, 'web')), false);
 

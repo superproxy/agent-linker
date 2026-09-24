@@ -24,6 +24,18 @@ function tmpRoot(): string {
   return mkdtempSync(join(tmpdir(), 'linkagent-pm-'));
 }
 
+function writeDistSplit(
+  root: string,
+  parts: { gateway: string; weixin?: string; node?: string },
+): void {
+  writeFileSync(join(root, '.linkagent-root'), 'test dist root\n');
+  const cfgDir = join(root, 'server', 'config');
+  mkdirSync(cfgDir, { recursive: true });
+  writeFileSync(join(cfgDir, 'gateway.yaml'), parts.gateway);
+  if (parts.weixin !== undefined) writeFileSync(join(cfgDir, 'weixin.yaml'), parts.weixin);
+  if (parts.node !== undefined) writeFileSync(join(cfgDir, 'node.yaml'), parts.node);
+}
+
 test('parseTargets：缺省/all → 三进程；单个目标；weixin:<accountId> 实例；非法值抛错', () => {
   assert.deepEqual(parseTargets(), ['gateway', 'weixin', 'node']);
   assert.deepEqual(parseTargets('all'), ['gateway', 'weixin', 'node']);
@@ -95,19 +107,17 @@ test('loadGatewayRuntimeConfig：无配置文件走默认 8787/127.0.0.1，默�
   assert.equal(cfg.shared.node.enabled, true);
 });
 
-test('loadGatewayRuntimeConfig：解析端口/token，0.0.0.0 回连地址归一为 127.0.0.1（旧扁平格式自动迁移）', () => {
+test('loadGatewayRuntimeConfig：解析端口/token，0.0.0.0 回连地址归一为 127.0.0.1', () => {
   const dir = tmpRoot();
-  mkdirSync(join(dir, 'server', 'config'), { recursive: true });
-  writeFileSync(
-    join(dir, 'server', 'config', 'config.yaml'),
-    `server:
+  writeDistSplit(dir, {
+    gateway: `server:
   host: 0.0.0.0
   port: 9999
 auth:
   enabled: true
   token: secret-token
 `,
-  );
+  });
   const cfg = loadGatewayRuntimeConfig(createInstallLayout(dir));
   assert.equal(cfg.port, 9999);
   assert.equal(cfg.host, '127.0.0.1');
@@ -115,21 +125,17 @@ auth:
   assert.equal(cfg.token, 'secret-token');
 });
 
-test('loadGatewayRuntimeConfig：新三段格式 + open 模式 + 进程 enabled 开关', () => {
+test('loadGatewayRuntimeConfig：split 三文件 + open 模式 + 进程 enabled 开关', () => {
   const dir = tmpRoot();
-  mkdirSync(join(dir, 'server', 'config'), { recursive: true });
-  writeFileSync(
-    join(dir, 'server', 'config', 'config.yaml'),
-    `gateway:
-  server: { host: 127.0.0.1, port: 9000 }
-  auth: { mode: open, token: "" }
-weixin:
-  enabled: false
-node:
-  enabled: true
-  name: runner-1
+  writeDistSplit(dir, {
+    gateway: `server: { host: 127.0.0.1, port: 9000 }
+auth: { mode: open, token: "" }
 `,
-  );
+    weixin: 'enabled: false',
+    node: `enabled: true
+name: runner-1
+`,
+  });
   const cfg = loadGatewayRuntimeConfig(createInstallLayout(dir));
   assert.equal(cfg.port, 9000);
   assert.equal(cfg.authEnabled, false);
@@ -163,16 +169,12 @@ test('ProcessManager：dev 形态路径/命令/环境变量正确（无 .linkage
 test('ProcessManager：dist 形态用 node 跑 server/*.mjs；子进程自读共享配置，supervisor 置空屏蔽 URL/token 环境变量', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
-  mkdirSync(join(root, 'server', 'config'), { recursive: true });
-  writeFileSync(
-    join(root, 'server', 'config', 'config.yaml'),
-    `gateway:
-  server: { host: 127.0.0.1, port: 8787 }
-  auth: { mode: token, token: abc }
-node:
-  name: runner-9
+  writeDistSplit(root, {
+    gateway: `server: { host: 127.0.0.1, port: 8787 }
+auth: { mode: token, token: abc }
 `,
-  );
+    node: 'name: runner-9',
+  });
   const pm = new ProcessManager(root);
   assert.equal(pm.baseUrl, 'http://127.0.0.1:8787');
   const nodeSpec = (pm as unknown as { resolve(id: string): { command: string; args: string[] } }).resolve('node');
@@ -202,15 +204,10 @@ node:
 test('ProcessManager：weixin.accounts 多账号 → 每账号一个独立实例（实例展开/pid/log/env 隔离）', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
-  mkdirSync(join(root, 'server', 'config'), { recursive: true });
-  writeFileSync(
-    join(root, 'server', 'config', 'config.yaml'),
-    `gateway:
-  server: { host: 127.0.0.1, port: 8787 }
-weixin:
-  accounts: [acc-1, acc2]
-`,
-  );
+  writeDistSplit(root, {
+    gateway: 'server: { host: 127.0.0.1, port: 8787 }',
+    weixin: 'accounts: [acc-1, acc2]',
+  });
   const pm = new ProcessManager(root);
   // 实例展开：gateway → 微信账号实例（按配置顺序）→ node
   assert.deepEqual(pm.allInstanceIds(), ['gateway', 'weixin:acc-1', 'weixin:acc2', 'node']);
@@ -255,6 +252,10 @@ test('ProcessManager：操作 weixin:<账号> 时停掉遗留的默认 weixin �
 
 test('ProcessManager：extraWeixinAccounts 与 yaml 合并为多实例', () => {
   const root = tmpRoot();
+  writeDistSplit(root, {
+    gateway: 'server: { host: 127.0.0.1, port: 8787 }',
+    weixin: 'enabled: true\naccounts: []\n',
+  });
   const pm = new ProcessManager(root, { extraWeixinAccounts: () => ['alice', 'bob'] });
   assert.deepEqual(pm.allInstanceIds(), ['gateway', 'weixin:alice', 'weixin:bob', 'node']);
   assert.deepEqual(pm.expand(['weixin']), ['weixin:alice', 'weixin:bob']);
@@ -262,6 +263,10 @@ test('ProcessManager：extraWeixinAccounts 与 yaml 合并为多实例', () => {
 
 test('ProcessManager：未绑定微信账号时 all 不含微信进程', () => {
   const root = tmpRoot();
+  writeDistSplit(root, {
+    gateway: 'server: { host: 127.0.0.1, port: 8787 }',
+    weixin: 'accounts: []\n',
+  });
   const pm = new ProcessManager(root);
   assert.deepEqual(pm.allInstanceIds(), ['gateway', 'node']);
   assert.deepEqual(pm.expand(['weixin']), []);
@@ -274,17 +279,11 @@ test('ProcessManager：未绑定微信账号时 all 不含微信进程', () => {
 test('ProcessManager：isEnabled 读取共享配置段开关（weixin/node 可禁用）', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
-  mkdirSync(join(root, 'server', 'config'), { recursive: true });
-  writeFileSync(
-    join(root, 'server', 'config', 'config.yaml'),
-    `gateway:
-  server: { host: 127.0.0.1, port: 8787 }
-weixin:
-  enabled: false
-node:
-  enabled: true
-`,
-  );
+  writeDistSplit(root, {
+    gateway: 'server: { host: 127.0.0.1, port: 8787 }',
+    weixin: 'enabled: false',
+    node: 'enabled: true',
+  });
   const pm = new ProcessManager(root);
   assert.equal(pm.isEnabled('gateway'), true);
   assert.equal(pm.isEnabled('weixin'), false);

@@ -10,14 +10,13 @@ export interface LoadedSharedConfig {
   config: SharedConfig;
   source: 'file' | 'defaults';
   path: string;
-  /** split：三文件；monolith：单文件 config.yaml */
-  mode: 'split' | 'monolith' | 'defaults';
+  mode: 'split' | 'defaults';
 }
 
 /**
  * 三进程共享配置加载（优先级）：
  * 1. GATEWAY_CONFIG_PATH 指向的 yaml（缺失则报错）
- * 2. 配置目录：存在 gateway.yaml → 读 gateway/weixin/node 三文件；否则读 config.yaml
+ * 2. 配置目录：存在 gateway.yaml → 读 gateway/weixin/node 三文件
  * 3. 均缺失 → 内置默认 + 运行时 overlay
  */
 export function loadSharedConfig(pathArg?: string, runtimeGatewayDir?: string): LoadedSharedConfig {
@@ -33,15 +32,14 @@ export function loadSharedConfig(pathArg?: string, runtimeGatewayDir?: string): 
       config: loadEffectiveSharedConfig(yamlOnly, rtDir),
       source: 'file',
       path: paths.primaryPath,
-      mode: paths.mode === 'defaults' ? 'monolith' : paths.mode,
+      mode: paths.mode,
     };
   }
 
   const paths = pathArg ? resolveConfigPaths(pathArg) : resolveConfigPaths();
   const hasYaml =
-    paths.mode === 'split'
-      ? existsSync(paths.gatewayFile) || existsSync(paths.weixinFile) || existsSync(paths.nodeFile)
-      : paths.mode === 'monolith' && existsSync(paths.monolithFile);
+    paths.mode === 'split' &&
+    (existsSync(paths.gatewayFile) || existsSync(paths.weixinFile) || existsSync(paths.nodeFile));
 
   if (hasYaml) {
     const yamlOnly = loadYamlSharedConfig(paths);
@@ -49,7 +47,7 @@ export function loadSharedConfig(pathArg?: string, runtimeGatewayDir?: string): 
       config: loadEffectiveSharedConfig(yamlOnly, rtDir),
       source: 'file',
       path: paths.primaryPath,
-      mode: paths.mode === 'defaults' ? 'monolith' : paths.mode,
+      mode: 'split',
     };
   }
 

@@ -80,9 +80,9 @@ export interface InstallLayout {
   readonly configCandidates: string[];
   /** 配置目录（gateway.yaml / weixin.yaml / node.yaml 与 config.yaml 同目录） */
   readonly configDir: string;
-  /** split：gateway.yaml 存在；monolith：仅 config.yaml；none：均不存在 */
-  readonly configMode: 'split' | 'monolith' | 'none';
-  /** 主配置路径：split 时为 gateway.yaml，monolith 时为 config.yaml，否则为形态默认 config.yaml 路径 */
+  /** split：gateway.yaml 存在；none：无启动前 yaml（用内置默认 + 运行时 overlay） */
+  readonly configMode: 'split' | 'none';
+  /** 主配置路径：split 时为 gateway.yaml，否则为形态默认 gateway.yaml 路径（可能尚未创建） */
   readonly configFile: string;
   /** 自动生成的永久 gateway token 落盘路径 <root>/.runtime-state/gateway-token（三进程共享，0600） */
   readonly gatewayTokenFile: string;
@@ -127,32 +127,16 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
   // 配置候选：形态优先，另一形态作为兜底（两形态目录互不存在，结果与历史双候选一致）
   const configCandidates =
     kind === 'dist'
-      ? [join(root, 'server', 'config', 'config.yaml'), join(root, 'backend', 'config', 'config.yaml')]
-      : [join(root, 'backend', 'config', 'config.yaml'), join(root, 'server', 'config', 'config.yaml')];
+      ? [join(root, 'server', 'config', CONFIG_BASENAMES.gateway), join(root, 'backend', 'config', CONFIG_BASENAMES.gateway)]
+      : [join(root, 'backend', 'config', CONFIG_BASENAMES.gateway), join(root, 'server', 'config', CONFIG_BASENAMES.gateway)];
 
-  let configDir = dirname(configCandidates[0]!);
-  for (const candidate of configCandidates) {
-    const dir = dirname(candidate);
-    if (existsSync(join(dir, CONFIG_BASENAMES.gateway))) {
-      configDir = dir;
-      break;
-    }
-    if (existsSync(candidate)) {
-      configDir = dir;
-      break;
-    }
-  }
-
+  const configDir = dirname(configCandidates[0]!);
   const splitGateway = join(configDir, CONFIG_BASENAMES.gateway);
-  const monolithExisting = configCandidates.find((p) => existsSync(p));
   let configMode: InstallLayout['configMode'] = 'none';
   let configFile = configCandidates[0]!;
   if (existsSync(splitGateway)) {
     configMode = 'split';
     configFile = splitGateway;
-  } else if (monolithExisting) {
-    configMode = 'monolith';
-    configFile = monolithExisting;
   }
 
   // web 管理端：dist 为 <root>/web；dev 为 vite 产物 <root>/web/dist（兜底 <root>/web）

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { persistChildGatewayTarget, loadSharedConfig } from '../../src/gateway/config.js';
@@ -9,28 +9,28 @@ function rt(dir: string): string {
   return join(dir, 'runtime-gateway');
 }
 
-test('persistChildGatewayTarget：写入 overlay，config.yaml 注释与其它键不变', () => {
+function writeSplit(dir: string, files: { gateway?: string; weixin?: string; node?: string }): string {
+  mkdirSync(dir, { recursive: true });
+  const gw = join(dir, 'gateway.yaml');
+  writeFileSync(gw, files.gateway ?? 'server:\n  host: 127.0.0.1\n  port: 8787\n');
+  if (files.weixin) writeFileSync(join(dir, 'weixin.yaml'), files.weixin);
+  if (files.node) writeFileSync(join(dir, 'node.yaml'), files.node);
+  return gw;
+}
+
+test('persistChildGatewayTarget：写入 overlay，yaml 注释与其它键不变', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cgw-'));
-  const cfgPath = join(dir, 'config.yaml');
-  const runtimeDir = rt(dir);
-  writeFileSync(
-    cfgPath,
-    [
+  const cfgPath = writeSplit(dir, {
+    weixin: [
       '# 顶部注释应保留',
-      'gateway:',
-      '  server:',
-      '    host: 127.0.0.1',
-      '    port: 8787',
-      'weixin:',
-      '  mode: external',
-      'node:',
-      '  name: n1',
+      'mode: external',
     ].join('\n'),
-    'utf8',
-  );
+    node: 'name: n1',
+  });
+  const runtimeDir = rt(dir);
 
   persistChildGatewayTarget(cfgPath, 'weixin', { url: 'http://192.168.1.10:8787/', token: 'tok123' }, runtimeDir);
-  const out = readFileSync(cfgPath, 'utf8');
+  const out = readFileSync(join(dir, 'weixin.yaml'), 'utf8');
   assert.match(out, /# 顶部注释应保留/);
   assert.doesNotMatch(out, /gatewayUrl/);
   assert.match(out, /mode: external/);
@@ -47,21 +47,17 @@ test('persistChildGatewayTarget：写入 overlay，config.yaml 注释与其它�
 
 test('persistChildGatewayTarget：切回本机（空 url）overlay 清空；yaml 里旧键保留但不生效', () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cgw-'));
-  const cfgPath = join(dir, 'config.yaml');
-  const runtimeDir = rt(dir);
-  writeFileSync(
-    cfgPath,
-    [
-      'node:',
-      '  name: n1',
-      '  gatewayUrl: https://remote.example.com',
-      '  gatewayToken: secret',
+  const cfgPath = writeSplit(dir, {
+    node: [
+      'name: n1',
+      'gatewayUrl: https://remote.example.com',
+      'gatewayToken: secret',
     ].join('\n'),
-    'utf8',
-  );
+  });
+  const runtimeDir = rt(dir);
 
   persistChildGatewayTarget(cfgPath, 'node', { url: '', token: '' }, runtimeDir);
-  const out = readFileSync(cfgPath, 'utf8');
+  const out = readFileSync(join(dir, 'node.yaml'), 'utf8');
   assert.match(out, /gatewayUrl: https:\/\/remote\.example\.com/);
   assert.match(out, /name: n1/);
 
@@ -74,13 +70,13 @@ test('persistChildGatewayTarget：段缺失可写 overlay；config 不存在时�
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cgw-'));
   const runtimeDir = rt(dir);
 
-  const p1 = join(dir, 'a.yaml');
-  writeFileSync(p1, 'gateway:\n  server:\n    port: 9000\n', 'utf8');
+  const p1 = writeSplit(dir, { gateway: 'server:\n  port: 9000\n' });
   persistChildGatewayTarget(p1, 'weixin', { url: 'http://x:1', token: '' }, runtimeDir);
-  assert.doesNotMatch(readFileSync(p1, 'utf8'), /gatewayUrl/);
   assert.equal(loadSharedConfig(p1, runtimeDir).config.weixin.gatewayUrl, 'http://x:1');
 
-  const p2 = join(dir, 'nested', 'config.yaml');
+  const nested = join(dir, 'nested');
+  mkdirSync(nested, { recursive: true });
+  const p2 = join(nested, 'gateway.yaml');
   assert.ok(!existsSync(p2));
   persistChildGatewayTarget(p2, 'node', { url: 'https://h:2', token: 't' }, join(dir, 'rt2'));
   assert.ok(existsSync(join(dir, 'rt2', 'overlay.json')));

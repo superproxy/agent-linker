@@ -103,13 +103,21 @@ function runtimeDependenciesNode() {
   return deps;
 }
 
-function copyConfigYaml(destFile) {
-  mkdirSync(dirname(destFile), { recursive: true });
-  const live = join(REPO, 'backend', 'config', 'config.yaml');
-  const template = join(REPO, 'backend', 'config', 'config.yaml.template');
-  const src = existsSync(live) ? live : template;
-  if (!existsSync(src)) throw new Error('缺少 backend/config/config.yaml 或 config.yaml.template');
-  cpSync(src, destFile);
+/** 复制 split 启动配置（gateway / weixin / node 三文件） */
+function copySplitConfig(destDir, profile) {
+  mkdirSync(destDir, { recursive: true });
+  if (profile === 'node') {
+    writeFileSync(join(destDir, 'gateway.yaml'), NODE_GATEWAY_YAML);
+    writeFileSync(join(destDir, 'node.yaml'), NODE_YAML);
+    return;
+  }
+  for (const name of ['gateway.yaml', 'weixin.yaml', 'node.yaml']) {
+    const live = join(REPO, 'backend', 'config', name);
+    const template = join(REPO, 'backend', 'config', `${name}.template`);
+    const src = existsSync(live) ? live : template;
+    if (!existsSync(src)) throw new Error(`缺少 backend/config/${name} 或 ${name}.template`);
+    cpSync(src, join(destDir, name));
+  }
 }
 
 /** destRoot = 独立包根（含 server/config、scripts） */
@@ -279,7 +287,9 @@ const NODE_README = `# linkagent-node 执行节点独立包
 linkagent-node/
 ├── server/node.mjs          节点连接器
 ├── server/ctl.mjs           启停
-├── server/config/config.yaml
+├── server/config/gateway.yaml   # 仅推导缺省回连地址
+├── server/config/node.yaml      # 自报 agent、pi 权限与 setup:pi 说明
+├── server/config/pi-agent/      # npm run setup:pi 模板
 ├── start.sh / start.bat
 ├── node.env.example
 └── node_modules/
@@ -295,7 +305,7 @@ LINKAGENT_NODE_NAME=builder-01
 LINKAGENT_NODE_AGENTS=opencode,pi
 \`\`\`
 
-也可改 \`server/config/config.yaml\` 的 \`node.gatewayUrl\` / \`node.gatewayToken\` / \`node.agents\`。
+编辑 \`server/config/node.yaml\`（\`agents\`、\`gatewayUrl\` / \`gatewayToken\`）。pi 模型清单不在 yaml：在本机执行 \`npm run setup:pi\`（模板在 \`server/config/pi-agent/\`）。
 
 ## 启动
 \`\`\`bash
@@ -322,23 +332,30 @@ LINKAGENT_NODE_NAME=
 # LINKAGENT_NODE_AGENTS=opencode,pi
 `;
 
-const NODE_CONFIG = `# linkagent-node：执行机独立包
-# 网关地址 / token 优先环境变量 LINKAGENT_GATEWAY_URL / LINKAGENT_GATEWAY_TOKEN
-# 或 .runtime-state/node.env；此处为缺省值。
+const NODE_GATEWAY_YAML = `# linkagent-node：仅用于缺省回连地址与鉴权模式推导（agent 清单见 node.yaml）
+server:
+  host: 127.0.0.1
+  port: 8787
+auth:
+  mode: local
+  token: ""
+`;
 
-gateway:
-  server:
-    host: 127.0.0.1
-    port: 8787
-  auth:
-    mode: local
-
-node:
-  enabled: true
-  # name: builder-01
-  # agents: [opencode, pi]
-  # gatewayUrl: wss://gw.example.com
-  # gatewayToken: ""
+const NODE_YAML = `# linkagent-node 执行机：节点自报 agent 与 ACP 权限
+# 回连优先：LINKAGENT_GATEWAY_URL / LINKAGENT_GATEWAY_TOKEN 或 .runtime-state/node.env
+enabled: true
+# name: builder-01
+agents:
+  - opencode
+  - id: pi
+    permissionMode: approve-all
+    # pi 会话 model 不写 yaml；本机执行 npm run setup:pi（server/config/pi-agent 模板 → ~/.pi/agent）
+  - workbuddy
+  - trace-cli
+  - id: cursor
+    permissionMode: approve-all
+# gatewayUrl: wss://gw.example.com
+# gatewayToken: ""
 `;
 
 const step = (label, fn) => {
@@ -371,7 +388,7 @@ async function buildFull(dist, skipInstall) {
   });
 
   step('4/6 复制运行资源', () => {
-    copyConfigYaml(join(dist, 'server', 'config', 'config.yaml'));
+    copySplitConfig(join(dist, 'server', 'config'), 'full');
     copyPiSetup(dist);
     cpSync(join(REPO, 'skills'), join(dist, 'skills'), { recursive: true });
     mkdirSync(join(dist, 'dev'), { recursive: true });
@@ -479,7 +496,7 @@ linkagent/
 │   ├── weixin.mjs        个人微信 bot（独立进程，external 模式）
 │   ├── node.mjs          本机 node 节点连接器（反向 WS 连入网关）
 │   ├── pm.mjs            单机进程管理器（编排上面三进程）
-│   └── config/config.yaml    网关配置（改完需重启）
+│   └── config/               gateway.yaml / weixin.yaml / node.yaml（改完需 restart）
 ├── dev/                  内置聊天页
 ├── web/                  后台管理端（TS/React，挂载 /admin）
 ├── node_modules/         运行时依赖
@@ -499,7 +516,7 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 \`\`\`
 
 进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；进程崩溃后重新执行 \`./start.sh start\` 即可。
-网关开启 \`auth\` 时，微信/node 进程自动读取同一 \`config.yaml\` 的静态 token 回连，无需单独配置。
+网关开启 \`auth\` 时，微信/node 进程自动读取 \`server/config/gateway.yaml\` 的静态 token 回连，无需单独配置。
 微信首次使用需先在后台 \`/admin\` 扫码登录。
 
 启动后：
@@ -511,14 +528,11 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 安装根可用 \`LINKAGENT_HOME\` 显式指定。
 
 ## 配置
-编辑 \`server/config/config.yaml\`（gateway / weixin / node 三进程共享同一文件），修改后 \`./start.sh restart\`：
-- \`gateway.server.host/port\`：监听地址
-- \`gateway.auth.mode\`：\`local\`（默认，本机浏览器免登录，他机/API 需永久 gateway token）/ \`token\`（强制令牌）/ \`open\`（不鉴权）
-- \`gateway.auth.token\`：留空则首启自动生成并落盘 \`.runtime-state/gateway-token\`（三进程共享）
-- \`gateway.agents\`：覆盖内置默认 agent（id/type/displayName/description/cwd/command/model/...）
-- \`gateway.tasks\`：任务路由默认 agent、任务工作空间目录
-- \`gateway.plugins\` / \`gateway.channels\` 与 \`weixin\`：微信/企业微信渠道。单机包由进程管理器托管，网关以 \`weixin.mode: external\` 运行（微信在独立进程，后台 /admin 扫码登录后自动收消息）
-- \`weixin.enabled\` / \`node.enabled\`：\`pm start all\` 时是否拉起对应进程
+编辑 \`server/config/\` 下三文件（修改后 \`./start.sh restart\`）：
+- \`gateway.yaml\`：\`server.host/port\`、\`auth\`、网关侧 \`agents\` / \`tasks\` / \`plugins\` / \`channels\`
+- \`weixin.yaml\`：个人微信渠道；单机包 \`mode: external\`，后台 /admin 扫码
+- \`node.yaml\`：本机节点连接器、\`node.agents\`（含 pi 等 ACP 权限）
+运行时变更（agent 启停、微信账号列表、子进程回连地址等）写入 \`.runtime-state/gateway/overlay.json\`，不改上述 yaml。
 
 ## 重新构建
 在源码仓库执行 \`pnpm build:dist\`，产物在 \`dist/linkagent/\`。
@@ -538,7 +552,7 @@ async function buildNode(dist, skipInstall) {
 
   step('3/4 生成配置 / 启停 / README', () => {
     mkdirSync(join(dist, 'server', 'config'), { recursive: true });
-    writeFileSync(join(dist, 'server', 'config', 'config.yaml'), NODE_CONFIG);
+    copySplitConfig(join(dist, 'server', 'config'), 'node');
     writeFileSync(join(dist, 'server', 'ctl.mjs'), NODE_CTL_SOURCE);
     writeFileSync(join(dist, '.linkagent-root'), 'linkagent-node standalone deployment root\n');
     writeFileSync(join(dist, 'node.env.example'), NODE_ENV_EXAMPLE);

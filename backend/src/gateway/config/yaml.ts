@@ -3,7 +3,6 @@ import { parse } from 'yaml';
 import {
   assembleSharedConfig,
   defaultSharedConfig,
-  migrateConfig,
   normalizeSectionDocument,
   type SharedConfig,
 } from '@linkagent/shared';
@@ -24,12 +23,9 @@ function loadSplitYaml(paths: ResolvedConfigPaths): SharedConfig {
   });
 }
 
-/** 读取 yaml 底稿（不含运行时 overlay）；支持 split 三文件或 monolith config.yaml */
+/** 读取 yaml 底稿（不含运行时 overlay）；split 三文件或内置默认 */
 export function loadYamlSharedConfig(paths: ResolvedConfigPaths): SharedConfig {
   if (paths.mode === 'split') return loadSplitYaml(paths);
-  if (paths.mode === 'monolith' && existsSync(paths.monolithFile)) {
-    return migrateConfig(readYamlFile(paths.monolithFile));
-  }
   return defaultSharedConfig();
 }
 

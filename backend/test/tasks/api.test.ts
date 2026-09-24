@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createJsonStore } from '../../src/gateway/tasks/store.js';
@@ -665,7 +665,7 @@ test('TaskService: 默认任务固定本机 pi；setDefaultAgentId 只改空列�
 test('persistDefaultTaskAgentId: 写入 overlay，yaml 注释与其它键不变，重启重载可见', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
   const rt = join(dir, 'runtime-gateway');
-  const cfgPath = join(dir, 'config.yaml');
+  const cfgPath = join(dir, 'gateway.yaml');
   writeFileSync(
     cfgPath,
     [
@@ -701,13 +701,15 @@ test('persistDefaultTaskAgentId: tasks 段缺失可写 overlay；config 不存�
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
   const rt = join(dir, 'runtime-gateway');
 
-  const p1 = join(dir, 'a.yaml');
+  const p1 = join(dir, 'gateway.yaml');
   writeFileSync(p1, 'server:\n  port: 9000\n', 'utf8');
   persistDefaultTaskAgentId(p1, 'codex', rt);
   assert.doesNotMatch(readFileSync(p1, 'utf8'), /defaultAgentId: codex/);
   assert.equal(loadGatewayConfig(p1, rt).config.tasks.defaultAgentId, 'codex');
 
-  const p2 = join(dir, 'nested', 'config.yaml');
+  const nested = join(dir, 'nested');
+  mkdirSync(nested, { recursive: true });
+  const p2 = join(nested, 'gateway.yaml');
   assert.ok(!existsSync(p2));
   persistDefaultTaskAgentId(p2, 'pi', rt);
   assert.ok(!existsSync(p2));

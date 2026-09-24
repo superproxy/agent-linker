@@ -24,7 +24,7 @@ async function freshBuilt(definitions: { id: string; type: string; displayName: 
   TMP_ROOTS.push(stateRoot);
   const cfgDir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
   TMP_ROOTS.push(cfgDir);
-  const configPath = join(cfgDir, 'config.yaml');
+  const configPath = join(cfgDir, 'gateway.yaml');
   copyFileSync(FIXTURE_CONFIG, configPath);
   return buildServer({ configPath, definitions: definitions as never, stateRoot });
 }
@@ -153,11 +153,11 @@ test('POST /api/agents：添加 hermes 写入 overlay，重启配置仍含该 ag
   TMP_ROOTS.push(stateRoot);
   const dir = mkdtempSync(join(tmpdir(), 'linkagent-cfg-'));
   TMP_ROOTS.push(dir);
-  const configPath = join(dir, 'config.yaml');
+  const configPath = join(dir, 'gateway.yaml');
   const runtimeGatewayDir = createInstallLayout(stateRoot).state('gateway');
   writeFileSync(
     configPath,
-    'gateway:\n  server: { host: 127.0.0.1, port: 8787 }\n  agents:\n    - id: opencode\n      type: opencode\n      enabled: true\n',
+    'server:\n  host: 127.0.0.1\n  port: 8787\nagents:\n  - id: opencode\n    type: opencode\n    enabled: true\n',
   );
   const built = await buildServer({
     configPath,

@@ -128,7 +128,7 @@ export function loadGatewayRuntimeConfig(layout: InstallLayout): GatewayRuntimeC
   // token 文件由 gateway 进程首启时生成；supervisor 这里只读（resolveChildRuntime 内部只读不创建）。
   // 与 gateway 一致：split 时用 layout.configFile（gateway.yaml）触发三文件合并，避免误读 stub config.yaml。
   const configPath = layout.configMode === 'none' ? undefined : layout.configFile;
-  const { config } = loadSharedConfig(configPath);
+  const { config } = loadSharedConfig(configPath, layout.state('gateway'));
   const { host: rawHost, port } = config.gateway.server;
   const mode = config.gateway.auth.mode;
   // 透传 layout 的 token 文件路径，确保测试/多实例隔离（不回退读全局安装布局的 token）

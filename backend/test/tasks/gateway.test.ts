@@ -1,6 +1,6 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildServer } from '../../src/gateway/index.js';
@@ -23,8 +23,11 @@ async function freshBuilt(definitions: { id: string; type: string; displayName: 
   // 状态目录隔离：构建真实网关但把 .runtime-state 指到临时根，避免测试用户（gw_test_* 等）污染真实任务数据
   const stateRoot = mkdtempSync(join(tmpdir(), 'linkagent-gw-'));
   TMP_ROOTS.push(stateRoot);
+  const cfgDir = mkdtempSync(join(tmpdir(), 'linkagent-gw-cfg-'));
+  TMP_ROOTS.push(cfgDir);
+  writeFileSync(join(cfgDir, 'gateway.yaml'), readFileSync(join('test', 'fixtures', 'gateway.test.yaml'), 'utf8'));
   return buildServer({
-    configPath: 'test/fixtures/gateway.test.yaml',
+    configPath: join(cfgDir, 'gateway.yaml'),
     definitions: definitions as never,
     stateRoot,
   });

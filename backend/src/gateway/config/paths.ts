@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { CONFIG_BASENAMES } from '@linkagent/shared';
 import { getLayout } from '../../install/layout.js';
 
-export type ConfigLoadMode = 'split' | 'monolith' | 'defaults';
+export type ConfigLoadMode = 'split' | 'defaults';
 
 export interface ResolvedConfigPaths {
   mode: ConfigLoadMode;
@@ -14,7 +14,6 @@ export interface ResolvedConfigPaths {
   gatewayFile: string;
   weixinFile: string;
   nodeFile: string;
-  monolithFile: string;
 }
 
 function filesInDir(dir: string): Omit<ResolvedConfigPaths, 'mode'> {
@@ -24,21 +23,17 @@ function filesInDir(dir: string): Omit<ResolvedConfigPaths, 'mode'> {
     gatewayFile: join(dir, CONFIG_BASENAMES.gateway),
     weixinFile: join(dir, CONFIG_BASENAMES.weixin),
     nodeFile: join(dir, CONFIG_BASENAMES.node),
-    monolithFile: join(dir, CONFIG_BASENAMES.monolith),
   };
 }
 
 function modeForDir(dir: string): ConfigLoadMode {
   if (existsSync(join(dir, CONFIG_BASENAMES.gateway))) return 'split';
-  if (existsSync(join(dir, CONFIG_BASENAMES.monolith))) return 'monolith';
   return 'defaults';
 }
 
 function finalize(dir: string, mode: ConfigLoadMode, primaryOverride?: string): ResolvedConfigPaths {
   const files = filesInDir(dir);
-  let primaryPath = files.primaryPath;
-  if (mode === 'monolith') primaryPath = files.monolithFile;
-  if (primaryOverride) primaryPath = primaryOverride;
+  const primaryPath = primaryOverride ?? files.primaryPath;
   return { mode, ...files, primaryPath };
 }
 
@@ -48,9 +43,6 @@ function pathsFromExistingFile(file: string): ResolvedConfigPaths {
   if (base === CONFIG_BASENAMES.gateway || base === CONFIG_BASENAMES.weixin || base === CONFIG_BASENAMES.node) {
     return finalize(dir, 'split', join(dir, CONFIG_BASENAMES.gateway));
   }
-  if (base === CONFIG_BASENAMES.monolith) {
-    return finalize(dir, 'monolith', file);
-  }
   const mode = modeForDir(dir);
   return finalize(dir, mode, file);
 }
@@ -58,13 +50,13 @@ function pathsFromExistingFile(file: string): ResolvedConfigPaths {
 /**
  * 解析配置路径：
  * - 未传参：layout.configDir + configMode；
- * - 指向目录：目录内 split 优先于 monolith；
+ * - 指向目录：存在 gateway.yaml 则 split；
  * - 指向文件：按文件名或同目录探测。
  */
 export function resolveConfigPaths(pathArg?: string): ResolvedConfigPaths {
   if (!pathArg) {
     const layout = getLayout();
-    const mode: ConfigLoadMode = layout.configMode === 'none' ? 'defaults' : layout.configMode;
+    const mode: ConfigLoadMode = layout.configMode === 'split' ? 'split' : 'defaults';
     return finalize(layout.configDir, mode, layout.configFile);
   }
 
@@ -79,7 +71,6 @@ export function resolveConfigPaths(pathArg?: string): ResolvedConfigPaths {
 
   const dir = dirname(p);
   const mode = modeForDir(dir);
-  if (mode === 'monolith') return finalize(dir, mode, join(dir, CONFIG_BASENAMES.monolith));
   if (mode === 'split') return finalize(dir, mode, join(dir, CONFIG_BASENAMES.gateway));
   return finalize(dir, 'defaults', p);
 }
