@@ -8,8 +8,7 @@
 #   scripts/node.ps1 log [name]            跟随日志
 #   scripts/node.ps1 foreground [name]     前台运行（Ctrl-C 退出，开发用）
 #
-# 回连地址、token、展示名、agent 写在 node.yaml，不读环境变量。
-# 命名实例只隔离状态目录，展示名用命令行 --name。
+# 回连：env / .runtime-state/node[-<name>].env 优先，其次 node.yaml；命名实例隔离状态目录。
 #
 # 注意：不要使用 $PidXxx 变量名，PowerShell 会把 $PID 解析成当前进程 id。
 # 本文件需带 UTF-8 BOM；Windows PowerShell 5.1 否则会把中文后的 ASCII 引号吞掉。

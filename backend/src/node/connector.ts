@@ -14,6 +14,7 @@ import {
 import type { NodeAgentListItem } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
+import { loadNodeConnectorEnvFiles } from './env-load.js';
 import {
   AcpEngine,
   DEFAULT_COMMANDS,
@@ -31,11 +32,14 @@ import { TASK_KEY_PREFIX } from '../gateway/tasks/types.js';
  * 远程节点连接器：在「执行 agent 的机器」上运行，主动 WebSocket 连入网关，
  * 收到 turn 消息后用本机 AcpEngine 拉起 ACP agent，事件/结果回传网关。
  *
- * 回连地址、token、展示名、自报 agent 只读 node.yaml（gatewayUrl / gatewayToken / name / agents）。
- * 未写 gatewayUrl 时由 gateway.server 推导本机地址；未写 agents 时用内置默认。
- * 命令行仍可覆盖：--gatewayUrl、--name。
+ * 回连与自报（独立启动 / 执行机包）：优先级 命令行 > 环境变量 > node.yaml > 缺省推导。
+ * 启动时会加载 node.env（安装根）与 .runtime-state/node[-<name>].env，不覆盖已有环境变量。
+ * supervisor 托管的本机 node 进程由 manager 显式屏蔽 LINKAGENT_GATEWAY_* / NODE_AGENTS。
  *
- * 仍用环境变量的只有运行时隔离项：
+ * 环境变量：
+ *   LINKAGENT_GATEWAY_URL / LINKAGENT_GATEWAY_TOKEN  回连地址与 nt_ / 网关静态 token
+ *   LINKAGENT_NODE_NAME      展示名（缺省 node.yaml name 或 node-<hostname>）
+ *   LINKAGENT_NODE_AGENTS    逗号分隔自报 agent（缺省 node.yaml agents 或内置默认）
  *   LINKAGENT_NODE_ID        节点 id（缺省首次连接由网关签发并持久化，重连复用）
  *   LINKAGENT_NODE_STATE_DIR 节点状态目录（默认 .runtime-state/node；本机多实例时各自指定可避免 nodeId 冲突）
  *   LINKAGENT_NODE_CLAIM     匿名申请时的 nu_ 归属申明码（hello.claimToken，非 Upgrade Bearer）
@@ -346,22 +350,38 @@ function parseArgs(argv: string[]): Partial<ConnectorOptions> {
   return out as Partial<ConnectorOptions>;
 }
 
+function resolveAgentIdsFromEnv(raw: string | undefined): string[] | undefined {
+  const line = raw?.trim();
+  if (!line) return undefined;
+  const ids = line
+    .split(',')
+    .map((s) => normalizeAgentId(s.trim()))
+    .filter((id) => id.length > 0);
+  return ids.length > 0 ? ids : undefined;
+}
+
 function main(): void {
+  loadNodeConnectorEnvFiles();
+
   const args = parseArgs(process.argv.slice(2));
   const stateDir = process.env.LINKAGENT_NODE_STATE_DIR?.trim() || nodeStateDir();
   const envNodeId = process.env.LINKAGENT_NODE_ID?.trim();
 
-  // 回连只认 node.yaml，不读 LINKAGENT_GATEWAY_URL / TOKEN
+  const layout = getLayout();
   const { config } = loadSharedConfig();
   const runtime = resolveChildRuntime(
     config,
     { gatewayUrl: config.node.gatewayUrl, gatewayToken: config.node.gatewayToken },
+    { url: process.env.LINKAGENT_GATEWAY_URL, token: process.env.LINKAGENT_GATEWAY_TOKEN },
+    layout.gatewayTokenFile,
   );
 
+  const envAgentIds = resolveAgentIdsFromEnv(process.env.LINKAGENT_NODE_AGENTS);
   const agentIds =
-    config.node.agents.length > 0
+    envAgentIds ??
+    (config.node.agents.length > 0
       ? config.node.agents.map(nodeAgentEntryId)
-      : defaultAgentDefinitions().map((d) => d.id);
+      : defaultAgentDefinitions().map((d) => d.id));
   const agents = resolveNodeAgentInfos(config.node.agents, agentIds);
 
   const rawToken = runtime.gatewayToken.trim();
@@ -369,25 +389,25 @@ function main(): void {
   if (token) {
     if (isPersonalTokenShape(token)) {
       console.error(
-        '[node] node.yaml 的 gatewayToken 是个人 API token（pat_），不能用于节点连接。请在后台「远程 · 节点」颁发 nt_ 机器凭证。',
+        '[node] gatewayToken 是个人 API token（pat_），不能用于节点连接。请在后台「远程 · 节点」颁发 nt_ 机器凭证。',
       );
       process.exit(1);
     }
     if (token.startsWith(TASK_KEY_PREFIX)) {
       console.error(
-        '[node] node.yaml 的 gatewayToken 是任务 key（k_），不能用于节点连接。请在后台「远程 · 节点」颁发 nt_ 机器凭证。',
+        '[node] gatewayToken 是任务 key（k_），不能用于节点连接。请在后台「远程 · 节点」颁发 nt_ 机器凭证。',
       );
       process.exit(1);
     }
     if (isNodeClaimShape(token)) {
       console.error(
-        '[node] node.yaml 的 gatewayToken 是归属申明码（nu_），不能用于 Upgrade。请改用 LINKAGENT_NODE_CLAIM，并删掉 gatewayToken 行走待审批。',
+        '[node] gatewayToken 是归属申明码（nu_），不能用于 Upgrade。请改用 LINKAGENT_NODE_CLAIM，并删掉 gatewayToken 行走待审批。',
       );
       process.exit(1);
     }
     if (!isNodeTokenShape(token)) {
       console.warn(
-        '[node] node.yaml 的 gatewayToken 不是 nt_ 机器凭证；若连接报 401，请确认未误用登录会话 token，并改用 nt_ 或网关静态 token。',
+        '[node] gatewayToken 不是 nt_ 机器凭证；若连接报 401，请确认未误用登录会话 token，并改用 nt_ 或网关静态 token。',
       );
     }
   }
@@ -396,7 +416,9 @@ function main(): void {
     gatewayUrl: args.gatewayUrl ?? runtime.gatewayUrl,
     ...(token ? { token } : {}),
     ...(claimToken ? { claimToken } : {}),
-    name: args.name ?? (config.node.name || `node-${hostname()}`),
+    name:
+      args.name ??
+      (process.env.LINKAGENT_NODE_NAME?.trim() || config.node.name || `node-${hostname()}`),
     nodeId: envNodeId || loadPersistedNodeId(stateDir),
     // 配置了网关令牌时无需 secret；否则读取审批模式持久化的节点凭证
     ...(token ? {} : { secret: loadPersistedSecret(stateDir) }),
