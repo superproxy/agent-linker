@@ -88,6 +88,26 @@ function connectNode(nt: string, nodeId: string): Promise<{ ws: WebSocket; nodeI
   });
 }
 
+/** 匿名申请进入待审批（可选携带 nu_ 归属申明码） */
+function connectAnon(nodeId: string, claimToken?: string): Promise<{ ws: WebSocket; nodeId: string }> {
+  const ws = new WebSocket(wsBase);
+  const hello: NodeToGateway = {
+    type: 'hello',
+    name: 'anon-pc',
+    nodeId,
+    agents: [{ id: 'pi' }],
+    ...(claimToken ? { claimToken } : {}),
+  };
+  return new Promise((resolve, reject) => {
+    ws.on('open', () => ws.send(JSON.stringify(hello)));
+    ws.on('message', (raw) => {
+      const m = JSON.parse(raw.toString()) as GatewayToNode;
+      if (m.type === 'welcome') resolve({ ws, nodeId: m.nodeId });
+    });
+    ws.on('error', reject);
+  });
+}
+
 test('nt_ 属主可 disable/enable；他人 403；离线后可 delete', async () => {
   const issued = await app.inject({
     method: 'POST',
@@ -129,6 +149,91 @@ test('nt_ 属主可 disable/enable；他人 403；离线后可 delete', async ()
   });
   assert.equal(del.statusCode, 200, del.body);
   assert.equal(built.nodeManager.list().find((n) => n.nodeId === nodeId), undefined);
+});
+
+test('属主可批准自己的待审批节点；他人 403', async () => {
+  const claim = await app.inject({
+    method: 'POST',
+    url: '/api/node-claims/ensure',
+    headers: auth(aliceToken),
+  });
+  assert.equal(claim.statusCode, 200, claim.body);
+  const claimToken = (claim.json() as { claimToken: string }).claimToken;
+
+  const { ws, nodeId } = await connectAnon('n_alice_approve', claimToken);
+  const pending = built.nodeManager.list().find((n) => n.nodeId === nodeId);
+  assert.equal(pending?.status, 'pending');
+  assert.equal(pending?.ownerUsername, 'alice');
+
+  const bobApprove = await app.inject({
+    method: 'POST',
+    url: `/api/nodes/${encodeURIComponent(nodeId)}/approve`,
+    headers: auth(bobToken),
+  });
+  assert.equal(bobApprove.statusCode, 403, bobApprove.body);
+
+  const aliceApprove = await app.inject({
+    method: 'POST',
+    url: `/api/nodes/${encodeURIComponent(nodeId)}/approve`,
+    headers: auth(aliceToken),
+  });
+  assert.equal(aliceApprove.statusCode, 200, aliceApprove.body);
+  assert.equal((aliceApprove.json() as { node: { status?: string } }).node.status, 'approved');
+  assert.equal(built.nodeManager.isOnline(nodeId), true);
+  ws.terminate();
+});
+
+test('属主可拒绝自己的待审批节点；他人 403', async () => {
+  const claim = await app.inject({
+    method: 'POST',
+    url: '/api/node-claims/ensure',
+    headers: auth(aliceToken),
+  });
+  const claimToken = (claim.json() as { claimToken: string }).claimToken;
+
+  const { ws, nodeId } = await connectAnon('n_alice_reject', claimToken);
+
+  const bobReject = await app.inject({
+    method: 'POST',
+    url: `/api/nodes/${encodeURIComponent(nodeId)}/reject`,
+    headers: auth(bobToken),
+    payload: { reason: 'no' },
+  });
+  assert.equal(bobReject.statusCode, 403, bobReject.body);
+
+  const aliceReject = await app.inject({
+    method: 'POST',
+    url: `/api/nodes/${encodeURIComponent(nodeId)}/reject`,
+    headers: auth(aliceToken),
+    payload: { reason: '不需要了' },
+  });
+  assert.equal(aliceReject.statusCode, 200, aliceReject.body);
+  const rec = built.nodeManager.list().find((n) => n.nodeId === nodeId);
+  assert.equal(rec?.status, 'blocked');
+  ws.terminate();
+});
+
+test('纯匿名申请（无属主）仅管理员可审批', async () => {
+  const { ws, nodeId } = await connectAnon('n_anon_approve');
+  const pending = built.nodeManager.list().find((n) => n.nodeId === nodeId);
+  assert.equal(pending?.status, 'pending');
+  assert.equal(pending?.ownerUsername, undefined);
+
+  const bobApprove = await app.inject({
+    method: 'POST',
+    url: `/api/nodes/${encodeURIComponent(nodeId)}/approve`,
+    headers: auth(bobToken),
+  });
+  assert.equal(bobApprove.statusCode, 403, bobApprove.body);
+
+  const adminApprove = await app.inject({
+    method: 'POST',
+    url: `/api/nodes/${encodeURIComponent(nodeId)}/approve`,
+    headers: auth(adminToken),
+  });
+  assert.equal(adminApprove.statusCode, 200, adminApprove.body);
+  assert.equal(built.nodeManager.isOnline(nodeId), true);
+  ws.terminate();
 });
 
 test('nt_ 属主可 enable 已停用的节点', async () => {

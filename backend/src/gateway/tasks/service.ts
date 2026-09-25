@@ -223,6 +223,20 @@ export class TaskService {
   ensureLoginSpace(username: string): UserTasks {
     const existing = this.store.read(LOGIN_TASK_CHANNEL, username, username);
     if (existing) {
+      // 旧路径 split-brain：<owner>.web.<user> 与 web.<user>（无属主）并存时，先合并再归一字段，避免 write 清掉 legacy 丢任务
+      const legacy = this.store.list().find((u) => u.channel === LOGIN_TASK_CHANNEL && u.userId === username && !u.ownerUsername);
+      if (legacy) {
+        const old = this.store.read(LOGIN_TASK_CHANNEL, username);
+        if (old?.tasks.length) {
+          const merged = this.mergeLoginSpaces(existing, old);
+          merged.channel = LOGIN_TASK_CHANNEL;
+          merged.userId = username;
+          merged.ownerUsername = username;
+          this.store.write(merged);
+          return this.ensureKeys(merged);
+        }
+        this.store.remove(LOGIN_TASK_CHANNEL, username);
+      }
       if (existing.channel !== LOGIN_TASK_CHANNEL || existing.userId !== username || existing.ownerUsername !== username) {
         existing.channel = LOGIN_TASK_CHANNEL;
         existing.userId = username;
@@ -246,6 +260,23 @@ export class TaskService {
       return this.ensureKeys(migrated);
     }
     return this.load(LOGIN_TASK_CHANNEL, username, username);
+  }
+
+  /** 合并无属主旧文件与带属主新文件的任务（按 id 去重，保留新文件优先）；旧文件带独有任务时视为更近活动，沿用其 activeTaskId */
+  private mergeLoginSpaces(owned: UserTasks, legacy: UserTasks): UserTasks {
+    const byId = new Map<string, TaskItem>();
+    for (const t of owned.tasks) byId.set(t.id, t);
+    for (const t of legacy.tasks) if (!byId.has(t.id)) byId.set(t.id, t);
+    const legacyOnly = legacy.tasks.filter((t) => !owned.tasks.some((o) => o.id === t.id));
+    const activeTaskId =
+      legacyOnly.length > 0 && byId.has(legacy.activeTaskId) ? legacy.activeTaskId : owned.activeTaskId;
+    return {
+      channel: owned.channel,
+      userId: owned.userId,
+      ownerUsername: owned.ownerUsername,
+      activeTaskId,
+      tasks: [...byId.values()],
+    };
   }
 
   /** 后台任务管理只展示登录用户空间（web/<username>） */

@@ -4,9 +4,10 @@ import { isTaskCommand, type TaskService } from './service.js';
 import { LOGIN_TASK_CHANNEL, isDefaultTaskId, normalizeNodeId, type TaskItem, type UserTasks } from './types.js';
 import { isSkillRequest } from './skill-files.js';
 
-/** 有登录归属时读写该用户唯一任务空间；无归属时沿用渠道终端文件（旧数据 / 单测） */
+/** 有登录归属时读写该用户唯一任务空间；web 渠道一律归登录空间（避免与 owner 空间 split-brain）；无归属时沿用渠道终端文件（旧数据 / 单测） */
 function loadTaskSpace(service: TaskService, channel: string, userId: string, owner?: string): UserTasks {
   if (owner) return service.ensureLoginSpace(owner);
+  if (channel === LOGIN_TASK_CHANNEL && userId?.trim()) return service.ensureLoginSpace(userId.trim());
   return service.load(channel, userId);
 }
 

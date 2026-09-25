@@ -12,8 +12,8 @@ type HeaderReq = { headers: Record<string, string | string[] | undefined> };
 /**
  * 节点管理与用户偏好 REST：
  *   GET    /api/nodes                                  可见节点（管理员含本机+全部；其他人只看自己的远程机器）
- *   POST   /api/nodes/:nodeId/approve                  批准待审批节点（仅管理员）
- *   POST   /api/nodes/:nodeId/reject                   拒绝待审批节点（仅管理员）
+ *   POST   /api/nodes/:nodeId/approve                  批准待审批节点（管理员或 nt_/nu_ 属主）
+ *   POST   /api/nodes/:nodeId/reject                   拒绝待审批节点（管理员或 nt_/nu_ 属主）
  *   POST   /api/nodes/:nodeId/disable                  临时停用节点：在线则关闭连接，重连被拒（管理员或 nt_ 属主）
  *   POST   /api/nodes/:nodeId/enable                   恢复已停用节点（管理员或 nt_ 属主）
  *   DELETE /api/nodes/:nodeId                          删除离线/已停用节点（管理员或 nt_ 属主）
@@ -90,9 +90,10 @@ export function registerNodeApi(
   });
 
   app.post('/api/nodes/:nodeId/approve', async (request, reply) => {
-    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
     const { nodeId } = request.params as { nodeId: string };
-    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点无需审批' });
+    const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
+    const gate = manageNodeGate(request, rec, nodeId, '内建本机节点无需审批');
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     try {
       return { node: nodeManager.approveNode(nodeId) };
     } catch (err) {
@@ -102,9 +103,10 @@ export function registerNodeApi(
   });
 
   app.post('/api/nodes/:nodeId/reject', async (request, reply) => {
-    if (!requireAdmin(request, reply)) return { error: 'forbidden' };
     const { nodeId } = request.params as { nodeId: string };
-    if (nodeId === LOCAL_NODE_ID) return reply.code(400).send({ error: '内建本机节点不可拒绝' });
+    const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
+    const gate = manageNodeGate(request, rec, nodeId, '内建本机节点不可拒绝');
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     const body = request.body as { reason?: string } | null | undefined;
     try {
       nodeManager.rejectNode(nodeId, body?.reason?.trim() || undefined);

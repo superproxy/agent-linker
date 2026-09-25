@@ -373,6 +373,39 @@ test('工作空间：清除 cwd 回落用户目录；旧登录数据补用户目
   assert.equal(existsSync(oldCwd), false);
 });
 
+test('ensureLoginSpace 合并无属主旧文件任务（split-brain 修复）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-split-'));
+  const store = createJsonStore(dir);
+  const svc = new TaskService({ store });
+
+  const owned: UserTasks = {
+    channel: 'web',
+    userId: 'local',
+    ownerUsername: 'local',
+    activeTaskId: 'default',
+    tasks: [{ id: 'default', key: 'k_default', keyEnabled: true, name: '默认', agentId: 'pi', nodeId: 'local', createdAt: Date.now() }],
+  };
+  store.write(owned); // local.web.local.json
+  const legacy: UserTasks = {
+    channel: 'web',
+    userId: 'local',
+    activeTaskId: 't_stock',
+    tasks: [{ id: 't_stock', key: 'k_stock', keyEnabled: true, name: '股票分析', agentId: 'pi', nodeId: 'local', createdAt: Date.now() }],
+  };
+  store.write(legacy); // web.local.json（无属主）
+
+  const space = svc.ensureLoginSpace('local');
+  assert.equal(space.tasks.length, 2);
+  assert.ok(space.tasks.some((t) => t.id === 'default'));
+  assert.ok(space.tasks.some((t) => t.id === 't_stock'));
+  assert.equal(space.activeTaskId, 't_stock');
+  assert.equal(existsSync(join(dir, 'web.local.json')), false, '无属主旧文件应被清除');
+  assert.equal(existsSync(join(dir, 'local.web.local.json')), true, '属主文件应保留');
+  // 幂等：再读不重复合并
+  const again = svc.ensureLoginSpace('local');
+  assert.equal(again.tasks.length, 2);
+});
+
 test('默认任务不能改 agent；/task agent default 被拒绝', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_1');

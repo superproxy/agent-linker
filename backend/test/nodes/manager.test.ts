@@ -295,11 +295,10 @@ test('disableNode 不存在：抛错', async () => {
 
 test('disable → 重连被拒(4408 rejected)；enable → 解除标记', async () => {
   const h = await startManager();
-  // 匿名申请进 rec(pending)，再批准，最后停用
+  // 匿名直连进 rec（免鉴权模式直接 approved），然后停用
   const first = await connectAndHandshake(h.url, hello({ nodeId: 'cycle' }));
   first.ws.close();
   await new Promise((r) => setTimeout(r, 30));
-  h.manager.approveNode('cycle');
   h.manager.disableNode('cycle');
 
   // 不带 secret 的 hello：rec 命中 + disabled=true → rejected(4408)

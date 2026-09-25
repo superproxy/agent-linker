@@ -431,6 +431,20 @@ export class NodeManager {
       (this.expectedToken !== '' && hello.token === this.expectedToken);
     const authDisabled = upgradeAuth.kind === 'open' || this.expectedToken === '';
 
+    // 被管理员停用：所有重连入口（node / token / secret / 匿名）一律拒绝
+    const requested = hello.nodeId?.trim();
+    const rec = requested && NODE_ID_PATTERN.test(requested) ? this.registry.get(requested) : null;
+    if (rec?.disabled === true) {
+      this.send(ws, { type: 'rejected', reason: '该节点已被管理员停用' });
+      try {
+        ws.close(4408, 'disabled');
+      } catch {
+        ws.terminate();
+      }
+      this.logger.warn(`被禁用节点 ${rec.nodeId} 尝试重连，关闭`);
+      return;
+    }
+
     if (nodeAuth) {
       this.admit(ws, hello, agents, remoteAddress, {
         mode: 'node',
@@ -458,21 +472,6 @@ export class NodeManager {
     }
 
     // 3) 节点凭证（nodeId + secret）重连
-    const requested = hello.nodeId?.trim();
-    const rec = requested && NODE_ID_PATTERN.test(requested) ? this.registry.get(requested) : null;
-
-    // 被管理员临时停用：所有重连入口（token / node / secret）一律拒绝
-    if (rec?.disabled === true) {
-      this.send(ws, { type: 'rejected', reason: '该节点已被管理员停用' });
-      try {
-        ws.close(4408, 'disabled');
-      } catch {
-        ws.terminate();
-      }
-      this.logger.warn(`被禁用节点 ${rec.nodeId} 尝试重连，关闭`);
-      return;
-    }
-
     if (rec && rec.secret && secretEqual(hello.secret, rec.secret)) {
       const status = rec.status ?? 'approved';
       if (status === 'blocked') {

@@ -39,6 +39,17 @@ test('普通消息 → chat，解析激活任务 agent+task，sessionKey 编码�
   assert.equal(d.sessionKey, 'weixin:wx_1:task:default');
 });
 
+test('web 渠道无属主也归登录用户空间（split-brain 修复）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linkagent-webspace-'));
+  const svc = new TaskService({ store: createJsonStore(dir) });
+  const d = decideTaskRouting(svc, { text: '/task new 股票分析', channel: 'web', userId: 'local' });
+  assert.equal(d.kind, 'command');
+  const state = svc.ensureLoginSpace('local');
+  assert.equal(state.tasks.some((t) => t.name === '股票分析'), true);
+  assert.equal(existsSync(join(dir, 'local.web.local.json')), true, '任务应落在属主空间');
+  assert.equal(existsSync(join(dir, 'web.local.json')), false, '不应落到无属主文件');
+});
+
 test('企微 userId → chat 任务路由（不用 body.model agent:pi）', () => {
   const svc = freshService();
   svc.load('wecom', 'zhangsan');

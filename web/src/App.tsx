@@ -281,7 +281,7 @@ function PageRouter(props: {
       );
     case 'remote-nodes':
       return (
-        <NodesPage scope="remote" base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} onGoTab={props.onGoTab} />
+        <NodesPage scope="remote" base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} username={username} onGoTab={props.onGoTab} />
       );
     case 'weixin':
       return <WeixinPage base={base} token={token} onAuthError={onAuthError} username={username} isAdmin={isAdmin} />;

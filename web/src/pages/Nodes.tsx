@@ -15,6 +15,7 @@ export function NodesPage(props: {
   onAuthError: AuthErrorHandler;
   scope: 'local' | 'remote';
   isAdmin?: boolean;
+  username?: string;
   onGoTab?: (tab: TabId) => void;
 }) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);
@@ -175,10 +176,11 @@ export function NodesPage(props: {
         const isLocal = n.nodeId === 'local';
         const isPending = n.status === 'pending';
         if (isLocal) return <span className="sub-muted">内建</span>;
+        const canApprove = isAdmin || (!!props.username && n.ownerUsername === props.username);
         if (isPending)
           return (
             <Space size={6}>
-              {isAdmin ? (
+              {canApprove ? (
                 <>
                   <Button size="small" type="primary" disabled={busyId === n.nodeId} onClick={() => guard(n.nodeId)(ops.approveNode(n.nodeId))}>
                     批准
@@ -197,7 +199,7 @@ export function NodesPage(props: {
                   </Popconfirm>
                 </>
               ) : (
-                <span className="sub-muted">等待管理员审批</span>
+                <span className="sub-muted">等待审批</span>
               )}
               <Popconfirm
                 title={`删除节点「${n.name}」的接入申请？`}

@@ -121,7 +121,11 @@ test('AuthGuard：disabled / 静态 token / 会话 / 无效凭据 四态', () =>
   assert.equal(guard.isAdmin({ headers: { authorization: `Bearer ${adminSession.token}` } }), true);
   assert.equal(guard.isAdmin({ headers: { authorization: `Bearer ${userSession.token}` } }), false);
 
-  // sessionUser 仅会话态返回用户
+  // sessionUser 仅会话态返回用户；静态 token 在用户库已有 admin 时解析为该账号
   assert.equal(guard.sessionUser({ headers: { authorization: `Bearer ${userSession.token}` } })?.username, 'alice');
-  assert.equal(guard.sessionUser({ headers: { authorization: 'Bearer static-secret' } }), null);
+  assert.equal(
+    guard.sessionUser({ headers: { authorization: 'Bearer static-secret' } })?.username,
+    DEFAULT_ADMIN_USERNAME,
+    '用户库已有 admin 时静态 token 归 admin 账号',
+  );
 });
