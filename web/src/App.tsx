@@ -32,6 +32,7 @@ import { FeishuPage } from './pages/Feishu';
 import { AccountsPage } from './pages/Accounts';
 import { LocalGatewayPage, RemoteGatewayPage } from './pages/Settings';
 import { ProcessesPage } from './pages/Processes';
+import { IdePage } from './pages/Ide';
 
 type AuthState =
   | { status: 'loading' }
@@ -230,6 +231,8 @@ function PageRouter(props: {
           onClearSession={props.onClearChatSession}
         />
       );
+    case 'ide':
+      return <IdePage base={base} token={token} onAuthError={onAuthError} onGoTab={props.onGoTab} />;
     case 'local-agents':
       return <AgentsPage scope="local" base={base} token={token} onAuthError={onAuthError} />;
     case 'remote-agents':
@@ -297,6 +300,8 @@ function PageRouter(props: {
       return isAdmin ? (
         <LocalGatewayPage token={token} onAuthError={onAuthError} onApplyBase={props.onApplyBase} />
       ) : null;
+    case 'ide':
+      return <IdePage base={base} token={token} onAuthError={onAuthError} onGoTab={props.onGoTab} />;
     case 'remote-gateway':
       return isAdmin ? (
         <RemoteGatewayPage

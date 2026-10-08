@@ -56,6 +56,32 @@ export interface HealthInfo {
   agents: AgentInfo[];
 }
 
+// 远程Agent相关类型
+export interface RemoteAgent {
+  agentId: string;
+  agentName: string;
+  os: 'linux' | 'darwin' | 'win32';
+  arch: 'x64' | 'arm64' | 'ia32';
+  hostname: string;
+  online: boolean;
+  lastSeen: number;
+  ownerUsername: string;
+  systemLoad?: {
+    cpu: number;
+    memory: number;
+    disk: number;
+  };
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: number;
+  mode: number;
+}
+
 export interface ChatDelta {
   type: 'reasoning' | 'text' | 'done' | 'error';
   text?: string;
@@ -71,6 +97,45 @@ export interface ChatStreamOpts {
   task?: string;
   agent?: string;
   ownerUsername?: string;
+}
+
+export class ApiClient {
+  constructor(
+    private base: string,
+    private token: string,
+  ) {}
+
+  private url(path: string): string {
+    return this.base.replace(/\/$/, '') + path;
+  }
+
+  private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
+    const res = await fetch(this.url(path), {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.token}`,
+        ...(init?.headers || {}),
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 401) throw new ApiError(401, await errorMessage(res));
+      throw new ApiError(res.status, await errorMessage(res));
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // 远程Agent相关接口
+  async remoteListAgents(): Promise<{ agents: RemoteAgent[] }> {
+    return this.fetch('/api/remote/agents');
+  }
+
+  async remoteSendCommand(agentId: string, command: string, params: Record<string, any>): Promise<{ success: boolean; data: any }> {
+    return this.fetch(`/api/remote/agents/${agentId}/command`, {
+      method: 'POST',
+      body: JSON.stringify({ command, params }),
+    });
+  }
 }
 
 export class GatewayClient {

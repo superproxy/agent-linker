@@ -1,0 +1,31 @@
+# FRP服务端配置
+bindPort: 7000
+kcpBindPort: 7000
+quicBindPort: 7000
+
+# 认证配置
+auth:
+  method: token
+  token: "frp_token_8787_linkagent"
+
+# HTTP/HTTPS穿透端口
+vhostHTTPPort: 8080
+vhostHTTPSPort: 8443
+
+# 控制面板
+webServer:
+  port: 7001
+  user: admin
+  password: "linkagent@8787"
+
+# 流量控制
+maxPortsPerClient: 100
+allowPorts:
+  - start: 10000
+    end: 50000
+
+# 日志配置
+log:
+  level: info
+  maxDays: 30
+  disablePrintColor: false

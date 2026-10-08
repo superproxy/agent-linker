@@ -3,6 +3,7 @@ import {
   AppstoreOutlined,
   CloudServerOutlined,
   ClusterOutlined,
+  CodeOutlined,
   ControlOutlined,
   DashboardOutlined,
   DesktopOutlined,
@@ -33,6 +34,7 @@ export interface GatewayProfile {
 export type TabId =
   | 'overview'
   | 'chat'
+  | 'ide'
   | 'local-agents'
   | 'remote-agents'
   | 'tasks'
@@ -84,7 +86,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'weixin', label: '微信', icon: <MessageOutlined /> },
       { id: 'wecom', label: '企业微信', icon: <MessageOutlined /> },
       { id: 'feishu', label: '飞书', icon: <MessageOutlined /> },
-      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
+      { id: 'ide', label: '在线IDE', icon: <CodeOutlined /> },
     ],
   },
   {
@@ -102,6 +104,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'remote-gateway', label: '网关', icon: <CloudServerOutlined />, adminOnly: true },
       { id: 'remote-nodes', label: '节点', icon: <ClusterOutlined /> },
       { id: 'remote-agents', label: 'agent', icon: <AppstoreOutlined /> },
+    ],
+  },
+  {
+    title: '工具',
+    items: [
+      { id: 'chat', label: '对话', icon: <MessageOutlined /> },
+      { id: 'ide', label: '在线IDE', icon: <CodeOutlined /> },
     ],
   },
   {
