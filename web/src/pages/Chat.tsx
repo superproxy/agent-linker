@@ -22,9 +22,9 @@ function sessionFingerprint(s: ChatSession | null): string {
 }
 
 export function ChatPage(
-  props: PageProps & { session: ChatSession | null; onClearSession: () => void },
+  props: PageProps & { session: ChatSession | null; onClearSession: () => void; embedded?: boolean },
 ) {
-  const { base, token, onAuthError, session, onClearSession } = props;
+  const { base, token, onAuthError, session, onClearSession, embedded } = props;
   const client = useMemo(() => new GatewayClient(base, () => token), [base, token]);
   const ops = useMemo(() => new OpsClient(base, () => token), [base, token]);
   const { tick } = useRefreshTick();
@@ -174,11 +174,13 @@ export function ChatPage(
   );
 
   return (
-    <Flex vertical className="chat-page" gap={12}>
+    <Flex vertical className={embedded ? 'chat-page ide-chat' : 'chat-page'} gap={12}>
       <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-        {session
-          ? '当前进入该任务的持久会话（有记忆）。消息走网关 /v1 任务路由，与微信渠道同一套任务隔离。'
-          : '未绑定任务时为 oneshot 测试。从「任务管理」点「对话」可进入对应任务的持久会话。'}
+        {embedded
+          ? '在 IDE 里直接向网关发起流式对话，模型与侧栏「对话」相同。'
+          : session
+            ? '当前进入该任务的持久会话（有记忆）。消息走网关 /v1 任务路由，与微信渠道同一套任务隔离。'
+            : '未绑定任务时为 oneshot 测试。从「任务管理」点「对话」可进入对应任务的持久会话。'}
       </Typography.Paragraph>
       <Card
         className="chat-card"

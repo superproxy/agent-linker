@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { resolveTaskPath, resolveTaskWorkspaceRoot, isWindowsDriveRoot, isLegacyBrokenTaskCwd, resolveCwd } from '../../util/task-paths.js';
 import { identityForLoginTask, taskSkillProcessEnv, writeTaskSkillMarkdown } from './skill-files.js';
 import type { TaskStore } from './store.js';
@@ -84,6 +84,24 @@ export class TaskService {
       ? resolveTaskWorkspaceRoot(options.workspaceRoot.trim())
       : undefined;
     this.skill = options.skill;
+  }
+
+  /**
+   * 任务域名变化：创建、删除、或 key 开关。
+   * 由网关接到 APISIX Admin API。失败只记日志，不回滚任务。
+   */
+  setHostChangeHandler(handler: (change: { taskId: string; name: string; enabled: boolean; removed?: boolean }) => void): void {
+    this.hostChange = handler;
+  }
+
+  private hostChange?: (change: { taskId: string; name: string; enabled: boolean; removed?: boolean }) => void;
+
+  private notifyHost(task: { id: string; name: string }, enabled: boolean, removed = false): void {
+    try {
+      this.hostChange?.({ taskId: task.id, name: task.name, enabled, removed });
+    } catch (err) {
+      console.error(`[tasks] 同步任务域名失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**
@@ -216,6 +234,8 @@ export class TaskService {
       tasks: [this.buildDefaultTask({ channel, userId, ...(ownerUsername ? { ownerUsername } : {}) })],
     };
     this.store.write(fresh);
+    const created = fresh.tasks[0];
+    if (created) this.notifyHost(created, true);
     return this.ensureKeys(fresh);
   }
 
@@ -380,6 +400,7 @@ export class TaskService {
     state.activeTaskId = task.id;
     this.store.write(state);
     this.syncSkillFiles(state);
+    this.notifyHost(task, task.keyEnabled !== false);
     return task;
   }
 
@@ -414,7 +435,26 @@ export class TaskService {
     state.activeTaskId = task.id; // 新建即激活
     this.store.write(state);
     this.syncSkillFiles(state);
+    this.notifyHost(task, task.keyEnabled !== false);
     return task;
+  }
+
+  /**
+   * 任务 IDE 的根目录。只认登录用户空间里该任务已保存的 cwd，调用方负责核对登录人。
+   * 没有手填目录时补齐自动目录 <workspaceRoot>/<用户名>/<taskId>。
+   */
+  workspaceForTask(ownerUsername: string, taskId: string): string {
+    const owner = ownerUsername.trim();
+    const id = taskId.trim();
+    if (!owner || !id) throw new Error('任务不存在');
+    const state = this.ensureLoginSpace(owner);
+    const task = state.tasks.find((t) => t.id === id);
+    if (!task) throw new Error(`任务不存在: ${id}`);
+    if (this.alignTaskWorkspace(state, task)) this.store.write(state);
+    const cwd = task.cwd?.trim();
+    if (!cwd) throw new Error('任务没有工作目录');
+    mkdirSync(cwd, { recursive: true });
+    return resolve(cwd);
   }
 
   /** 生成或校验任务 key：自定义 key 需全局唯一；缺省自动生成 */
@@ -523,12 +563,14 @@ export class TaskService {
 
   deleteTask(state: UserTasks, id: string): TaskItem[] {
     const idx = state.tasks.findIndex((t) => t.id === id);
-    if (idx < 0) throw new Error(`任务不存在: ${id}`);
+    const task = idx >= 0 ? state.tasks[idx] : undefined;
+    if (!task) throw new Error(`任务不存在: ${id}`);
     state.tasks.splice(idx, 1);
     if (state.activeTaskId === id) {
       state.activeTaskId = state.tasks[0]?.id ?? '';
     }
     this.store.write(state);
+    this.notifyHost(task, false, true);
     return state.tasks;
   }
 
@@ -562,6 +604,7 @@ export class TaskService {
     if (!task) throw new Error(`任务不存在: ${id}`);
     task.name = name.trim() || task.name;
     this.store.write(state);
+    this.notifyHost(task, task.keyEnabled !== false);
     return task;
   }
 
@@ -591,6 +634,7 @@ export class TaskService {
     if (!task) throw new Error(`任务不存在: ${id}`);
     task.keyEnabled = enabled;
     this.store.write(state);
+    this.notifyHost(task, enabled);
     return task;
   }
 

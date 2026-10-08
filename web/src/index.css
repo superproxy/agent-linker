@@ -155,6 +155,95 @@ code,
   padding: 22px 24px 40px;
 }
 
+.vibe-page {
+  height: calc(100vh - 118px);
+  min-height: 480px;
+}
+
+.vibe-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #1e1e1e;
+}
+
+.ide-page {
+  height: calc(100vh - 118px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ide-page .ide-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.ide-page .ide-side,
+.ide-page .ide-main {
+  min-height: 0;
+  overflow: auto;
+}
+
+.ide-page .ide-editor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.ide-page .ant-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ide-page .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ide-page .ant-tabs-content,
+.ide-page .ant-tabs-tabpane-active {
+  height: 100%;
+}
+
+.ide-page .chat-page.ide-chat {
+  height: 100%;
+  min-height: 0;
+}
+
+.ide-page .ide-frame-wrap {
+  height: calc(100vh - 168px);
+  min-height: 480px;
+}
+
+.ide-page .ide-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #1e1e1e;
+}
+
+.ide-page .ide-term {
+  margin: 8px 0 0;
+  min-height: 160px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 8px;
+}
+
 .chat-page {
   height: calc(100vh - 118px);
   min-height: 420px;

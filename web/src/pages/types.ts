@@ -18,4 +18,6 @@ export interface ChatSession {
   nodeId?: string;
   key?: string;
   keyEnabled?: boolean;
+  /** 展示用。文件与终端的根目录由服务端按任务记录解析，不采用这里的值 */
+  cwd?: string;
 }

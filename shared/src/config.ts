@@ -168,8 +168,48 @@ export const nodeSectionSchema = z
     gatewayUrl: z.string().default(''),
     /** 回连网关的永久 token；缺省取 gateway.auth.token 或自动生成的 gateway-token */
     gatewayToken: z.string().default(''),
+    /**
+     * 浏览器 IDE。node 只拉起 code-server，端口发布到回环地址。
+     * nginx 与 frps 由网关安装并监听，不在 node 里起反代容器。
+     * 缺省关闭，避免没有 docker 的节点启动失败。
+     */
+    serveWeb: z
+      .object({
+        enabled: z.boolean().default(false),
+        /** 浏览器 IDE 镜像。coder 的 code-server，可按需换成自有镜像 */
+        image: z.string().min(1).default('codercom/code-server:latest'),
+        /** 发布到宿主机的地址，供网关本机 nginx 反代 */
+        host: z.string().default('127.0.0.1'),
+        port: z.number().int().positive().default(8000),
+        /** 必须与网关前缀一致 */
+        basePath: z.string().default('/vibe-ide'),
+        /** 挂进 IDE 的目录；空则用安装根 */
+        workspace: z.string().default(''),
+      })
+      .default({
+        enabled: false,
+        image: 'codercom/code-server:latest',
+        host: '127.0.0.1',
+        port: 8000,
+        basePath: '/vibe-ide',
+        workspace: '',
+      }),
   })
-  .default({ enabled: true, name: '', agents: [], gatewayUrl: '', gatewayToken: '' });
+  .default({
+    enabled: true,
+    name: '',
+    agents: [],
+    gatewayUrl: '',
+    gatewayToken: '',
+    serveWeb: {
+      enabled: false,
+      image: 'codercom/code-server:latest',
+      host: '127.0.0.1',
+      port: 8000,
+      basePath: '/vibe-ide',
+      workspace: '',
+    },
+  });
 export type NodeSection = z.infer<typeof nodeSectionSchema>;
 
 /**

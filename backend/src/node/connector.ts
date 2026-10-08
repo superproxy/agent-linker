@@ -15,6 +15,7 @@ import type { NodeAgentListItem } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { loadNodeConnectorEnvFiles } from './env-load.js';
+import { startNodeServeWeb } from './serve-web.js';
 import {
   AcpEngine,
   DEFAULT_COMMANDS,
@@ -427,9 +428,15 @@ function main(): void {
     stateDir,
   });
   connector.start();
+  const serveWeb = startNodeServeWeb({
+    serveWeb: config.node.serveWeb,
+    workspaceDir: config.node.serveWeb.workspace || layout.root,
+    runtimeDir: layout.state('ide-proxy'),
+  });
 
   const shutdown = () => {
     console.log('[node] 关闭中…');
+    serveWeb.stop();
     connector.stop();
     setTimeout(() => process.exit(0), 500);
   };

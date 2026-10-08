@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type Key } from 'react';
 import { Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { CommentOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { CodeOutlined, CommentOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { OpsClient, type NodeInfo, type TaskItem, type UserTasks } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { confirmAsync, notify } from '../lib/notify';
 import { CopyableCode, EmptyHint } from '../components/common';
 import { agentDisplayLabel } from '../lib/agent-labels';
 import type { ChatSession } from './types';
+import { taskCodeServerOrigin, taskIdeOrigin } from '../lib/task-host';
 
 interface EditState {
   channel: string;
@@ -29,6 +30,7 @@ export function TasksPage(props: {
   token: string;
   onAuthError: AuthErrorHandler;
   onOpenChat: (session: ChatSession) => void;
+  onOpenIde: (session: ChatSession) => void;
   username?: string;
   isAdmin?: boolean;
 }) {
@@ -446,29 +448,33 @@ export function TasksPage(props: {
     {
       title: '操作',
       key: 'ops',
-      width: 268,
-      render: (_, t) => (
+      width: 490,
+      render: (_, t) => {
+        const session: ChatSession = {
+          channel: t.channel,
+          userId: t.userId,
+          ownerUsername: t.ownerUsername,
+          taskId: t.id,
+          taskName: t.name,
+          agentId: t.agentId,
+          nodeId: t.nodeId,
+          key: t.key,
+          keyEnabled: t.keyEnabled,
+          cwd: t.cwd,
+        };
+        return (
         <Space size={6}>
-          <Button
-            size="small"
-            type="primary"
-            ghost
-            icon={<CommentOutlined />}
-            onClick={() =>
-              props.onOpenChat({
-                channel: t.channel,
-                userId: t.userId,
-                ownerUsername: t.ownerUsername,
-                taskId: t.id,
-                taskName: t.name,
-                agentId: t.agentId,
-                nodeId: t.nodeId,
-                key: t.key,
-                keyEnabled: t.keyEnabled,
-              })
-            }
-          >
+          <Button size="small" type="primary" ghost icon={<CommentOutlined />} onClick={() => props.onOpenChat(session)}>
             对话
+          </Button>
+          <Button size="small" icon={<CodeOutlined />} onClick={() => props.onOpenIde(session)}>
+            IDE
+          </Button>
+          <Button size="small" href={taskIdeOrigin(t.name, t.id)} target="_blank">
+            web
+          </Button>
+          <Button size="small" href={taskCodeServerOrigin(t.name, t.id)} target="_blank">
+            code-server
           </Button>
           {!t.active ? (
             <Button
@@ -499,7 +505,8 @@ export function TasksPage(props: {
             删除
           </Button>
         </Space>
-      ),
+        );
+      },
     },
   ];
 

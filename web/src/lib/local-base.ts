@@ -2,8 +2,8 @@
 export const DEFAULT_BASE = 'http://127.0.0.1:8787';
 
 export function isLoopbackHostname(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
-  return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+  return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h.endsWith('.localhost');
 }
 
 export function isLoopbackBase(url: string): boolean {
@@ -53,9 +53,17 @@ export function processApiBase(origin: string): string {
  * 管理后台其它 API 的缺省网关地址：
  * 未保存过则用当前页面 origin（web 与 gateway 同端口）；
  * localhost 与 127.0.0.1 对齐到页面主机；本机 127 不带到远程部署页。
+ * {taskId}-web.localhost 始终用页面自己的源，避免请求落到另一个端口。
  */
 export function initialGatewayBase(origin: string, saved: string | null): string {
   const o = stripSlash(origin);
+  if (o) {
+    try {
+      if (new URL(o).hostname.toLowerCase().endsWith('.localhost')) return o;
+    } catch {
+      // origin 不是 URL 时继续走下面的缺省
+    }
+  }
   const s = (saved ?? '').trim();
   if (!s) return o || DEFAULT_BASE;
   const aligned = alignToPageOrigin(o || DEFAULT_BASE, s);

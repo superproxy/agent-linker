@@ -8,3 +8,4 @@ export * from './node.js';
 export * from './node-agents.js';
 export * from './user.js';
 export * from './opencode.js';
+export * from './task-host.js';

@@ -136,6 +136,68 @@ export class ApiClient {
       body: JSON.stringify({ command, params }),
     });
   }
+
+  async ideList(
+    path = '',
+    scope?: IdeTaskScope,
+  ): Promise<{ path: string; parent: string | null; entries: IdeFileEntry[] }> {
+    const q = path ? `?path=${encodeURIComponent(path)}` : '';
+    return this.fetch(withIdeTask(`/api/remote/files/list${q}`, scope));
+  }
+
+  async ideRead(path: string, scope?: IdeTaskScope): Promise<{ path: string; content: string }> {
+    return this.fetch(withIdeTask(`/api/remote/files/content?path=${encodeURIComponent(path)}`, scope));
+  }
+
+  async ideWrite(path: string, content: string, scope?: IdeTaskScope): Promise<{ path: string }> {
+    return this.fetch(withIdeTask('/api/remote/files/content', scope), {
+      method: 'PUT',
+      body: JSON.stringify({ path, content }),
+    });
+  }
+
+  async ideMkdir(path: string, scope?: IdeTaskScope): Promise<{ path: string }> {
+    return this.fetch(withIdeTask('/api/remote/files/mkdir', scope), {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async ideDelete(path: string, scope?: IdeTaskScope): Promise<{ path: string }> {
+    return this.fetch(withIdeTask('/api/remote/files/delete', scope), {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async ideExec(command: string, scope?: IdeTaskScope): Promise<{ stdout: string; stderr: string; code: number }> {
+    return this.fetch(withIdeTask('/api/remote/terminal', scope), {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    });
+  }
+}
+
+/** 任务 IDE：服务端按 taskId 解析该任务的 cwd，客户端不传绝对路径 */
+export interface IdeTaskScope {
+  taskId: string;
+  owner?: string;
+}
+
+function withIdeTask(url: string, scope?: IdeTaskScope): string {
+  if (!scope?.taskId) return url;
+  const parsed = new URL(url, 'http://local');
+  parsed.searchParams.set('taskId', scope.taskId);
+  if (scope.owner) parsed.searchParams.set('owner', scope.owner);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+export interface IdeFileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  modifiedAt: number;
 }
 
 export class GatewayClient {

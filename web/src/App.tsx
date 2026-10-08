@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Spin } from 'antd';
-import { ApiError, AuthClient, type UserPublic } from './api';
+import { ApiError, AuthClient, OpsClient, type UserPublic } from './api';
 import {
   ALL_TABS,
   LS_KEY,
@@ -33,6 +33,8 @@ import { AccountsPage } from './pages/Accounts';
 import { LocalGatewayPage, RemoteGatewayPage } from './pages/Settings';
 import { ProcessesPage } from './pages/Processes';
 import { IdePage } from './pages/Ide';
+import { VibePage } from './pages/Vibe';
+import { matchTaskHost, taskLabelFromHostname } from './lib/task-host';
 
 type AuthState =
   | { status: 'loading' }
@@ -57,6 +59,9 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
   const [tab, setTab] = useState<TabId>(() => resolveStoredTab(localStorage.getItem(LS_TAB_KEY)));
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
+  const [ideSession, setIdeSession] = useState<ChatSession | null>(null);
+  const [hostTaskError, setHostTaskError] = useState('');
+  const hostTaskLabel = taskLabelFromHostname(window.location.hostname);
   const [pwdOpen, setPwdOpen] = useState(false);
   const { bump } = useRefreshTick();
 
@@ -119,9 +124,60 @@ export function App() {
   );
 
   const goTab = (t: TabId) => {
+    setIdeSession(null);
     setTab(t);
     localStorage.setItem(LS_TAB_KEY, t);
   };
+  const openTaskIde = (session: ChatSession) => {
+    setIdeSession(session);
+    setTab('ide');
+    localStorage.setItem(LS_TAB_KEY, 'ide');
+  };
+
+  useEffect(() => {
+    if (!hostTaskLabel) return;
+    if (auth.status === 'loading' || auth.status === 'login') return;
+    let cancelled = false;
+    const ops = new OpsClient(base, () => readToken());
+    void ops
+      .listAllTasks()
+      .then((users) => {
+        if (cancelled) return;
+        const found = users.flatMap((user) =>
+          user.tasks.map((task) => ({
+            ...task,
+            channel: user.channel,
+            userId: user.userId,
+            ownerUsername: user.ownerUsername,
+          })),
+        );
+        const task = matchTaskHost(found, hostTaskLabel);
+        if (!task) {
+          setHostTaskError(`没有任务 ${hostTaskLabel}`);
+          return;
+        }
+        setHostTaskError('');
+        openTaskIde({
+          channel: task.channel,
+          userId: task.userId,
+          ownerUsername: task.ownerUsername,
+          taskId: task.id,
+          taskName: task.name,
+          agentId: task.agentId,
+          nodeId: task.nodeId,
+          key: task.key,
+          keyEnabled: task.keyEnabled,
+          cwd: task.cwd,
+        });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setHostTaskError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.status, base, hostTaskLabel]);
 
   if (auth.status === 'loading') {
     return (
@@ -147,7 +203,8 @@ export function App() {
 
   const currentUser = auth.status === 'ready' ? auth.user : null;
   const token = readToken();
-  const effectiveTab = isTabAllowed(tab, auth) ? tab : 'overview';
+  const taskIde = tab === 'ide' && ideSession !== null;
+  const effectiveTab = isTabAllowed(tab, auth) || taskIde ? tab : 'overview';
 
   return (
     <>
@@ -162,6 +219,9 @@ export function App() {
         onLogout={logout}
         onChangePassword={() => setPwdOpen(true)}
       >
+        {hostTaskError ? (
+          <div style={{ marginBottom: 12, color: '#ff7875' }}>{hostTaskError}</div>
+        ) : null}
         <PageRouter
           tab={effectiveTab}
           base={base}
@@ -171,10 +231,12 @@ export function App() {
           onApplyBase={applyBase}
           onGoTab={goTab}
           chatSession={chatSession}
+          ideSession={ideSession}
           onOpenChat={(s) => {
             setChatSession(s);
             goTab('chat');
           }}
+          onOpenIde={openTaskIde}
           onClearChatSession={() => setChatSession(null)}
         />
       </DashboardLayout>
@@ -210,7 +272,9 @@ function PageRouter(props: {
   onApplyBase: (next: string) => void;
   onGoTab: (t: TabId) => void;
   chatSession: ChatSession | null;
+  ideSession: ChatSession | null;
   onOpenChat: (s: ChatSession) => void;
+  onOpenIde: (s: ChatSession) => void;
   onClearChatSession: () => void;
 }) {
   const { tab, base, token, onAuthError } = props;
@@ -232,7 +296,17 @@ function PageRouter(props: {
         />
       );
     case 'ide':
-      return <IdePage base={base} token={token} onAuthError={onAuthError} onGoTab={props.onGoTab} />;
+      if (!isAdmin && !props.ideSession) return null;
+      return (
+        <IdePage
+          key={props.ideSession?.taskId ?? 'global'}
+          base={base}
+          token={token}
+          onAuthError={onAuthError}
+          onGoTab={props.onGoTab}
+          session={props.ideSession}
+        />
+      );
     case 'local-agents':
       return <AgentsPage scope="local" base={base} token={token} onAuthError={onAuthError} />;
     case 'remote-agents':
@@ -246,7 +320,17 @@ function PageRouter(props: {
         />
       );
     case 'tasks':
-      return <TasksPage base={base} token={token} onAuthError={onAuthError} onOpenChat={props.onOpenChat} username={username} isAdmin={isAdmin} />;
+      return (
+        <TasksPage
+          base={base}
+          token={token}
+          onAuthError={onAuthError}
+          onOpenChat={props.onOpenChat}
+          onOpenIde={props.onOpenIde}
+          username={username}
+          isAdmin={isAdmin}
+        />
+      );
     case 'keys':
       return <KeysPage base={base} token={token} onAuthError={onAuthError} isAdmin={isAdmin} />;
     case 'my-token':
@@ -300,8 +384,6 @@ function PageRouter(props: {
       return isAdmin ? (
         <LocalGatewayPage token={token} onAuthError={onAuthError} onApplyBase={props.onApplyBase} />
       ) : null;
-    case 'ide':
-      return <IdePage base={base} token={token} onAuthError={onAuthError} onGoTab={props.onGoTab} />;
     case 'remote-gateway':
       return isAdmin ? (
         <RemoteGatewayPage
@@ -311,6 +393,8 @@ function PageRouter(props: {
           onApplyBase={props.onApplyBase}
         />
       ) : null;
+    case 'vibe':
+      return isAdmin ? <VibePage /> : null;
     default:
       return null;
   }

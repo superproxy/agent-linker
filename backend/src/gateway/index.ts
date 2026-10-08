@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
@@ -18,6 +20,10 @@ import {
 import type { SharedConfig } from '@linkagent/shared';
 import { normalizeWeixinMode } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
+import { isVibeIdePath, proxyVibeIdeUpgrade, registerVibeIdeProxy } from './vibe-ide-proxy.js';
+import { startGatewayEdge, type GatewayEdge } from './edge/runtime.js';
+import { registerRemoteModule } from '../remote/index.js';
+import { IdeWorkspaceError } from '../remote/ide-workspace.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, enrichAgentInfos, type AcpAgentKind } from './agents/acpWrapper.js';
 import { AgentInstallError, runAgentInstall } from './agents/installCli.js';
@@ -440,8 +446,14 @@ export async function buildServer(options?: {
     return newDispatchTraceId();
   };
 
-  // WebSocket 升级：节点连接器连 /api/nodes/ws（复用同一 8787 端口）
-  app.server.on('upgrade', (req, socket, head) => nodeManager.handleUpgrade(req, socket, head));
+  // WebSocket 升级：/vibe-ide 转到本机 code serve-web；其余仅 /api/nodes/ws
+  app.server.on('upgrade', (req, socket, head) => {
+    if (isVibeIdePath(req.url)) {
+      proxyVibeIdeUpgrade(req, socket, head);
+      return;
+    }
+    nodeManager.handleUpgrade(req, socket, head);
+  });
 
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
 
@@ -1053,6 +1065,33 @@ export async function buildServer(options?: {
     },
   );
 
+  await registerRemoteModule(app, {
+    baseDir: layout.state('ide-workspace'),
+    checkAuth: (request) => authGuard.checkAuth(request),
+    isAdmin: (request) => authGuard.isAdmin(request),
+    resolveTaskDir: (request) => {
+      const query = request.query as { taskId?: string; owner?: string };
+      const taskId = query.taskId?.trim();
+      if (!taskId) return undefined;
+      const session = authGuard.sessionUser(request);
+      const admin = authGuard.isAdmin(request);
+      const requested = query.owner?.trim();
+      const owner = admin ? requested || session?.username : session?.username;
+      if (!owner) throw new IdeWorkspaceError('未登录', 401, 'unauthorized');
+      if (!admin && requested && requested !== owner) {
+        throw new IdeWorkspaceError('不能打开其他用户的任务目录', 403, 'forbidden');
+      }
+      try {
+        return taskService.workspaceForTask(owner, taskId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '任务不存在';
+        throw new IdeWorkspaceError(message, 404, 'not_found');
+      }
+    },
+  });
+
+  registerVibeIdeProxy(app);
+
   // 管理后台静态资源最后挂载（prefix /），避免抢在 /v1、/api 等路由之前。
   if (webRoot) {
     app.get('/admin', async (_req, reply) => reply.redirect('/'));
@@ -1072,11 +1111,30 @@ export async function buildServer(options?: {
   return { app, manager, nodeManager, pluginManager, taskService, weixinBot, host: gw.server.host, port: gw.server.port, authEnabled };
 }
 
+/** node.yaml 里 code-server 的发布地址。没有该文件时用 127.0.0.1:8000。 */
+function readCodeServerUpstream(nodeYamlPath: string): string {
+  const fallback = 'http://127.0.0.1:8000';
+  if (!existsSync(nodeYamlPath)) return fallback;
+  try {
+    const doc = parseYaml(readFileSync(nodeYamlPath, 'utf8')) as { serveWeb?: { host?: string; port?: number } };
+    const hostRaw = doc.serveWeb?.host?.trim() || '127.0.0.1';
+    const host = hostRaw === '0.0.0.0' || hostRaw === '::' ? '127.0.0.1' : hostRaw;
+    const port = doc.serveWeb?.port ?? 8000;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return fallback;
+    return `http://${host}:${port}`;
+  } catch {
+    return fallback;
+  }
+}
+
 async function main(): Promise<void> {
-  const { app, manager, nodeManager, host, port, authEnabled } = await buildServer();
+  const { app, manager, nodeManager, taskService, host, port, authEnabled } = await buildServer();
+  const layout = getLayout();
+  let edge: GatewayEdge | null = null;
 
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'shutting down');
+    edge?.stop();
     await nodeManager.dispose().catch(() => {});
     await manager.dispose().catch(() => {});
     await app.close().catch(() => {});
@@ -1086,6 +1144,24 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   await app.listen({ host, port });
+  edge = await startGatewayEdge({
+    toolsDir: layout.state('tools'),
+    runtimeDir: layout.state('edge'),
+    idePrefix: '/',
+    ideUpstream: readCodeServerUpstream(join(layout.configDir, 'node.yaml')),
+    gatewayUpstream: `http://127.0.0.1:${port}`,
+  });
+  taskService.setHostChangeHandler((change) => {
+    void edge?.applyTaskHost(change).catch((err: unknown) => {
+      console.error(`[edge] 任务域名同步失败：${err instanceof Error ? err.message : String(err)}`);
+    });
+  });
+  const hosts = taskService.listAllTasks().flatMap((user) =>
+    user.tasks.map((task) => ({ id: task.id, name: task.name, enabled: task.keyEnabled !== false })),
+  );
+  void edge.syncTaskHosts(hosts).catch((err: unknown) => {
+    console.error(`[edge] 任务域名初始化失败：${err instanceof Error ? err.message : String(err)}`);
+  });
   app.log.info(
     { baseUrl: `http://${host}:${port}/v1`, authEnabled },
     'OpenAI 兼容网关就绪：Chatbox/Open WebUI 配置 base_url=http://${host}:${port}/v1',

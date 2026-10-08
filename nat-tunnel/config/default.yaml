@@ -1,0 +1,10 @@
+server:
+  host: 127.0.0.1
+  port: 9898
+frps:
+  serverAddr: 127.0.0.1
+  serverPort: 7000
+  # 留空时读取环境变量 NAT_TUNNEL_TOKEN，值与网关 .runtime-state/edge/frps.token 相同
+  token: ""
+frpcBin: frpc
+runtimeDir: .runtime-state/nat-tunnel

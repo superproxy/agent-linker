@@ -10,3 +10,11 @@ agents:
     permissionMode: approve-all
     # key: <Cursor API key>   # 启动：agent acp --key <key>（也可写 command: [agent, acp, --key, ...]）
   - hermes
+
+# node 只拉起 code-server，发布到 127.0.0.1:8000。nginx / frps 由网关安装。
+serveWeb:
+  enabled: true
+  image: codercom/code-server:latest
+  host: 127.0.0.1
+  port: 8000
+  basePath: /vibe-ide
