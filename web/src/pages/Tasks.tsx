@@ -8,7 +8,7 @@ import { confirmAsync, notify } from '../lib/notify';
 import { CopyableCode, EmptyHint } from '../components/common';
 import { agentDisplayLabel } from '../lib/agent-labels';
 import type { ChatSession } from './types';
-import { taskCodeServerOrigin, taskIdeOrigin } from '../lib/task-host';
+import { taskCodeServerOrigin, taskDevOrigin } from '../lib/task-host';
 
 interface EditState {
   channel: string;
@@ -470,7 +470,7 @@ export function TasksPage(props: {
           <Button size="small" icon={<CodeOutlined />} onClick={() => props.onOpenIde(session)}>
             IDE
           </Button>
-          <Button size="small" href={taskIdeOrigin(t.name, t.id)} target="_blank">
+          <Button size="small" href={taskDevOrigin(t.name, t.id)} target="_blank">
             web
           </Button>
           <Button size="small" href={taskCodeServerOrigin(t.name, t.id)} target="_blank">

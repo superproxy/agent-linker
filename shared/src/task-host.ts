@@ -1,4 +1,4 @@
-/** 任务域名：`{任务名称}-{任务号}-web.localhost` / `-ide.localhost`。 */
+/** 任务域名：`{任务名称}-{任务号}-web.localhost`、`-ide`、`-dev`、`-vnc`。 */
 
 const BASE = 36;
 const TMIN = 1;
@@ -88,7 +88,7 @@ export function taskHostStem(name: string, taskId: string): string {
   return slug ? `${slug}-${id}` : id;
 }
 
-export function taskPublicHost(name: string, taskId: string, kind: 'web' | 'ide'): string {
+export function taskPublicHost(name: string, taskId: string, kind: 'web' | 'ide' | 'dev' | 'vnc'): string {
   const stem = taskHostStem(name, taskId);
   if (!stem) return '';
   return `${stem}-${kind}.localhost`;

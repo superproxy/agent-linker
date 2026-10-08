@@ -8,6 +8,8 @@ export const FRPS_BIND_ADDR = '0.0.0.0';
 export const FRPS_BIND_PORT = 7000;
 export const FRPS_DASHBOARD_HOST = '127.0.0.1';
 export const FRPS_DASHBOARD_PORT = 7500;
+/** 工作区 dev 与 VNC 的 HTTP 反向代理入口。frpc 用域名登记到这个端口。 */
+export const FRPS_VHOST_HTTP_PORT = 7080;
 /** nat-tunnel 的远端端口必须落在这段，避免占用系统端口。 */
 export const FRPS_ALLOW_PORT_START = 10000;
 export const FRPS_ALLOW_PORT_END = 50000;

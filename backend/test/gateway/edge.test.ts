@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { FRP_VERSION, NGINX_VERSION, frpAsset, nginxAsset } from '../../src/gateway/edge/assets.js';
 import { renderFrpsConf, renderNginxConf } from '../../src/gateway/edge/render.js';
-import { taskCodeServerHost, taskRouteHost } from '../../src/gateway/edge/apisix.ts';
+import { taskCodeServerHost, taskDevHost, taskRouteHost, taskVncHost } from '../../src/gateway/edge/apisix.ts';
 import { startGatewayEdge, type EdgeChild } from '../../src/gateway/edge/runtime.js';
 import { renderFrpcConfig } from '../../../nat-tunnel/src/tunnel.js';
 
@@ -49,6 +49,7 @@ test('nginx 只监听回环，frps 控制口对外开放、面板在回环', () 
   const frps = renderFrpsConf({ token: 't', dashboardPassword: 'p' });
   assert.match(frps, /bindAddr = "0\.0\.0\.0"/);
   assert.match(frps, /bindPort = 7000/);
+  assert.match(frps, /vhostHTTPPort = 7080/);
   assert.match(frps, /webServer\.addr = "127\.0\.0\.1"/);
   assert.match(frps, /webServer\.port = 7500/);
 });
@@ -137,9 +138,16 @@ test('syncTaskHosts 用任务号-ide.localhost 登记 code-server，并去掉固
   assert.match(put('task-code-default')?.body ?? '', /host\.docker\.internal:8010/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"host":"test-t-41db7238-ide\.localhost"/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"status":0/);
+  assert.match(put('task-dev-default')?.body ?? '', new RegExp(`"host":"${escapeHost(taskDevHost('默认', 'default'))}"`));
+  assert.match(put('task-dev-default')?.body ?? '', /host\.docker\.internal:5173/);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', new RegExp(`"host":"${escapeHost(taskVncHost('test', 't_41db7238'))}"`));
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /host\.docker\.internal:6080/);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"status":0/);
   await edge.applyTaskHost({ taskId: 'default', enabled: false, removed: true });
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-default')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-code-default')), true);
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-dev-default')), true);
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-vnc-default')), true);
   edge.stop();
 });
 

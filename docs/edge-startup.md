@@ -30,7 +30,7 @@ Invoke-WebRequest -Uri "https://github.com/fatedier/frp/releases/download/v0.60.
 tar -xf .runtime-state\tools\frp\download.bin -C .runtime-state\tools\frp
 Invoke-WebRequest -Uri "https://nginx.org/download/nginx-1.26.3.zip" -OutFile .runtime-state\tools\nginx\download.bin
 tar -xf .runtime-state\tools\nginx\download.bin -C .runtime-state\tools\nginx
-docker pull codercom/code-server:latest
+docker build -t linkagent-code-server:local -f code-server/Dockerfile code-server
 ```
 
 解压后的程序：

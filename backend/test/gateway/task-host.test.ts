@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { domainToASCII, domainToUnicode } from 'node:url';
 import { decodeHostname } from '../../../shared/src/task-host.ts';
-import { matchTaskHost, taskCodeServerOrigin, taskIdeOrigin, taskLabelFromHostname, taskViewOrigins } from '../../../web/src/lib/task-host.ts';
+import { matchTaskHost, taskCodeServerOrigin, taskDevOrigin, taskIdeOrigin, taskLabelFromHostname, taskViewOrigins, taskVncOrigin } from '../../../web/src/lib/task-host.ts';
 
 test('taskLabelFromHostname 从任务名称-任务号里取出任务号', () => {
   assert.equal(taskLabelFromHostname('默认-default-web.localhost'), 'default');
@@ -33,10 +33,13 @@ test('taskIdeOrigin 使用任务名称和任务号做主机名', () => {
   assert.equal(taskCodeServerOrigin('test', 't_41db7238'), 'http://test-t-41db7238-ide.localhost:8088/');
 });
 
-test('taskViewOrigins 给出嵌套 IDE 与任务 Web', () => {
+test('taskViewOrigins 的 Web 和 VNC 使用任务域名', () => {
   assert.deepEqual(taskViewOrigins({ id: 'default', name: '默认' }), {
     ide: 'http://默认-default-ide.localhost:8088/',
-    web: 'http://默认-default-web.localhost:8088/',
+    web: taskDevOrigin('默认', 'default'),
+    vnc: taskVncOrigin('默认', 'default'),
   });
-  assert.deepEqual(taskViewOrigins({ id: '  ', name: '空' }), { ide: 'http://localhost:8088/', web: null });
+  assert.equal(taskDevOrigin('test', 't_41db7238'), 'http://test-t-41db7238-dev.localhost:8088/');
+  assert.equal(taskVncOrigin('test', 't_41db7238'), 'http://test-t-41db7238-vnc.localhost:8088/vnc.html?autoconnect=1&resize=scale&path=websockify');
+  assert.deepEqual(taskViewOrigins({ id: '  ', name: '空' }), { ide: 'http://localhost:8088/', web: '', vnc: '' });
 });

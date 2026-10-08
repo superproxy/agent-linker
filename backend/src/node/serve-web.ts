@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { stringify } from 'yaml';
@@ -12,6 +12,8 @@ export interface ServeWebLaunch {
   workspaceDir: string;
   /** compose 落盘目录 */
   runtimeDir: string;
+  /** 网关 frps 令牌文件。存在时把 dev 与 VNC 反向代理登记到 frps。 */
+  frpsTokenFile?: string;
 }
 
 export interface ServeWebChild {
@@ -35,6 +37,37 @@ export const IDE_CONTAINER_WORKSPACE = '/root/workspace';
  * code-server 会判定来源不一致并拒绝工作台 WebSocket。
  */
 const IDE_TRUSTED_ORIGIN = '*.localhost:8088';
+/** 与 frps vhostHTTPPort 一致。容器内 frpc 把下面两个端口登记成 HTTP 域名。 */
+export const FRPS_VHOST_HTTP_PORT = 7080;
+export const WORKSPACE_DEV_PORT = 5173;
+export const WORKSPACE_VNC_PORT = 6080;
+export const WORKSPACE_DEV_HOST = 'dev.localhost';
+export const WORKSPACE_VNC_HOST = 'vnc.localhost';
+const NODE_MODULES_VOLUME = 'linkagent-code-node-modules';
+
+export function renderWorkspaceFrpc(token: string): string {
+  const secret = token.trim();
+  if (!secret || /["\r\n]/.test(secret)) throw new Error('frps token 无效');
+  return `serverAddr = "host.docker.internal"
+serverPort = 7000
+auth.method = "token"
+auth.token = "${secret}"
+
+[[proxies]]
+name = "workspace-dev"
+type = "http"
+localIP = "127.0.0.1"
+localPort = ${WORKSPACE_DEV_PORT}
+customDomains = ["${WORKSPACE_DEV_HOST}"]
+
+[[proxies]]
+name = "workspace-vnc"
+type = "http"
+localIP = "127.0.0.1"
+localPort = ${WORKSPACE_VNC_PORT}
+customDomains = ["${WORKSPACE_VNC_HOST}"]
+`;
+}
 
 function dockerVolumeHost(workspaceDir: string): string {
   return workspaceDir.replace(/\\/g, '/');
@@ -46,8 +79,13 @@ export function serveWebBasePath(basePath: string): string {
 }
 
 /** node 只发布 code-server。nginx 由网关安装，反代这个回环端口。 */
-export function renderIdeCompose(opts: ServeWebConfig, workspaceDir: string): string {
+export function renderIdeCompose(opts: ServeWebConfig, workspaceDir: string, frpcFile?: string): string {
   const prefix = serveWebBasePath(opts.basePath);
+  const volumes = [
+    `${dockerVolumeHost(workspaceDir)}:${IDE_CONTAINER_WORKSPACE}`,
+    `${NODE_MODULES_VOLUME}:${IDE_CONTAINER_WORKSPACE}/node_modules`,
+  ];
+  if (frpcFile) volumes.push(`${dockerVolumeHost(frpcFile)}:/etc/linkagent/frpc.toml:ro`);
   const doc = {
     services: {
       'code-serve-web': {
@@ -55,6 +93,9 @@ export function renderIdeCompose(opts: ServeWebConfig, workspaceDir: string): st
         container_name: CODE_CONTAINER,
         restart: 'unless-stopped',
         user: '0:0',
+        shm_size: '1gb',
+        extra_hosts: ['host.docker.internal:host-gateway'],
+        entrypoint: ['/usr/local/bin/linkagent-entrypoint.sh'],
         command: [
           '--auth', 'none',
           '--bind-addr', '0.0.0.0:8080',
@@ -62,9 +103,16 @@ export function renderIdeCompose(opts: ServeWebConfig, workspaceDir: string): st
           '--trusted-origins', IDE_TRUSTED_ORIGIN,
           IDE_CONTAINER_WORKSPACE,
         ],
-        ports: [`${opts.host}:${opts.port}:8080`],
-        volumes: [`${dockerVolumeHost(workspaceDir)}:${IDE_CONTAINER_WORKSPACE}`],
+        ports: [
+          `${opts.host}:${opts.port}:8080`,
+          `127.0.0.1:${WORKSPACE_DEV_PORT}:${WORKSPACE_DEV_PORT}`,
+          `127.0.0.1:${WORKSPACE_VNC_PORT}:${WORKSPACE_VNC_PORT}`,
+        ],
+        volumes,
       },
+    },
+    volumes: {
+      [NODE_MODULES_VOLUME]: {},
     },
   };
   return stringify(doc);
@@ -80,7 +128,13 @@ export function startNodeServeWeb(launch: ServeWebLaunch, spawnFn: ServeWebSpawn
   if (!serveWeb.enabled) return { stop() {} };
   mkdirSync(launch.runtimeDir, { recursive: true });
   const composeFile = join(launch.runtimeDir, 'compose.yml');
-  writeFileSync(composeFile, renderIdeCompose(serveWeb, launch.workspaceDir), 'utf8');
+  const frpcFile = join(launch.runtimeDir, 'frpc.toml');
+  const token = launch.frpsTokenFile && existsSync(launch.frpsTokenFile)
+    ? readFileSync(launch.frpsTokenFile, 'utf8')
+    : '';
+  const frpcMounted = token.trim().length > 0;
+  if (frpcMounted) writeFileSync(frpcFile, renderWorkspaceFrpc(token), { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(composeFile, renderIdeCompose(serveWeb, launch.workspaceDir, frpcMounted ? frpcFile : undefined), 'utf8');
 
   const run = (action: 'up' | 'down') => {
     try {

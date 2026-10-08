@@ -5,6 +5,7 @@ import {
   FRPS_BIND_PORT,
   FRPS_DASHBOARD_HOST,
   FRPS_DASHBOARD_PORT,
+  FRPS_VHOST_HTTP_PORT,
   NGINX_LISTEN_HOST,
   NGINX_LISTEN_PORT,
 } from './assets.js';
@@ -74,6 +75,7 @@ export interface FrpsRenderOptions {
 export function renderFrpsConf(opts: FrpsRenderOptions): string {
   return `bindAddr = "${FRPS_BIND_ADDR}"
 bindPort = ${FRPS_BIND_PORT}
+vhostHTTPPort = ${FRPS_VHOST_HTTP_PORT}
 auth.method = "token"
 auth.token = "${opts.token}"
 

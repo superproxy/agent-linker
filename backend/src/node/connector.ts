@@ -432,6 +432,7 @@ function main(): void {
     serveWeb: config.node.serveWeb,
     workspaceDir: config.node.serveWeb.workspace || layout.root,
     runtimeDir: layout.state('ide-proxy'),
+    frpsTokenFile: layout.state('edge', 'frps.token'),
   });
 
   const shutdown = () => {

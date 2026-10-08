@@ -13,8 +13,12 @@ import {
   renderApisixConfig,
   taskCodeRouteId,
   taskCodeServerHost,
+  taskDevHost,
+  taskDevRouteId,
   taskRouteHost,
   taskRouteId,
+  taskVncHost,
+  taskVncRouteId,
 } from './apisix.js';
 import { renderFrpsConf } from './render.js';
 
@@ -37,6 +41,10 @@ export interface GatewayEdgeOptions {
   ideUpstream: string;
   /** {taskId}-web.localhost 转到网关 */
   gatewayUpstream: string;
+  /** 任务 -dev.localhost 转到容器内 npm run dev，默认 5173 */
+  devUpstream?: string;
+  /** 任务 -vnc.localhost 转到容器内 noVNC，默认 6080 */
+  vncUpstream?: string;
   /** 单测注入，避免访问本机 APISIX */
   adminFetch?: typeof fetch;
   platform?: NodeJS.Platform;
@@ -194,9 +202,13 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     const admin = new ApisixAdmin(adminUrl, adminKey, adminFetch);
     edgeApi = {
       async applyTaskHost(change) {
+        const devUpstream = opts.devUpstream ?? 'http://127.0.0.1:5173';
+        const vncUpstream = opts.vncUpstream ?? 'http://127.0.0.1:6080';
         if (change.removed) {
           await admin.remove(taskRouteId(change.taskId));
           await admin.remove(taskCodeRouteId(change.taskId));
+          await admin.remove(taskDevRouteId(change.taskId));
+          await admin.remove(taskVncRouteId(change.taskId));
           return;
         }
         await admin.upsert({
@@ -209,6 +221,18 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
           id: taskCodeRouteId(change.taskId),
           host: taskCodeServerHost(change.name, change.taskId),
           upstream: opts.ideUpstream,
+          enabled: change.enabled,
+        });
+        await admin.upsert({
+          id: taskDevRouteId(change.taskId),
+          host: taskDevHost(change.name, change.taskId),
+          upstream: devUpstream,
+          enabled: change.enabled,
+        });
+        await admin.upsert({
+          id: taskVncRouteId(change.taskId),
+          host: taskVncHost(change.name, change.taskId),
+          upstream: vncUpstream,
           enabled: change.enabled,
         });
       },

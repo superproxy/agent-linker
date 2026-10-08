@@ -21,7 +21,7 @@ export function taskRouteId(taskId: string): string {
   return `task-${safe}`;
 }
 
-function taskHostForProxy(name: string, taskId: string, kind: 'web' | 'ide'): string {
+function taskHostForProxy(name: string, taskId: string, kind: 'web' | 'ide' | 'dev' | 'vnc'): string {
   const host = taskPublicHost(name, taskId, kind);
   if (!host) return '';
   if (!/[^\u0000-\u007f]/.test(host)) return host;
@@ -41,6 +41,24 @@ export function taskCodeRouteId(taskId: string): string {
 /** code-server，例如 test-t_41db7238-ide.localhost。 */
 export function taskCodeServerHost(name: string, taskId: string): string {
   return taskHostForProxy(name, taskId, 'ide');
+}
+
+export function taskDevRouteId(taskId: string): string {
+  return `task-dev-${taskRouteId(taskId).slice('task-'.length)}`;
+}
+
+/** npm run dev，例如 test-t_41db7238-dev.localhost。 */
+export function taskDevHost(name: string, taskId: string): string {
+  return taskHostForProxy(name, taskId, 'dev');
+}
+
+export function taskVncRouteId(taskId: string): string {
+  return `task-vnc-${taskRouteId(taskId).slice('task-'.length)}`;
+}
+
+/** noVNC，例如 test-t_41db7238-vnc.localhost。 */
+export function taskVncHost(name: string, taskId: string): string {
+  return taskHostForProxy(name, taskId, 'vnc');
 }
 
 /** 容器访问宿主机服务时，127.0.0.1 指的是容器自己。 */

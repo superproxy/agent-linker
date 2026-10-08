@@ -152,6 +152,9 @@ export type NodeAgentConfigEntry = z.infer<typeof nodeAgentEntrySchema>;
 export const nodeAgentListItemSchema = z.union([z.string().min(1), nodeAgentEntrySchema]);
 export type NodeAgentListItem = z.infer<typeof nodeAgentListItemSchema>;
 
+/** LinkAgent 自己的 code-server 镜像，由 code-server/Dockerfile 构建。 */
+export const LINKAGENT_CODE_SERVER_IMAGE = 'linkagent-code-server:local';
+
 /** node（executor）执行器进程段：本机/远程节点连接器 */
 export const nodeSectionSchema = z
   .object({
@@ -176,8 +179,8 @@ export const nodeSectionSchema = z
     serveWeb: z
       .object({
         enabled: z.boolean().default(false),
-        /** 浏览器 IDE 镜像。coder 的 code-server，可按需换成自有镜像 */
-        image: z.string().min(1).default('codercom/code-server:latest'),
+        /** 浏览器 IDE 镜像。缺省是本仓库构建的 code-server */
+        image: z.string().min(1).default(LINKAGENT_CODE_SERVER_IMAGE),
         /** 发布到宿主机的地址，供网关本机 nginx 反代 */
         host: z.string().default('127.0.0.1'),
         port: z.number().int().positive().default(8000),
@@ -188,7 +191,7 @@ export const nodeSectionSchema = z
       })
       .default({
         enabled: false,
-        image: 'codercom/code-server:latest',
+        image: LINKAGENT_CODE_SERVER_IMAGE,
         host: '127.0.0.1',
         port: 8000,
         basePath: '/vibe-ide',
@@ -203,7 +206,7 @@ export const nodeSectionSchema = z
     gatewayToken: '',
     serveWeb: {
       enabled: false,
-      image: 'codercom/code-server:latest',
+      image: LINKAGENT_CODE_SERVER_IMAGE,
       host: '127.0.0.1',
       port: 8000,
       basePath: '/vibe-ide',

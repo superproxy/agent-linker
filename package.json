@@ -19,6 +19,7 @@
     "bot:wecom": "pnpm --filter @linkagent/backend bot:wecom",
     "web": "pnpm --filter @linkagent/web dev",
     "build:web": "pnpm --filter @linkagent/web build",
+    "image:code-server": "docker build -t linkagent-code-server:local -f code-server/Dockerfile code-server",
     "build:dist": "node scripts/build-dist.mjs",
     "build:dist:node": "node scripts/build-dist.mjs --target=node",
     "server": "bash scripts/server.sh start",

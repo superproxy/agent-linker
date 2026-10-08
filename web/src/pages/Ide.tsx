@@ -221,7 +221,6 @@ export function IdePage({ base, token, onAuthError, session = null }: IdePagePro
 
   const crumbs = dir ? dir.split('/') : [];
   const views = taskViewOrigins(session ? { id: session.taskId, name: session.taskName } : null);
-  const nested = window.self !== window.top;
 
   return (
     <div className="ide-page">
@@ -255,15 +254,26 @@ export function IdePage({ base, token, onAuthError, session = null }: IdePagePro
           {
             key: 'web-view',
             label: 'Web',
-            children: views.web && !nested ? (
+            children: views.web ? (
               <div className="ide-frame-wrap">
-                <iframe className="ide-frame" title={`任务 Web ${views.web}`} src={views.web} />
+                <iframe className="ide-frame" title={`任务开发页 ${views.web}`} src={views.web} />
               </div>
             ) : (
               <Card size="small" title="Web">
-                <Text type="secondary">
-                  {nested ? '当前页面已嵌套在任务 Web 中。' : '从任务进入在线 IDE 后，这里嵌套该任务的 Web。'}
-                </Text>
+                <Text type="secondary">从任务进入在线 IDE 后，这里展示该任务的 npm run dev。</Text>
+              </Card>
+            ),
+          },
+          {
+            key: 'vnc-view',
+            label: 'VNC',
+            children: views.vnc ? (
+              <div className="ide-frame-wrap">
+                <iframe className="ide-frame" title={`任务 VNC ${views.vnc}`} src={views.vnc} />
+              </div>
+            ) : (
+              <Card size="small" title="VNC">
+                <Text type="secondary">从任务进入在线 IDE 后，这里展示该任务的 VNC。</Text>
               </Card>
             ),
           },
