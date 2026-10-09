@@ -18,10 +18,11 @@ import {
   deriveGatewayBase,
 } from './config.js';
 import type { SharedConfig } from '@linkagent/shared';
-import { normalizeWeixinMode } from '@linkagent/shared';
+import { normalizeWeixinMode, resolveEdgePublic, taskIdFromPublicPath } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import { isVibeIdePath, proxyVibeIdeUpgrade, registerVibeIdeProxy } from './vibe-ide-proxy.js';
 import { startGatewayEdge, type GatewayEdge } from './edge/runtime.js';
+import { registerFrpPluginRoute } from './edge/frp-auth.js';
 import { registerRemoteModule } from '../remote/index.js';
 import { IdeWorkspaceError } from '../remote/ide-workspace.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
@@ -145,6 +146,7 @@ export async function buildServer(options?: {
   host: string;
   port: number;
   authEnabled: boolean;
+  edgePublic: { publicHost: string; publicPort: number };
 }> {
   const layout = options?.stateRoot ? createInstallLayout(options.stateRoot) : getLayout();
   const runtimeGatewayDir = layout.state('gateway');
@@ -458,7 +460,13 @@ export async function buildServer(options?: {
     nodeManager.handleUpgrade(req, socket, head);
   });
 
+  const edgePublic = resolveEdgePublic(gw.edge);
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
+  app.get('/api/edge', async () => edgePublic);
+  registerFrpPluginRoute(app, {
+    nodeTokenStore,
+    frpsTokenFile: layout.state('edge', 'frps.token'),
+  });
 
   app.get('/v1/models', async (request: FastifyRequest, reply: FastifyReply) => {
     if (!checkAuth(request)) {
@@ -1132,10 +1140,32 @@ export async function buildServer(options?: {
       return reply.redirect(`/${wildcard}`);
     });
     await app.register(fastifyStatic, { root: webRoot, prefix: '/' });
+    app.setNotFoundHandler((request, reply) => {
+      const path = request.url.split('?')[0] ?? '';
+      if ((request.method === 'GET' || request.method === 'HEAD') && taskIdFromPublicPath(path)) {
+        return reply.type('text/html').send(readFileSync(join(webRoot, 'index.html')));
+      }
+      return reply.code(404).send({
+        message: `Route ${request.method}:${request.url} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
+    });
     app.log.info({ webRoot }, 'web 管理端已挂载到 /');
   }
 
-  return { app, manager, nodeManager, pluginManager, taskService, weixinBot, host: gw.server.host, port: gw.server.port, authEnabled };
+  return {
+    app,
+    manager,
+    nodeManager,
+    pluginManager,
+    taskService,
+    weixinBot,
+    host: gw.server.host,
+    port: gw.server.port,
+    authEnabled,
+    edgePublic,
+  };
 }
 
 /** node.yaml 里 code-server 的发布地址。没有该文件时用 127.0.0.1:8000。 */
@@ -1155,7 +1185,7 @@ function readCodeServerUpstream(nodeYamlPath: string): string {
 }
 
 async function main(): Promise<void> {
-  const { app, manager, nodeManager, taskService, host, port, authEnabled } = await buildServer();
+  const { app, manager, nodeManager, taskService, host, port, authEnabled, edgePublic } = await buildServer();
   const layout = getLayout();
   let edge: GatewayEdge | null = null;
 
@@ -1177,6 +1207,8 @@ async function main(): Promise<void> {
     idePrefix: '/',
     ideUpstream: readCodeServerUpstream(join(layout.configDir, 'node.yaml')),
     gatewayUpstream: `http://127.0.0.1:${port}`,
+    frpPluginAddr: `${host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host}:${port}`,
+    publicHost: edgePublic.publicHost,
   });
   taskService.setHostChangeHandler((change) => {
     void edge?.applyTaskHost(change).catch((err: unknown) => {

@@ -45,6 +45,7 @@ import { TASK_KEY_PREFIX } from '../gateway/tasks/types.js';
  *   LINKAGENT_NODE_STATE_DIR 节点状态目录（默认 .runtime-state/node；本机多实例时各自指定可避免 nodeId 冲突）
  *   LINKAGENT_NODE_CLAIM     匿名申请时的 nu_ 归属申明码（hello.claimToken，非 Upgrade Bearer）
  *   LINKAGENT_NODE_VERBOSE   设为 1 时输出 turn 文本预览，并开启 acpx verbose
+ *   LINKAGENT_NODE_SERVE_WEB 设为 0 时不 compose code-server（Docker 聚合镜像由入口脚本拉起 IDE）
  *
  * 两种准入方式：
  *   1) 令牌直连：node.yaml 的 gatewayToken 与网关 auth.token 或 nt_ 机器凭证一致，连上即上线；

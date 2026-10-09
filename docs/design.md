@@ -308,7 +308,7 @@ flowchart TD
 ### 6.2 任务与偏好
 
 - 任务绑定 `(nodeId, agentId)`，**绑定校验**只在「节点在线且已自报该 agent」时通过；
-- 任务工作目录 `cwd` 落在执行节点（远程任务的文件操作发生在节点机）；
+- 任务工作目录 `cwd` 落在执行节点（远程任务的文件操作发生在节点机），层级见 §6.2.2；
 - 用户默认偏好（PrefsStore）仅用于控制台新建任务时**预填**节点/agent，不参与任何鉴权。
 
 #### 6.2.1 用户初始化的默认任务建档触发点
@@ -332,6 +332,59 @@ flowchart TD
 - `pat_` / admin 创建账号（`UserStore.createUser` / `PersonalTokenStore.ensure`）：没有 `channel/userId` 概念，与任务机制解耦；管理员用控制台/CLI 建账号后，用户首次通过 ct_ / 三元素接入才会建档。
 - `TaskService.deleteUser`（§6.4 关联）：一次性清空用户全部任务与状态；清空后下一次消息按 `load()` 重新建档，与上述触发点一致。
 - `TaskService.setDefaultAgentId`（管理后台改默认 agent）：仅影响**新建用户** / **重建 default** 时的初始 agentId；存量 default 是各自快照，不被批量改写。
+
+### 6.2.2 工作目录挂载层级
+
+每台执行机上的任务目录都是三层，不再使用网关磁盘上的绝对路径：
+
+```text
+<workspace>/<user>/<taskId>
+```
+
+`<workspace>` 是这台机器自己的任务根。`<user>` 是登录用户名。`<taskId>` 是该用户的一个任务。原生进程和 Docker 使用同一形状。
+
+挂载停在不同层，启动之后不能再追加卷：
+
+| 谁 | 挂载到 | 何时 | 看得见 |
+|---|---|---|---|
+| node | `<workspace>/<user>/` | node 启动时，只挂这一层 | 该用户名下的各个任务目录 |
+| ACP | `<workspace>/<user>/<taskId>/` | 该任务第一次需要执行时，由 node 拉起 | 只有这一个任务目录 |
+
+node 不挂整个 `<workspace>`，因此看不到其他用户。ACP 不挂 `<user>` 这一层，因此看不到同一用户的其他任务。任务目录在用户目录里面创建，不单独做一次 Docker 挂载。
+
+顺序：
+
+1. 网关只记录任务落在哪台机器，以及相对路径 `<user>/<taskId>`。
+2. 该用户的 node 启动时，挂载 `<workspace>/<user>/`。容器或进程已经在跑，之后不为新任务改挂载。
+3. 初始化这个任务时，node 在已挂载的用户目录下创建 `<taskId>/`，再把 ACP 的工作目录设为这一层。
+
+ACP 仍由 node 初始化和管理。入口脚本和网关都不进入 ACP。
+
+### 6.2.3 浏览器入口
+
+浏览器只走 `gateway.yaml` 里 `edge.publicHost` 这一个正式域名，缺省 `ide.localhost`，端口是 `edge.publicPort`（缺省 `8088`）。任务用路径区分。
+
+```text
+http://ide.localhost:8088/<taskId>-<type>
+```
+
+`<taskId>` 是任务号。`<type>` 只有三种：
+
+| type | 路径 | 打开什么 |
+|---|---|---|
+| `web` | `/<taskId>-web` | 该任务的 Web |
+| `code` | `/<taskId>-code` | code-server |
+| `vnc` | `/<taskId>-vnc` | noVNC |
+
+例如任务 `t_41db7238`：
+
+```text
+http://ide.localhost:8088/t_41db7238-web
+http://ide.localhost:8088/t_41db7238-code
+http://ide.localhost:8088/t_41db7238-vnc
+```
+
+APISIX 的路由按这个主机和路径登记：`host = ide.localhost`，`uri` 分别匹配 `/<taskId>-web`、`/<taskId>-code`、`/<taskId>-vnc`。
 
 ### 6.3 任务级 skill 注入（linkagent-tasks）
 

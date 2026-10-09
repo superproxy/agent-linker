@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { nodeSectionSchema, LINKAGENT_CODE_SERVER_IMAGE } from '@linkagent/shared';
-import { renderIdeCompose, renderWorkspaceFrpc, serveWebDockerArgs, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
+import { nodeServeWebSuppressed, renderIdeCompose, renderWorkspaceFrpc, serveWebDockerArgs, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
+import { renderEmbeddedHttpFrpc } from '../../../code-server/render-frpc.mjs';
 
 const enabled = {
   enabled: true,
@@ -90,6 +91,58 @@ test('startNodeServeWeb：有 frps 令牌时挂上 frpc 配置', () => {
   assert.match(compose, /frpc\.toml:\/etc\/linkagent\/frpc\.toml:ro/);
   assert.match(frpc, /name = "workspace-dev"/);
   assert.match(frpc, /name = "workspace-vnc"/);
+});
+
+test('nodeServeWebSuppressed：仅 0 / false / off 关闭', () => {
+  assert.equal(nodeServeWebSuppressed(undefined), false);
+  assert.equal(nodeServeWebSuppressed(''), false);
+  assert.equal(nodeServeWebSuppressed('1'), false);
+  assert.equal(nodeServeWebSuppressed('0'), true);
+  assert.equal(nodeServeWebSuppressed('false'), true);
+  assert.equal(nodeServeWebSuppressed('OFF'), true);
+});
+
+test('startNodeServeWeb：LINKAGENT_NODE_SERVE_WEB=0 时不 compose', () => {
+  const previous = process.env.LINKAGENT_NODE_SERVE_WEB;
+  process.env.LINKAGENT_NODE_SERVE_WEB = '0';
+  let called = false;
+  try {
+    startNodeServeWeb(
+      { serveWeb: enabled, workspaceDir: 'D:/work/repo', runtimeDir: 'unused' },
+      () => {
+        called = true;
+        throw new Error('不应调用');
+      },
+    );
+  } finally {
+    if (previous === undefined) delete process.env.LINKAGENT_NODE_SERVE_WEB;
+    else process.env.LINKAGENT_NODE_SERVE_WEB = previous;
+  }
+  assert.equal(called, false);
+});
+
+test('renderEmbeddedHttpFrpc：code-server、dev 与 VNC 三条 HTTP', () => {
+  const text = renderEmbeddedHttpFrpc({
+    token: 'abc',
+    serverAddr: 'frps.example',
+    serverPort: 7000,
+    ideDomain: 'box-ide.localhost',
+    devDomain: 'box-dev.localhost',
+    vncDomain: 'box-vnc.localhost',
+  });
+  assert.match(text, /serverAddr = "frps\.example"/);
+  assert.match(text, /localPort = 8080/);
+  assert.match(text, /localPort = 5173/);
+  assert.match(text, /customDomains = \["box-ide\.localhost"\]/);
+  assert.match(text, /customDomains = \["box-dev\.localhost"\]/);
+  const withPort = renderEmbeddedHttpFrpc({ token: 'abc', ideDomain: 'ide.localhost:7080', devDomain: 'dev.localhost:7080', vncDomain: 'vnc.localhost:7080' });
+  assert.match(withPort, /customDomains = \["ide\.localhost"\]/);
+  assert.match(withPort, /customDomains = \["dev\.localhost"\]/);
+  assert.match(withPort, /customDomains = \["vnc\.localhost"\]/);
+  assert.doesNotMatch(withPort, /:7080/);
+  assert.match(text, /localPort = 6080/);
+  assert.match(text, /customDomains = \["box-vnc\.localhost"\]/);
+  assert.throws(() => renderEmbeddedHttpFrpc({ token: '' }), /无效/);
 });
 
 test('startNodeServeWeb：未启用时不调用 docker', () => {

@@ -21,12 +21,14 @@ test('任务路由按任务号生成主机名，回环改写到宿主机', () =>
   assert.equal(apisixUpstreamNode('http://127.0.0.1:8787'), 'host.docker.internal:8787');
   const route = renderApisixRoute({
     id: 'task-default',
-    host: 'default-web.localhost',
+    host: 'ide.localhost',
+    uri: '/default-web*',
     upstream: 'http://127.0.0.1:8787',
     enabled: false,
   });
   assert.equal(route.status, 0);
-  assert.equal(route.host, 'default-web.localhost');
+  assert.equal(route.host, 'ide.localhost');
+  assert.equal(route.uri, '/default-web*');
   assert.equal(route.enable_websocket, true);
   const upstream = route.upstream as { nodes: Record<string, number>; pass_host: string };
   assert.equal(upstream.pass_host, 'pass');

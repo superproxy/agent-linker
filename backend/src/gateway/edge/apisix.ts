@@ -1,5 +1,5 @@
 import { domainToASCII } from 'node:url';
-import { taskPublicHost } from '@linkagent/shared';
+import { TASK_PUBLIC_HOST, taskPublicHost, taskPublicPath, type TaskRouteType } from '@linkagent/shared';
 import { NGINX_LISTEN_HOST, NGINX_LISTEN_PORT } from './assets.js';
 
 /** 带管理 API 的 APISIX。任务域名用 Admin API 创建和开关，不重载配置。 */
@@ -11,9 +11,21 @@ export const APISIX_PROJECT = 'linkagent-edge';
 export interface ApisixRouteSpec {
   id: string;
   host: string;
+  /** 缺省匹配全部路径。任务路由写成 `/<taskId>-web*` 这种前缀。 */
+  uri?: string;
   /** 形如 http://127.0.0.1:8787，容器内回环会改写成 host.docker.internal */
   upstream: string;
   enabled: boolean;
+  /** [正则, 替换]。code / vnc 去掉任务前缀后再交给上游。 */
+  rewrite?: [string, string];
+}
+
+export { TASK_PUBLIC_HOST };
+
+/** APISIX 前缀匹配，例如 `/t_41db7238-code*`。 */
+export function taskRouteUri(taskId: string, type: TaskRouteType): string {
+  const path = taskPublicPath(taskId, type);
+  return path ? `${path}*` : '/*';
 }
 
 export function taskRouteId(taskId: string): string {
@@ -74,10 +86,11 @@ export function apisixUpstreamNode(upstream: string): string {
 export function renderApisixRoute(spec: ApisixRouteSpec): Record<string, unknown> {
   return {
     name: spec.id,
-    uri: '/*',
+    uri: spec.uri ?? '/*',
     host: spec.host,
     enable_websocket: true,
     status: spec.enabled ? 1 : 0,
+    ...(spec.rewrite ? { plugins: { 'proxy-rewrite': { regex_uri: spec.rewrite } } } : {}),
     upstream: {
       type: 'roundrobin',
       scheme: 'http',

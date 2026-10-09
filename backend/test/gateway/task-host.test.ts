@@ -27,19 +27,22 @@ test('matchTaskHost 同时接受下划线和连字符', () => {
   assert.equal(matchTaskHost(tasks, 'missing'), undefined);
 });
 
-test('taskIdeOrigin 使用任务名称和任务号做主机名', () => {
-  assert.equal(taskIdeOrigin('默认', 'default'), 'http://默认-default-web.localhost:8088/');
-  assert.equal(taskIdeOrigin('test', 't_41db7238'), 'http://test-t-41db7238-web.localhost:8088/');
-  assert.equal(taskCodeServerOrigin('test', 't_41db7238'), 'http://test-t-41db7238-ide.localhost:8088/');
+test('taskIdeOrigin 使用正式域名和 taskId-type 路径', () => {
+  assert.equal(taskIdeOrigin('默认', 'default'), 'http://ide.localhost:8088/default-web');
+  assert.equal(taskIdeOrigin('test', 't_41db7238'), 'http://ide.localhost:8088/t_41db7238-web');
+  assert.equal(taskCodeServerOrigin('test', 't_41db7238'), 'http://ide.localhost:8088/t_41db7238-code');
 });
 
-test('taskViewOrigins 的 Web 和 VNC 使用任务域名', () => {
+test('taskViewOrigins 的 Web 和 VNC 走正式域名路径', () => {
   assert.deepEqual(taskViewOrigins({ id: 'default', name: '默认' }), {
-    ide: 'http://默认-default-ide.localhost:8088/',
+    ide: 'http://ide.localhost:8088/default-code',
     web: taskDevOrigin('默认', 'default'),
     vnc: taskVncOrigin('默认', 'default'),
   });
-  assert.equal(taskDevOrigin('test', 't_41db7238'), 'http://test-t-41db7238-dev.localhost:8088/');
-  assert.equal(taskVncOrigin('test', 't_41db7238'), 'http://test-t-41db7238-vnc.localhost:8088/vnc.html?autoconnect=1&resize=scale&path=websockify');
-  assert.deepEqual(taskViewOrigins({ id: '  ', name: '空' }), { ide: 'http://localhost:8088/', web: '', vnc: '' });
+  assert.equal(taskDevOrigin('test', 't_41db7238'), 'http://ide.localhost:8088/t_41db7238-web');
+  assert.equal(
+    taskVncOrigin('test', 't_41db7238'),
+    'http://ide.localhost:8088/t_41db7238-vnc/vnc.html?autoconnect=1&resize=scale&path=t_41db7238-vnc%2Fwebsockify',
+  );
+  assert.deepEqual(taskViewOrigins({ id: '  ', name: '空' }), { ide: 'http://ide.localhost:8088/', web: '', vnc: '' });
 });

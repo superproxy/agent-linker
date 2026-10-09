@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'yaml';
-import { migrateConfig, defaultSharedConfig, defaultAgentDefinitions } from '@linkagent/shared';
+import { migrateConfig, defaultSharedConfig, defaultAgentDefinitions, resolveEdgePublic } from '@linkagent/shared';
 import {
   loadSharedConfig,
   resolveGatewayAuth,
@@ -156,6 +156,16 @@ test('loadSharedConfig：gateway.yaml 扁平段加载', () => {
   assert.equal(loaded.mode, 'split');
   assert.equal(loaded.config.gateway.server.port, 8642);
   assert.equal(loaded.config.gateway.auth.mode, 'open');
+  assert.equal(loaded.config.gateway.edge.publicHost, 'ide.localhost');
+  assert.equal(loaded.config.gateway.edge.publicPort, 8088);
+});
+
+test('loadSharedConfig：edge.publicHost 带端口时拆成正式域名', () => {
+  const dir = tmpRoot();
+  const file = writeConfig(dir, 'edge:\n  publicHost: gw.example:443\n');
+  const edge = resolveEdgePublic(loadSharedConfig(file).config.gateway.edge);
+  assert.equal(edge.publicHost, 'gw.example');
+  assert.equal(edge.publicPort, 443);
 });
 
 // ── gateway token：配置优先 / 自动生成落盘 / 0600 / 三进程共享 ───────────────

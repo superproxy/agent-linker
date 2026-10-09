@@ -1,4 +1,28 @@
-/** 任务域名：`{任务名称}-{任务号}-web.localhost`、`-ide`、`-dev`、`-vnc`。 */
+/** 浏览器入口缺省主机。实际值由 gateway.yaml 的 edge.publicHost 加载。 */
+export const TASK_PUBLIC_HOST = 'ide.localhost';
+export const TASK_PUBLIC_PORT = 8088;
+
+export interface EdgePublicConfig {
+  publicHost: string;
+  publicPort: number;
+}
+
+/** 读 edge 配置。`publicHost` 可以写成 `host:443`，这时用这个端口，https 不带端口号。 */
+export function resolveEdgePublic(input?: { publicHost?: string; publicPort?: number }): EdgePublicConfig {
+  let host = (input?.publicHost ?? TASK_PUBLIC_HOST).trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  let port = input?.publicPort ?? TASK_PUBLIC_PORT;
+  const colon = host.lastIndexOf(':');
+  if (colon > 0 && /^\d+$/.test(host.slice(colon + 1))) {
+    port = Number(host.slice(colon + 1));
+    host = host.slice(0, colon);
+  }
+  if (!host || /[\s"/]/.test(host)) host = TASK_PUBLIC_HOST;
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) port = TASK_PUBLIC_PORT;
+  return { publicHost: host, publicPort: port };
+}
+
+export const TASK_ROUTE_TYPES = ['web', 'code', 'vnc'] as const;
+export type TaskRouteType = (typeof TASK_ROUTE_TYPES)[number];
 
 const BASE = 36;
 const TMIN = 1;
@@ -92,6 +116,21 @@ export function taskPublicHost(name: string, taskId: string, kind: 'web' | 'ide'
   const stem = taskHostStem(name, taskId);
   if (!stem) return '';
   return `${stem}-${kind}.localhost`;
+}
+
+/** 正式入口上的路径，例如 `/t_41db7238-code`。 */
+export function taskPublicPath(taskId: string, type: TaskRouteType): string {
+  const id = taskId.trim();
+  if (!id) return '';
+  return `/${id}-${type}`;
+}
+
+/** 从 `/<taskId>-web|code|vnc` 取出任务号。后面还可以带 `/vnc.html` 这类子路径。 */
+export function taskIdFromPublicPath(pathname: string): string | null {
+  const path = pathname.split('?')[0] ?? '';
+  const matched = /^\/(t[_-][0-9a-f]{8}|default)-(web|code|vnc)(?:\/|$)/i.exec(path);
+  const id = matched?.[1];
+  return id ? id.toLowerCase() : null;
 }
 
 /**

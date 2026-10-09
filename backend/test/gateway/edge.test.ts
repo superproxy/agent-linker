@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { FRP_VERSION, NGINX_VERSION, frpAsset, nginxAsset } from '../../src/gateway/edge/assets.js';
 import { renderFrpsConf, renderNginxConf } from '../../src/gateway/edge/render.js';
-import { taskCodeServerHost, taskDevHost, taskRouteHost, taskVncHost } from '../../src/gateway/edge/apisix.ts';
+import { TASK_PUBLIC_HOST } from '../../src/gateway/edge/apisix.ts';
 import { startGatewayEdge, type EdgeChild } from '../../src/gateway/edge/runtime.js';
 import { renderFrpcConfig } from '../../../nat-tunnel/src/tunnel.js';
 
@@ -52,6 +52,11 @@ test('nginx 只监听回环，frps 控制口对外开放、面板在回环', () 
   assert.match(frps, /vhostHTTPPort = 7080/);
   assert.match(frps, /webServer\.addr = "127\.0\.0\.1"/);
   assert.match(frps, /webServer\.port = 7500/);
+  const withPlugin = renderFrpsConf({ token: 't', dashboardPassword: 'p', pluginAddr: '127.0.0.1:8787' });
+  assert.match(withPlugin, /\[\[httpPlugins\]\]/);
+  assert.match(withPlugin, /addr = "127\.0\.0\.1:8787"/);
+  assert.match(withPlugin, /path = "\/internal\/frp\/handler"/);
+  assert.match(withPlugin, /ops = \["Login"\]/);
 });
 
 test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX', async () => {
@@ -99,7 +104,7 @@ test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX
   edge.stop();
 });
 
-test('syncTaskHosts 用任务号-ide.localhost 登记 code-server，并去掉固定 ide.localhost', async () => {
+test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
   const root = mkdtempSync(join(tmpdir(), 'edge-'));
   const calls: { method: string; url: string; body?: string }[] = [];
   const edge = await startGatewayEdge({
@@ -130,17 +135,20 @@ test('syncTaskHosts 用任务号-ide.localhost 登记 code-server，并去掉固
     { id: 't_41db7238', name: 'test', enabled: false },
   ]);
   const put = (id: string) => calls.find((call) => call.method === 'PUT' && call.url.endsWith(`/routes/${id}`));
-  const escapeHost = (host: string) => host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  assert.match(put('code-localhost')?.body ?? '', /"host":"localhost"/);
+  assert.match(put('code-localhost')?.body ?? '', new RegExp(`"host":"${TASK_PUBLIC_HOST}"`));
+  assert.match(put('code-localhost')?.body ?? '', /"uri":"\/vibe-ide\*"/);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/code-ide')), true);
-  assert.match(put('task-default')?.body ?? '', new RegExp(`"host":"${escapeHost(taskRouteHost('默认', 'default'))}"`));
-  assert.match(put('task-code-default')?.body ?? '', new RegExp(`"host":"${escapeHost(taskCodeServerHost('默认', 'default'))}"`));
+  assert.match(put('task-default')?.body ?? '', new RegExp(`"host":"${TASK_PUBLIC_HOST}"`));
+  assert.match(put('task-default')?.body ?? '', /"uri":"\/default-web\*"/);
+  assert.match(put('task-default')?.body ?? '', /host\.docker\.internal:8787/);
+  assert.match(put('task-code-default')?.body ?? '', /"uri":"\/default-code\*"/);
   assert.match(put('task-code-default')?.body ?? '', /host\.docker\.internal:8010/);
-  assert.match(put('task-code-t_41db7238')?.body ?? '', /"host":"test-t-41db7238-ide\.localhost"/);
+  assert.match(put('task-code-default')?.body ?? '', /\/vibe-ide\/\$1/);
+  assert.match(put('task-code-t_41db7238')?.body ?? '', /"uri":"\/t_41db7238-code\*"/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"status":0/);
-  assert.match(put('task-dev-default')?.body ?? '', new RegExp(`"host":"${escapeHost(taskDevHost('默认', 'default'))}"`));
-  assert.match(put('task-dev-default')?.body ?? '', /host\.docker\.internal:5173/);
-  assert.match(put('task-vnc-t_41db7238')?.body ?? '', new RegExp(`"host":"${escapeHost(taskVncHost('test', 't_41db7238'))}"`));
+  assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/task-dev-default')), false);
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-dev-default')), true);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"uri":"\/t_41db7238-vnc\*"/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /host\.docker\.internal:6080/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"status":0/);
   await edge.applyTaskHost({ taskId: 'default', enabled: false, removed: true });

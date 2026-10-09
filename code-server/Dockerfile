@@ -3,15 +3,14 @@ FROM codercom/code-server:4.140.0
 
 USER root
 
-# 当前 Active LTS（Krypton）。npm 随 Node 发行包一起安装。
+# 当前 Active LTS（Krypton）。npm 随 Node 发行包一起安装，镜像里不再全局装 pnpm。
 ARG NODE_VERSION=24.21.0
-ARG PNPM_VERSION=12.10.1
 ARG FRP_VERSION=0.60.0
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates curl xz-utils \
-    xvfb x11vnc novnc python3-websockify openbox xterm fonts-dejavu-core chromium \
+    xvfb x11vnc novnc python3-websockify openbox xterm fonts-dejavu-core fonts-wqy-microhei chromium \
   && arch="$(dpkg --print-architecture)" \
   && case "$arch" in \
        amd64) node_arch=x64; frp_arch=amd64 ;; \
@@ -20,18 +19,13 @@ RUN apt-get update \
      esac \
   && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1 \
-  && npm install -g --allow-scripts=pnpm "pnpm@${PNPM_VERSION}" \
   && curl -fsSL "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${frp_arch}.tar.gz" \
     | tar -xz -C /tmp \
   && mv "/tmp/frp_${FRP_VERSION}_linux_${frp_arch}/frpc" /usr/local/bin/frpc \
   && chmod +x /usr/local/bin/frpc \
-  && rm -rf /tmp/frp_${FRP_VERSION}_linux_${frp_arch} /var/lib/apt/lists/* /root/.npm
-
-# Chromium 里的中文界面需要 CJK 字体，否则 VNC 里是方框。
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends fonts-noto-cjk \
   && fc-cache -f \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /tmp/frp_${FRP_VERSION}_linux_${frp_arch} /var/lib/apt/lists/* /root/.npm \
+    /usr/local/include /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale
 
 COPY entrypoint.sh /usr/local/bin/linkagent-entrypoint.sh
 RUN chmod +x /usr/local/bin/linkagent-entrypoint.sh

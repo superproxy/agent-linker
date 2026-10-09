@@ -34,7 +34,7 @@ import { LocalGatewayPage, RemoteGatewayPage } from './pages/Settings';
 import { ProcessesPage } from './pages/Processes';
 import { IdePage } from './pages/Ide';
 import { VibePage } from './pages/Vibe';
-import { matchTaskHost, taskLabelFromHostname } from './lib/task-host';
+import { matchTaskHost, setTaskPublicEndpoint, taskIdFromPublicPath, taskLabelFromHostname } from './lib/task-host';
 
 type AuthState =
   | { status: 'loading' }
@@ -61,7 +61,8 @@ export function App() {
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   const [ideSession, setIdeSession] = useState<ChatSession | null>(null);
   const [hostTaskError, setHostTaskError] = useState('');
-  const hostTaskLabel = taskLabelFromHostname(window.location.hostname);
+  const hostTaskLabel = taskIdFromPublicPath(window.location.pathname) ?? taskLabelFromHostname(window.location.hostname);
+  const [, setEdgeTick] = useState(0);
   const [pwdOpen, setPwdOpen] = useState(false);
   const { bump } = useRefreshTick();
 
@@ -85,6 +86,21 @@ export function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(new URL('/api/edge', base).href)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { publicHost?: string; publicPort?: number } | null) => {
+        if (cancelled || !body?.publicHost || !body.publicPort) return;
+        setTaskPublicEndpoint({ host: body.publicHost, port: body.publicPort });
+        setEdgeTick((tick) => tick + 1);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [base]);
 
   const doLogin = async (username: string, password: string): Promise<string | null> => {
     try {

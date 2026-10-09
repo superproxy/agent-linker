@@ -11,13 +11,11 @@ import {
   apisixComposeArgs,
   renderApisixCompose,
   renderApisixConfig,
+  TASK_PUBLIC_HOST,
   taskCodeRouteId,
-  taskCodeServerHost,
-  taskDevHost,
   taskDevRouteId,
-  taskRouteHost,
   taskRouteId,
-  taskVncHost,
+  taskRouteUri,
   taskVncRouteId,
 } from './apisix.js';
 import { renderFrpsConf } from './render.js';
@@ -45,6 +43,10 @@ export interface GatewayEdgeOptions {
   devUpstream?: string;
   /** 任务 -vnc.localhost 转到容器内 noVNC，默认 6080 */
   vncUpstream?: string;
+  /** frps Login 插件地址，例如 127.0.0.1:8787 */
+  frpPluginAddr?: string;
+  /** 浏览器入口主机。路径是 `/<taskId>-web|code|vnc`。 */
+  publicHost?: string;
   /** 单测注入，避免访问本机 APISIX */
   adminFetch?: typeof fetch;
   platform?: NodeJS.Platform;
@@ -192,7 +194,11 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     const token = readOrCreateSecret(join(opts.runtimeDir, 'frps.token'));
     const dashboardPassword = readOrCreateSecret(join(opts.runtimeDir, 'frps.dashboard'));
     const frpsConf = join(opts.runtimeDir, 'frps.toml');
-    writeFileSync(frpsConf, renderFrpsConf({ token, dashboardPassword }), 'utf8');
+    writeFileSync(frpsConf, renderFrpsConf({
+      token,
+      dashboardPassword,
+      ...(opts.frpPluginAddr ? { pluginAddr: opts.frpPluginAddr } : {}),
+    }), 'utf8');
     const adminKey = readOrCreateSecret(join(opts.runtimeDir, 'apisix.admin-key'));
     composeFile = join(opts.runtimeDir, 'apisix-compose.yml');
     writeFileSync(join(opts.runtimeDir, 'apisix-config.yaml'), renderApisixConfig(adminKey), 'utf8');
@@ -202,42 +208,51 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     const admin = new ApisixAdmin(adminUrl, adminKey, adminFetch);
     edgeApi = {
       async applyTaskHost(change) {
-        const devUpstream = opts.devUpstream ?? 'http://127.0.0.1:5173';
         const vncUpstream = opts.vncUpstream ?? 'http://127.0.0.1:6080';
+        const host = opts.publicHost ?? TASK_PUBLIC_HOST;
+        const taskId = change.taskId;
         if (change.removed) {
-          await admin.remove(taskRouteId(change.taskId));
-          await admin.remove(taskCodeRouteId(change.taskId));
-          await admin.remove(taskDevRouteId(change.taskId));
-          await admin.remove(taskVncRouteId(change.taskId));
+          await admin.remove(taskRouteId(taskId));
+          await admin.remove(taskCodeRouteId(taskId));
+          await admin.remove(taskDevRouteId(taskId));
+          await admin.remove(taskVncRouteId(taskId));
           return;
         }
+        await admin.remove(taskDevRouteId(taskId));
+        const codePrefix = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         await admin.upsert({
-          id: taskRouteId(change.taskId),
-          host: taskRouteHost(change.name, change.taskId),
+          id: taskRouteId(taskId),
+          host,
+          uri: taskRouteUri(taskId, 'web'),
           upstream: opts.gatewayUpstream,
           enabled: change.enabled,
         });
         await admin.upsert({
-          id: taskCodeRouteId(change.taskId),
-          host: taskCodeServerHost(change.name, change.taskId),
+          id: taskCodeRouteId(taskId),
+          host,
+          uri: taskRouteUri(taskId, 'code'),
           upstream: opts.ideUpstream,
           enabled: change.enabled,
+          rewrite: [`^/${codePrefix}-code/?(.*)`, '/vibe-ide/$1'],
         });
         await admin.upsert({
-          id: taskDevRouteId(change.taskId),
-          host: taskDevHost(change.name, change.taskId),
-          upstream: devUpstream,
-          enabled: change.enabled,
-        });
-        await admin.upsert({
-          id: taskVncRouteId(change.taskId),
-          host: taskVncHost(change.name, change.taskId),
+          id: taskVncRouteId(taskId),
+          host,
+          uri: taskRouteUri(taskId, 'vnc'),
           upstream: vncUpstream,
           enabled: change.enabled,
+          rewrite: [`^/${codePrefix}-vnc/?(.*)`, '/$1'],
         });
       },
       async syncTaskHosts(tasks) {
-        await admin.upsert({ id: 'code-localhost', host: 'localhost', upstream: opts.ideUpstream, enabled: true });
+        const host = opts.publicHost ?? TASK_PUBLIC_HOST;
+        await admin.upsert({
+          id: 'code-localhost',
+          host,
+          uri: '/vibe-ide*',
+          upstream: opts.ideUpstream,
+          enabled: true,
+        });
         await admin.remove('code-ide');
         for (const task of tasks) {
           await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });

@@ -122,10 +122,23 @@ export function serveWebDockerArgs(composeFile: string, action: 'up' | 'down'): 
   return action === 'up' ? ['compose', '-f', composeFile, 'up', '-d'] : ['compose', '-f', composeFile, 'down'];
 }
 
+/**
+ * Docker 聚合镜像里 IDE / VNC / frpc 已由入口脚本拉起。
+ * `LINKAGENT_NODE_SERVE_WEB=0|false|off` 时 node 不再 compose 第二个 code-server。
+ */
+export function nodeServeWebSuppressed(flag: string | undefined): boolean {
+  const raw = (flag ?? '').trim().toLowerCase();
+  return raw === '0' || raw === 'false' || raw === 'off';
+}
+
 /** node 启动时只拉起 code-server。未启用或 docker 不存在时不打断节点回连。 */
 export function startNodeServeWeb(launch: ServeWebLaunch, spawnFn: ServeWebSpawn = spawn as ServeWebSpawn): { stop: () => void } {
   const { serveWeb } = launch;
-  if (!serveWeb.enabled) return { stop() {} };
+  const suppressed = nodeServeWebSuppressed(process.env.LINKAGENT_NODE_SERVE_WEB);
+  if (serveWeb.enabled && suppressed) {
+    console.log('[node] LINKAGENT_NODE_SERVE_WEB 已关闭 compose，IDE 由容器入口拉起');
+  }
+  if (!serveWeb.enabled || suppressed) return { stop() {} };
   mkdirSync(launch.runtimeDir, { recursive: true });
   const composeFile = join(launch.runtimeDir, 'compose.yml');
   const frpcFile = join(launch.runtimeDir, 'frpc.toml');

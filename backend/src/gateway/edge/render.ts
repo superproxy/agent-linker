@@ -69,16 +69,29 @@ ${proxyLocation('/', opts.gatewayUpstream)}
 export interface FrpsRenderOptions {
   token: string;
   dashboardPassword: string;
+  /** 网关地址，例如 127.0.0.1:8787。设置后 Login 先问网关，节点 nt_ 也能通过。 */
+  pluginAddr?: string;
 }
 
 /** frps 控制口对 NAT 客户端开放，面板只监听回环。 */
 export function renderFrpsConf(opts: FrpsRenderOptions): string {
+  const pluginAddr = opts.pluginAddr?.trim() ?? '';
+  if (pluginAddr && /["\r\n]/.test(pluginAddr)) throw new Error('frps 插件地址无效');
+  const plugin = pluginAddr
+    ? `
+[[httpPlugins]]
+name = "node-tokens"
+addr = "${pluginAddr}"
+path = "/internal/frp/handler"
+ops = ["Login"]
+`
+    : '';
   return `bindAddr = "${FRPS_BIND_ADDR}"
 bindPort = ${FRPS_BIND_PORT}
 vhostHTTPPort = ${FRPS_VHOST_HTTP_PORT}
 auth.method = "token"
 auth.token = "${opts.token}"
-
+${plugin}
 webServer.addr = "${FRPS_DASHBOARD_HOST}"
 webServer.port = ${FRPS_DASHBOARD_PORT}
 webServer.user = "admin"

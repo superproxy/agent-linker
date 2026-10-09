@@ -33,6 +33,14 @@ tar -xf .runtime-state\tools\nginx\download.bin -C .runtime-state\tools\nginx
 docker build -t linkagent-code-server:local -f code-server/Dockerfile code-server
 ```
 
+原始路线用上面的镜像：宿主机 node 在 `serveWeb.enabled: true` 时 compose 它。`pnpm node` 默认是本机原生进程。同一组命令加上 `--docker`，或设置 `LINKAGENT_NODE_RUNTIME=docker`，改为 Docker 聚合镜像。本机没有 `linkagent-node:local` 时会先构建。没有 `code-server/node-docker/node.env` 时用同目录的 `node.env.example`。强制重新构建用 `pnpm node:docker:build`。
+
+参数说明：
+
+```powershell
+pnpm node:help
+```
+
 解压后的程序：
 
 ```text

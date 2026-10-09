@@ -90,6 +90,11 @@ export class NodeTokenStore {
     return record;
   }
 
+  /** 当前全部 nt_ 明文，供 frps 登录插件比对。不经过 HTTP。 */
+  listTokens(): string[] {
+    return this.kv.list().map((r) => r.token);
+  }
+
   listForUser(username: string): NodeTokenRecord[] {
     return this.kv
       .list()

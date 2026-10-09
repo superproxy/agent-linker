@@ -10,6 +10,9 @@ backend/config/node.yaml
 backend/config/channels.yaml
 backend/config/config.yaml
 .runtime-state/
+code-server/node-docker/node.env
+code-server/node-docker/.runtime-state/
+code-server/node-docker/workspace/
 .tmp/
 opencode.json
 .codebuddy/

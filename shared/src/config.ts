@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TASK_PUBLIC_HOST, TASK_PUBLIC_PORT } from './task-host.js';
 import { ACP_AGENT_KINDS, ACP_PERMISSION_MODES, ACP_PERMISSION_POLICY_ACTIONS } from './adapter.js';
 import { normalizeWeixinMode, type WeixinMode } from './weixin-mode.js';
 
@@ -91,6 +92,15 @@ export const gatewaySectionSchema = z.object({
       workspaceDir: z.string().optional(),
     })
     .default({ defaultAgentId: 'pi' }),
+  /** 浏览器入口。APISIX 按这个主机加 `/<taskId>-web|code|vnc` 转发。 */
+  edge: z
+    .object({
+      /** 正式域名。可写成 host:443。 */
+      publicHost: z.string().default(TASK_PUBLIC_HOST),
+      /** 浏览器端口。写在 publicHost 里的端口优先。80 / 443 不出现在链接里。 */
+      publicPort: z.number().int().positive().max(65535).default(TASK_PUBLIC_PORT),
+    })
+    .default({ publicHost: TASK_PUBLIC_HOST, publicPort: TASK_PUBLIC_PORT }),
 });
 export type GatewaySection = z.infer<typeof gatewaySectionSchema>;
 
@@ -312,6 +322,7 @@ const legacyConfigSchema = z
     channels: z.record(z.string(), z.unknown()).optional(),
     plugins: z.array(z.object({ package: z.string().min(1), enabled: z.boolean().optional() })).optional(),
     tasks: z.object({ defaultAgentId: z.string().optional(), workspaceDir: z.string().optional() }).optional(),
+    edge: z.object({ publicHost: z.string().optional(), publicPort: z.number().optional() }).optional(),
     weixin: z
       .object({
         mode: weixinModeSchema.optional(),
@@ -364,6 +375,7 @@ export function migrateConfig(raw: unknown): SharedConfig {
     ...(legacy.channels ? { channels: legacy.channels } : {}),
     ...(legacy.plugins ? { plugins: legacy.plugins } : {}),
     ...(legacy.tasks ? { tasks: legacy.tasks } : {}),
+    ...(legacy.edge ? { edge: legacy.edge } : {}),
   });
 
   const weixin = weixinSectionSchema.parse({

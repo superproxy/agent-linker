@@ -1,0 +1,28 @@
+# 聚合镜像：在 code-server 镜像上加入 node 与 pi-acp。
+# 构建上下文由 scripts/image-node.mjs 准备，只含 linkagent-node/。
+# 原始路线仍用 code-server/Dockerfile，由宿主机 node 按 serveWeb 拉起。
+ARG BASE_IMAGE=linkagent-code-server:local
+FROM ${BASE_IMAGE}
+
+USER root
+
+RUN npm install -g --ignore-scripts --omit=dev @earendil-works/pi-coding-agent pi-acp@0.0.33 \
+  && npm cache clean --force \
+  && rm -rf /root/.npm \
+    /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/docs \
+    /usr/local/lib/node_modules/@earendil-works/pi-coding-agent/examples
+
+COPY linkagent-node /opt/linkagent-node
+COPY code-server/render-frpc.mjs /usr/local/bin/linkagent-render-frpc.mjs
+COPY code-server/entrypoint-bundle.sh /usr/local/bin/linkagent-node-entrypoint.sh
+RUN chmod +x /usr/local/bin/linkagent-node-entrypoint.sh /usr/local/bin/linkagent-render-frpc.mjs \
+  && mkdir -p /var/lib/linkagent/node
+
+ENV LINKAGENT_HOME=/opt/linkagent-node \
+    LINKAGENT_NODE_SERVE_WEB=0 \
+    LINKAGENT_NODE_AGENTS=pi \
+    LINKAGENT_NODE_STATE_DIR=/var/lib/linkagent/node
+
+EXPOSE 8080 5173 6080
+ENTRYPOINT ["/usr/local/bin/linkagent-node-entrypoint.sh"]
+CMD ["--auth", "none", "--bind-addr", "0.0.0.0:8080", "--trusted-origins", "*.localhost:8088", "--abs-proxy-base-path", "/vibe-ide", "/root/workspace"]
