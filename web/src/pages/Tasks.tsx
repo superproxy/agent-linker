@@ -10,6 +10,12 @@ import { agentDisplayLabel } from '../lib/agent-labels';
 import type { ChatSession } from './types';
 import { taskCodeServerOrigin, taskDevOrigin } from '../lib/task-host';
 
+/** 运行节点下拉里「本机」的值是空串。提交必须写成 local，否则服务端会沿用任务当前的远程节点。 */
+function nodeIdForSubmit(value: string | undefined): string {
+  const id = value?.trim();
+  return id || 'local';
+}
+
 interface EditState {
   channel: string;
   userId: string;
@@ -302,7 +308,7 @@ export function TasksPage(props: {
           if (t.id === 'default') {
             notify.info('默认任务固定使用本机 pi，不能修改 agent / 节点。');
           } else {
-            await ops.setTaskAgent(editing.channel, editing.userId, t.id, v.agentId, v.nodeId || undefined, editing.ownerUsername);
+            await ops.setTaskAgent(editing.channel, editing.userId, t.id, v.agentId, nodeIdForSubmit(v.nodeId), editing.ownerUsername);
           }
         }
       }, '任务已保存');
@@ -316,7 +322,7 @@ export function TasksPage(props: {
             userId,
             name: v.name.trim(),
             ...(v.agentId ? { agentId: v.agentId } : {}),
-            ...(v.nodeId ? { nodeId: v.nodeId } : {}),
+            nodeId: nodeIdForSubmit(v.nodeId),
             ...(v.key?.trim() ? { key: v.key.trim() } : {}),
             ...(v.cwd?.trim() ? { cwd: v.cwd.trim() } : {}),
             ...(ownerUsername ? { ownerUsername } : {}),

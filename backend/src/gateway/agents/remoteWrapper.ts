@@ -43,6 +43,7 @@ export class RemoteNodeAdapter implements AgentAdapter {
     if (!this.link.online) throw new NodeOfflineError(this.nodeId);
     const text = lastUserText(req.messages) ?? '';
     if (!text) throw new Error('请求中没有可发送的 user 文本（网关一期仅支持文本）');
+    let sawOutput = false;
     const result = await this.link.runTurn(
       {
         agentId: this.id,
@@ -55,6 +56,7 @@ export class RemoteNodeAdapter implements AgentAdapter {
         ...(this.permissionPolicy ? { permissionPolicy: this.permissionPolicy } : {}),
       },
       (ev) => {
+        sawOutput = true;
         if (ev.kind === 'text') cb.onText(ev.text);
         else if (ev.kind === 'thought') cb.onReasoning?.(ev.text);
         else cb.onToolActivity?.(ev.name);
@@ -62,6 +64,9 @@ export class RemoteNodeAdapter implements AgentAdapter {
       signal,
     );
     if (result.status === 'failed') throw new Error(result.error?.message ?? '远程 agent 执行失败');
+    if (!sawOutput) {
+      throw new Error('agent 未返回内容。请检查该节点上 agent 的模型配置与 API key。');
+    }
     if (result.sessionId) cb.onSessionId?.(result.sessionId);
     return { sessionId: result.sessionId };
   }

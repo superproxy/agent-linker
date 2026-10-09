@@ -180,12 +180,12 @@ auth: { mode: token, token: abc }
   const nodeSpec = (pm as unknown as { resolve(id: string): { command: string; args: string[] } }).resolve('node');
   assert.equal(nodeSpec.command, process.execPath);
   assert.ok(nodeSpec.args[0].endsWith(join('server', 'node.mjs')));
-  // node 进程自己读 node.yaml，supervisor 不再注入回连或 agent 环境变量
+  // node 进程自己读 node.yaml；这些键置空，用来盖掉父进程继承值
   const nodeEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('node');
-  assert.equal(nodeEnv.LINKAGENT_GATEWAY_URL, undefined);
-  assert.equal(nodeEnv.LINKAGENT_GATEWAY_TOKEN, undefined);
-  assert.equal(nodeEnv.LINKAGENT_NODE_NAME, undefined);
-  assert.equal(nodeEnv.LINKAGENT_NODE_AGENTS, undefined);
+  assert.equal(nodeEnv.LINKAGENT_GATEWAY_URL, '');
+  assert.equal(nodeEnv.LINKAGENT_GATEWAY_TOKEN, '');
+  assert.equal(nodeEnv.LINKAGENT_NODE_NAME, '');
+  assert.equal(nodeEnv.LINKAGENT_NODE_AGENTS, '');
   const wxEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('weixin');
   assert.equal(wxEnv.LINKAGENT_GATEWAY_URL, '');
   assert.equal(wxEnv.LINKAGENT_GATEWAY_TOKEN, '');

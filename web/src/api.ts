@@ -1194,6 +1194,20 @@ export class OpsClient {
     return data.task;
   }
 
+  async taskMessages(
+    channel: string,
+    userId: string,
+    taskId: string,
+    owner?: string,
+  ): Promise<{ role: 'user' | 'assistant'; content: string; error?: string }[]> {
+    const q = new URLSearchParams({ channel, userId });
+    if (owner) q.set('owner', owner);
+    const data = (await this.request(`/api/tasks/${encodeURIComponent(taskId)}/messages?${q}`)) as {
+      messages?: { role: 'user' | 'assistant'; content: string; error?: string }[];
+    };
+    return Array.isArray(data.messages) ? data.messages : [];
+  }
+
   async setTaskAgent(
     channel: string,
     userId: string,

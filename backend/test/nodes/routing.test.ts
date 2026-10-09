@@ -158,6 +158,13 @@ test('RemoteNodeAdapter：在线时事件映射 + 结果透传；离线直接抛
   fakeRunTurn = async () => ({ status: 'failed', error: { message: 'boom' } });
   await assert.rejects(() => adapter.chat({ messages: [{ role: 'user', content: 'x' }] }, { onText: () => {} }), /boom/);
 
+  // 回合正常结束但没有任何正文、思考或工具事件 → 抛给对话页，避免空回复
+  fakeRunTurn = async () => ({ status: 'completed' });
+  await assert.rejects(
+    () => adapter.chat({ messages: [{ role: 'user', content: 'x' }] }, { onText: () => {} }),
+    /未返回内容/,
+  );
+
   // 离线 → NodeOfflineError
   online = false;
   await assert.rejects(

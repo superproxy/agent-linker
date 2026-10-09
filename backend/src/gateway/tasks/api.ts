@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { normalizeAgentId } from '@linkagent/shared';
 import { isTaskCommand, type TaskService } from './service.js';
+import type { TaskChatMessage } from './transcript.js';
 import { LOGIN_TASK_CHANNEL, isDefaultTaskId, normalizeNodeId, type TaskItem, type UserTasks } from './types.js';
 import { isSkillRequest } from './skill-files.js';
 
@@ -46,6 +47,8 @@ export interface TaskApiDeps {
    * 未提供则忽略该头（单测）。返回 forbidden/unauth 时接口直接结束。
    */
   skillAuth?: (request: { headers: Record<string, string | string[] | undefined> }) => 'ok' | 'unauth' | 'forbidden';
+  /** 读取任务持久会话的历史对话（ACP 会话 + 网关已保存的轮次） */
+  loadTaskTranscript?: (sessionKey: string, agentId: string) => TaskChatMessage[];
 }
 
 function sessionKeyOf(channel: string, userId: string, taskId: string, ownerUsername?: string): string {
@@ -140,6 +143,37 @@ export function registerTaskApi(
     // 登录态 + owner：任务管理按用户；渠道凭据仍读 weixin/<peer> 文件
     if (checkAuth(request) && owner) return service.ensureLoginSpace(owner);
     return service.load(channel, userId, owner);
+  });
+
+  // GET /api/tasks/:taskId/messages?channel=&userId=&owner=
+  // 打开任务对话 / IDE 时回放已有轮次。鉴权与 GET /api/tasks 相同。
+  app.get('/api/tasks/:taskId/messages', async (request, reply) => {
+    if (blockSkill(request, reply)) return { error: 'forbidden' };
+    const q = request.query as { channel?: string; userId?: string; owner?: string };
+    const channel = q.channel ?? '';
+    const userId = q.userId ?? '';
+    const ownerQ = q.owner;
+    if (!channel || !userId) return reply.code(400).send({ error: 'channel 与 userId 必填' });
+    let owner: string | undefined;
+    if (!checkAuth(request)) {
+      const scope = resolveChannelScope?.(request);
+      if (!scope || scope.channel !== channel || scope.userId !== userId) {
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+      owner = scope.ownerUsername?.trim() || ownerQ?.trim() || undefined;
+    } else {
+      const space = spaceOf(request, ownerQ);
+      if (!space.ok) return reply.code(space.status).send({ error: space.status === 401 ? 'unauthorized' : 'forbidden' });
+      owner = space.owner;
+    }
+    if (!ensureTaskChannel(channel, reply)) return { error: `渠道 ${channel} 不支持任务机制（活动任务仅 weixin / wecom / web）` };
+    const state =
+      checkAuth(request) && owner ? service.ensureLoginSpace(owner) : service.load(channel, userId, owner);
+    const { taskId } = request.params as { taskId: string };
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (!task) return reply.code(404).send({ error: '任务不存在' });
+    const sessionKey = sessionKeyOf(state.channel, state.userId, task.id, state.ownerUsername);
+    return { messages: deps.loadTaskTranscript?.(sessionKey, task.agentId) ?? [] };
   });
 
   // GET /api/tasks/by-key/:key —— 任务 key 反查（管理后台/外部分享直连用，返回任务与归属用户）
@@ -239,8 +273,9 @@ export function registerTaskApi(
     }
     // 显式指定 agent 时校验 (节点, agent) 组合当前可路由；agent 留空则继承激活任务（无需校验）
     const agentId = body.agentId?.trim().toLowerCase();
-    const nodeId = body.nodeId?.trim();
-    const effectiveNode = normalizeNodeId(nodeId || service.resolveRoute(state).nodeId);
+    // 显式传入（含空串）表示用户选了节点：空串是表单里的「本机」。缺省才沿用当前激活任务的节点。
+    const requestedNode = typeof body.nodeId === 'string' ? normalizeNodeId(body.nodeId) : undefined;
+    const effectiveNode = requestedNode ?? service.resolveRoute(state).nodeId;
     if (!isAdmin(request) && effectiveNode === 'local') {
       return reply.code(403).send({ error: '普通用户不能把任务绑到本机 agent；默认任务已固定为本机 pi' });
     }
@@ -248,7 +283,7 @@ export function registerTaskApi(
       return reply.code(400).send({ error: `节点 ${effectiveNode} 上没有可用 agent: ${agentId}（请确认节点在线且已提供该 agent）` });
     }
     try {
-      const task = service.createTask(state, body.name ?? '', body.agentId, body.key, body.cwd, nodeId);
+      const task = service.createTask(state, body.name ?? '', body.agentId, body.key, body.cwd, requestedNode);
       return task;
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
@@ -307,7 +342,11 @@ export function registerTaskApi(
     }
     const agentId = body.agentId.trim().toLowerCase();
     const state = loadTaskSpace(service, body.channel, body.userId, space.owner);
-    const nodeId = body.nodeId?.trim() || service.resolveRoute(state, params.taskId).nodeId;
+    // 显式传入（含空串）才改节点。空串是「本机」，不能回退成任务当前的远程节点。
+    const nodeSpecified = typeof body.nodeId === 'string';
+    const nodeId = nodeSpecified
+      ? normalizeNodeId(body.nodeId)
+      : service.resolveRoute(state, params.taskId).nodeId;
     if (!isAdmin(request) && normalizeNodeId(nodeId) === 'local') {
       return reply.code(403).send({ error: '普通用户不能把任务绑到本机 agent；默认任务已固定为本机 pi' });
     }
@@ -321,7 +360,7 @@ export function registerTaskApi(
       return reply.code(400).send({ error: `节点 ${nodeId} 上没有可用 agent: ${agentId}（请确认节点在线且已提供该 agent）` });
     }
     try {
-      const task = service.setTaskAgent(state, params.taskId, agentId, body.nodeId);
+      const task = service.setTaskAgent(state, params.taskId, agentId, nodeSpecified ? nodeId : undefined);
       return { task };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -32,6 +32,7 @@ import { createJsonStore } from './tasks/store.js';
 import { TaskService } from './tasks/service.js';
 import { readTaskSkillMarkdown } from './tasks/skill-files.js';
 import { decideTaskRouting, registerTaskApi } from './tasks/api.js';
+import { createTaskTranscripts } from './tasks/transcript.js';
 import { NodeManager } from './nodes/manager.js';
 import { createNodeRegistry } from './nodes/store.js';
 import { createPreferenceStore } from './prefs/store.js';
@@ -262,6 +263,7 @@ export async function buildServer(options?: {
         }
       : {}),
   });
+  const taskTranscripts = createTaskTranscripts(layout.state('task-transcripts'), layout.nodeState);
 
   const authGuard = new AuthGuard(userStore, {
     mode: auth.mode,
@@ -323,6 +325,7 @@ export async function buildServer(options?: {
         if (s.status === 'none') return 'unauth';
         return 'forbidden';
       },
+      loadTaskTranscript: (sessionKey, agentId) => taskTranscripts.load(sessionKey, agentId),
     },
     // 渠道用户级凭据：ct_ token 只读自己的 GET /api/tasks（调试 / 外部工具；bot 路由走 /v1）
     (req) => {
@@ -669,6 +672,14 @@ export async function buildServer(options?: {
       ...(routing.kind === 'chat' && routing.env ? { env: routing.env } : {}),
     };
     const meta = newMeta(modelForChat);
+    const rememberTurn = (assistant: { content: string; error?: string }) => {
+      if (routing.kind !== 'chat') return;
+      try {
+        taskTranscripts.append(routing.sessionKey, routing.agentId, lastUserText, assistant);
+      } catch (err) {
+        request.log.warn({ err }, 'task transcript append failed');
+      }
+    };
 
     // ---- 非流式：聚合后一次返回 ----
     if (body.stream !== true) {
@@ -684,12 +695,14 @@ export async function buildServer(options?: {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        rememberTurn({ content, error: message });
         if (dispatchTraceId) {
           emitGatewayDispatchTrace('gateway.v1.fail', { traceId: dispatchTraceId, reason: 'agent_error', error: message });
         }
         request.log.error({ err, ...chatRouteMeta }, 'agent chat failed');
         return reply.code(500).send(openaiError(message, 'server_error', 'agent_error'));
       }
+      rememberTurn({ content });
       if (dispatchTraceId) {
         emitGatewayDispatchTrace('gateway.v1.done', { traceId: dispatchTraceId, kind: 'chat', stream: false, replyChars: content.length });
       }
@@ -720,6 +733,7 @@ export async function buildServer(options?: {
     const send = (chunk: ChatCompletionChunk) => res.write(formatSseData(chunk));
 
     let streamReplyChars = 0;
+    let streamText = '';
     try {
       send(chunkDelta(meta, { role: 'assistant', content: '' }, null));
       if (dispatchTraceId) {
@@ -733,6 +747,7 @@ export async function buildServer(options?: {
         {
           onText: (d) => {
             streamReplyChars += d.length;
+            streamText += d;
             send(chunkDelta(meta, { content: d }, null));
           },
           onReasoning: (d) => send(chunkDelta(meta, { reasoning_content: d }, null)),
@@ -743,6 +758,7 @@ export async function buildServer(options?: {
       );
       send(chunkDelta(meta, {}, 'stop'));
       res.write(SSE_DONE);
+      rememberTurn({ content: streamText });
       if (dispatchTraceId) {
         emitGatewayDispatchTrace('gateway.v1.done', {
           traceId: dispatchTraceId,
@@ -753,6 +769,8 @@ export async function buildServer(options?: {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      const aborted = controller.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+      rememberTurn(aborted ? { content: streamText } : { content: streamText, error: message });
       const offline = err instanceof Error && (err as { code?: string }).code === 'node_offline';
       if (dispatchTraceId) {
         emitGatewayDispatchTrace('gateway.v1.fail', { traceId: dispatchTraceId, reason: 'agent_stream', error: message });

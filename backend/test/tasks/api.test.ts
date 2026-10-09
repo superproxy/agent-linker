@@ -879,6 +879,41 @@ test('PATCH /api/tasks/:id/agent: 注入 agent 校验后，不存在的 agent 40
   }
 });
 
+test('PATCH /agent：表单本机（空 nodeId）改绑到 local，不拿任务原来的远程节点校验', async () => {
+  const svc = freshService();
+  const app = Fastify();
+  const checked: string[] = [];
+  registerTaskApi(app, svc, () => true, {
+    hasRoutingAgent: (nodeId, agentId) => {
+      checked.push(`${nodeId}:${agentId}`);
+      return agentId === 'cursor' ? nodeId === 'local' : true;
+    },
+  });
+  await app.ready();
+  try {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'weixin', userId: 'wx_local', name: '远程任务', agentId: 'pi', nodeId: 'n_facc81aef2eb' },
+    });
+    assert.equal(created.statusCode, 200);
+    const taskId = created.json().id as string;
+    assert.equal(created.json().nodeId, 'n_facc81aef2eb');
+
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}/agent`,
+      payload: { channel: 'weixin', userId: 'wx_local', agentId: 'cursor', nodeId: '' },
+    });
+    assert.equal(moved.statusCode, 200);
+    assert.equal(moved.json().task.nodeId, 'local');
+    assert.equal(moved.json().task.agentId, 'cursor');
+    assert.deepEqual(checked, ['n_facc81aef2eb:pi', 'local:cursor']);
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
 test('PATCH 默认任务 agent 一律 400；普通用户不能新建本机任务', async () => {
   const svc = freshService();
   const app = Fastify();
@@ -928,6 +963,42 @@ test('PATCH 默认任务 agent 一律 400；普通用户不能新建本机任务
     });
     assert.equal(dup.statusCode, 400);
     assert.match(dup.json().error, /已存在/);
+  } finally {
+    await app.close().catch(() => {});
+  }
+});
+
+test('GET /api/tasks/:taskId/messages：按任务会话读取历史，未知任务 404', async () => {
+  const svc = freshService();
+  const seen: string[] = [];
+  const app = Fastify();
+  registerTaskApi(app, svc, () => true, {
+    loadTaskTranscript: (sessionKey, agentId) => {
+      seen.push(`${sessionKey}|${agentId}`);
+      return [{ role: 'user', content: '你好' }];
+    },
+  });
+  await app.ready();
+  try {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { channel: 'weixin', userId: 'wx_h', name: '历史' },
+    });
+    assert.equal(created.statusCode, 200);
+    const taskId = created.json().id as string;
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/tasks/${taskId}/messages?channel=weixin&userId=wx_h`,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json().messages, [{ role: 'user', content: '你好' }]);
+    assert.deepEqual(seen, [`weixin:wx_h:task:${taskId}|pi`]);
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/api/tasks/t_missing/messages?channel=weixin&userId=wx_h',
+    });
+    assert.equal(missing.statusCode, 404);
   } finally {
     await app.close().catch(() => {});
   }

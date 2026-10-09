@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Breadcrumb, Button, Card, Input, Space, Tabs, Tag, Typography } from 'antd';
-import { FolderOpenOutlined, FileOutlined, ReloadOutlined } from '@ant-design/icons';
+import { FolderOpenOutlined, FileOutlined, ReloadOutlined, ShrinkOutlined, ExpandAltOutlined } from '@ant-design/icons';
 import { ApiClient, type IdeFileEntry, type IdeTaskScope } from '../api';
 import type { TabId } from '../lib/constants';
 import type { AuthErrorHandler } from '../lib/hooks';
@@ -64,6 +64,8 @@ export function IdePage({ base, token, onAuthError, session = null }: IdePagePro
   const [debugStderr, setDebugStderr] = useState('');
   const [debugCode, setDebugCode] = useState<number | null>(null);
   const [debugging, setDebugging] = useState(false);
+  const [webOpen, setWebOpen] = useState(true);
+  const [webRev, setWebRev] = useState(0);
 
   const fail = useCallback(
     (e: unknown) => {
@@ -230,16 +232,51 @@ export function IdePage({ base, token, onAuthError, session = null }: IdePagePro
         items={[
           {
             key: 'chat',
-            label: '对话',
+            label: '对话 / Web',
             children: (
-              <ChatPage
-                base={base}
-                token={token}
-                onAuthError={onAuthError}
-                session={session}
-                onClearSession={() => undefined}
-                embedded
-              />
+              <div className={webOpen ? 'ide-chat-web' : 'ide-chat-web is-collapsed'}>
+                <ChatPage
+                  base={base}
+                  token={token}
+                  onAuthError={onAuthError}
+                  session={session}
+                  onClearSession={() => undefined}
+                  embedded
+                />
+                <div className="ide-web-pane">
+                  <div className="ide-web-bar">
+                    {webOpen ? <Text>Web</Text> : <span />}
+                    <Space size={4}>
+                      {webOpen ? (
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<ReloadOutlined />}
+                          disabled={!views.web}
+                          title="刷新 Web"
+                          onClick={() => setWebRev((n) => n + 1)}
+                        />
+                      ) : null}
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={webOpen ? <ShrinkOutlined /> : <ExpandAltOutlined />}
+                        title={webOpen ? '收缩 Web' : '展开 Web'}
+                        onClick={() => setWebOpen((open) => !open)}
+                      />
+                    </Space>
+                  </div>
+                  {views.web ? (
+                    <div className="ide-frame-wrap" hidden={!webOpen}>
+                      <iframe key={webRev} className="ide-frame" title={`任务开发页 ${views.web}`} src={views.web} />
+                    </div>
+                  ) : webOpen ? (
+                    <Card size="small" title="Web">
+                      <Text type="secondary">从任务进入在线 IDE 后，右侧展示该任务的 npm run dev。</Text>
+                    </Card>
+                  ) : null}
+                </div>
+              </div>
             ),
           },
           {
@@ -249,19 +286,6 @@ export function IdePage({ base, token, onAuthError, session = null }: IdePagePro
               <div className="ide-frame-wrap">
                 <iframe className="ide-frame" title={`任务 IDE ${views.ide}`} src={views.ide} />
               </div>
-            ),
-          },
-          {
-            key: 'web-view',
-            label: 'Web',
-            children: views.web ? (
-              <div className="ide-frame-wrap">
-                <iframe className="ide-frame" title={`任务开发页 ${views.web}`} src={views.web} />
-              </div>
-            ) : (
-              <Card size="small" title="Web">
-                <Text type="secondary">从任务进入在线 IDE 后，这里展示该任务的 npm run dev。</Text>
-              </Card>
             ),
           },
           {

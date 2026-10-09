@@ -276,8 +276,14 @@ export class ProcessManager {
           LINKAGENT_GATEWAY_TOKEN: '',
         };
       case 'node':
-        // 回连地址、token、展示名、agent 清单由 node 进程读 node.yaml，不再注入环境变量。
-        return {};
+        // 回连地址、token、展示名、agent 清单由 node 进程读 node.yaml。
+        // 显式置空，盖掉父进程（shell / 网关）继承的 LINKAGENT_*，避免旧的 agent 清单或远程网关地址盖住 node.yaml。
+        return {
+          LINKAGENT_GATEWAY_URL: '',
+          LINKAGENT_GATEWAY_TOKEN: '',
+          LINKAGENT_NODE_NAME: '',
+          LINKAGENT_NODE_AGENTS: '',
+        };
     }
   }
 

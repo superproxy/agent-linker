@@ -36,6 +36,7 @@ export function ChatPage(
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const historyGen = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fp = sessionFingerprint(session);
 
@@ -66,10 +67,31 @@ export function ChatPage(
 
   useEffect(() => {
     abortRef.current?.abort();
+    const gen = ++historyGen.current;
     setMessages([]);
     setInput('');
     setBusy(false);
     if (session) setModel(`agent:${session.agentId}`);
+    if (!session) return;
+    ops
+      .taskMessages(session.channel, session.userId, session.taskId, session.ownerUsername)
+      .then((list) => {
+        if (historyGen.current !== gen) return;
+        const loaded: Msg[] = list
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .map((m) => ({
+            id: ++msgSeq,
+            role: m.role,
+            content: m.content,
+            ...(m.error ? { error: m.error } : {}),
+            done: true,
+          }));
+        if (loaded.length === 0) return;
+        setMessages((cur) => (cur.length > 0 ? cur : loaded));
+      })
+      .catch((e) => {
+        if (historyGen.current !== gen || onAuthError(e)) return;
+      });
   }, [fp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -177,7 +199,7 @@ export function ChatPage(
     <Flex vertical className={embedded ? 'chat-page ide-chat' : 'chat-page'} gap={12}>
       <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
         {embedded
-          ? '在 IDE 里直接向网关发起流式对话，模型与侧栏「对话」相同。'
+          ? '左侧对话，右侧是该任务的开发页，可以边聊边看效果。'
           : session
             ? '当前进入该任务的持久会话（有记忆）。消息走网关 /v1 任务路由，与微信渠道同一套任务隔离。'
             : '未绑定任务时为 oneshot 测试。从「任务管理」点「对话」可进入对应任务的持久会话。'}
