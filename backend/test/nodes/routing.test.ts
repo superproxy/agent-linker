@@ -173,6 +173,28 @@ test('RemoteNodeAdapter：在线时事件映射 + 结果透传；离线直接抛
   );
 });
 
+test('RemoteNodeAdapter：指定模型才下发，未指定不带 model', async () => {
+  const seen: RemoteTurnRequest[] = [];
+  fakeRunTurn = async (req, onEvent) => {
+    seen.push(req);
+    onEvent({ kind: 'text', text: 'ok' });
+    return { status: 'completed' };
+  };
+  const link: NodeLink = {
+    nodeId: 'n1',
+    online: true,
+    runTurn: (req, cb) => fakeRunTurn(req, cb),
+  };
+  const adapter = new RemoteNodeAdapter('n1', 'pi', link);
+  await adapter.chat(
+    { messages: [{ role: 'user', content: '你好' }], model: ' volcengine/deepseek-v4-flash-ga-260731 ' },
+    { onText: () => {} },
+  );
+  await adapter.chat({ messages: [{ role: 'user', content: '你好' }] }, { onText: () => {} });
+  assert.equal(seen[0]?.model, 'volcengine/deepseek-v4-flash-ga-260731');
+  assert.equal(seen[1]?.model, undefined);
+});
+
 test('RemoteNodeAdapter：空 user 文本直接报错（不发起远程 turn）', async () => {
   let called = false;
   const link: NodeLink = {

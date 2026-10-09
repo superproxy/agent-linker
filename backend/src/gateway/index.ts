@@ -27,7 +27,7 @@ import { IdeWorkspaceError } from '../remote/ide-workspace.js';
 import { AgentManager, type AgentPatch } from './agents/manager.js';
 import { AGENT_CATALOG, enrichAgentInfos, type AcpAgentKind } from './agents/acpWrapper.js';
 import { AgentInstallError, runAgentInstall } from './agents/installCli.js';
-import { collectModelCandidates } from './modelcandidates.js';
+import { collectModelCandidates, readPiDefaultModel } from './modelcandidates.js';
 import { createJsonStore } from './tasks/store.js';
 import { TaskService } from './tasks/service.js';
 import { readTaskSkillMarkdown } from './tasks/skill-files.js';
@@ -665,11 +665,13 @@ export async function buildServer(options?: {
         ? { nodeId: routing.nodeId, agentId: routing.agentId, taskId: routing.taskId }
         : { model: modelForChat };
 
+    const configuredModel = routing.kind === 'chat' ? manager.configuredModel(routing.agentId) : undefined;
     const chatRequest = {
       messages: [{ role: 'user' as const, content: prompt }],
       ...(sessionKeyForChat ? { sessionKey: sessionKeyForChat } : {}),
       ...(routing.kind === 'chat' && routing.cwd ? { cwd: routing.cwd } : {}),
       ...(routing.kind === 'chat' && routing.env ? { env: routing.env } : {}),
+      ...(configuredModel ? { model: configuredModel } : {}),
     };
     const meta = newMeta(modelForChat);
     const rememberTurn = (assistant: { content: string; error?: string }) => {
@@ -976,8 +978,15 @@ export async function buildServer(options?: {
       return reply.code(403).send(openaiError('需要管理员权限', 'invalid_request_error', 'forbidden'));
     }
     const candidates: Record<string, string[]> = {};
-    for (const d of manager.listAgentDetails()) candidates[d.id] = collectModelCandidates(d.type);
-    return { candidates };
+    const defaults: Record<string, string> = {};
+    for (const d of manager.listAgentDetails()) {
+      candidates[d.id] = collectModelCandidates(d.type);
+      if (d.type === 'pi') {
+        const fallback = readPiDefaultModel();
+        if (fallback) defaults[d.id] = fallback;
+      }
+    }
+    return { candidates, defaults };
   });
 
   app.patch('/api/agents/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

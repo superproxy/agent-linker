@@ -44,10 +44,12 @@ export class RemoteNodeAdapter implements AgentAdapter {
     const text = lastUserText(req.messages) ?? '';
     if (!text) throw new Error('请求中没有可发送的 user 文本（网关一期仅支持文本）');
     let sawOutput = false;
+    const model = req.model?.trim();
     const result = await this.link.runTurn(
       {
         agentId: this.id,
         text,
+        ...(model ? { model } : {}),
         ...(req.sessionKey?.trim() ? { sessionKey: req.sessionKey.trim() } : {}),
         ...(req.cwd?.trim() ? { cwd: req.cwd } : {}),
         ...(req.permissionMode ?? this.permissionMode

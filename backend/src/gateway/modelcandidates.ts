@@ -89,6 +89,37 @@ function collectPiCandidates(): string[] {
   return [...new Set(fromProviders)].sort();
 }
 
+/** 从 pi settings.json 的 defaultProvider / defaultModel 合成 providerId/modelId */
+export function piDefaultModelId(settings: MaybeRecord | null): string | undefined {
+  if (!settings) return undefined;
+  const provider = typeof settings.defaultProvider === 'string' ? settings.defaultProvider.trim() : '';
+  const model = typeof settings.defaultModel === 'string' ? settings.defaultModel.trim() : '';
+  if (!provider || !model || provider.includes('/') || model.includes('/')) return undefined;
+  return `${provider}/${model}`;
+}
+
+/** 本机 ~/.pi/agent/settings.json 的默认模型；缺失或字段不完整时返回 undefined */
+export function readPiDefaultModel(): string | undefined {
+  return piDefaultModelId(tryReadJson(join(homedir(), '.pi', 'agent', 'settings.json')));
+}
+
+/**
+ * 一轮对话实际要下发的会话模型。
+ * 显式指定优先；未指定时 pi 用 settings.json 默认模型，用来覆盖持久会话里残留的模型。
+ * 其它 agent 没有统一的默认模型文件，未指定则不改会话里已有的模型。
+ */
+export function resolveTurnModel(
+  agentName: string,
+  requested: string | undefined,
+  piDefault: () => string | undefined = readPiDefaultModel,
+): string | undefined {
+  const explicit = requested?.trim();
+  if (explicit) return explicit;
+  if (agentName !== 'pi') return undefined;
+  const fallback = piDefault()?.trim();
+  return fallback || undefined;
+}
+
 /** 按 agent 后端类型收集候选；未知类型或读取失败返回空数组 */
 export function collectModelCandidates(kind: CandidateKind): string[] {
   try {

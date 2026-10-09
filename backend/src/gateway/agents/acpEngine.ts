@@ -9,7 +9,7 @@ import { createAcpRuntime, createAgentRegistry, createRuntimeStore, isAcpRuntime
 import type { AgentDefinition, AgentDescriptor, NodeAgentInfo, PermissionPolicySpec } from '@linkagent/shared';
 import { ACP_AGENT_KINDS } from '@linkagent/shared';
 import { lastUserText } from '@linkagent/shared/opencode';
-import { collectModelCandidates } from '../modelcandidates.js';
+import { collectModelCandidates, resolveTurnModel } from '../modelcandidates.js';
 
 export type AcpAgentKind = (typeof ACP_AGENT_KINDS)[number];
 
@@ -420,22 +420,23 @@ export class AcpEngine {
         throw err;
       }
 
-      if (opts.model) {
+      const sessionModel = resolveTurnModel(this.agentName, opts.model);
+      if (sessionModel) {
         const knownPi = this.agentName === 'pi' ? collectModelCandidates('pi') : [];
-        const skipUnregisteredPi = this.agentName === 'pi' && (knownPi.length === 0 || !knownPi.includes(opts.model));
+        const skipUnregisteredPi = this.agentName === 'pi' && (knownPi.length === 0 || !knownPi.includes(sessionModel));
         if (skipUnregisteredPi) {
           opts.onEvent?.({
             kind: 'text',
-            text: `⚠️ 未应用会话模型 ${opts.model}（不在本机 pi 已注册清单中）。模型由 pi/ACP 自己安装维护，请清空网关 agents[].model 或改成 models.json 里已有的 providerId/modelId。`,
+            text: `⚠️ 未应用会话模型 ${sessionModel}（不在本机 pi 已注册清单中）。模型由 pi/ACP 自己安装维护，请清空网关 agents[].model 或改成 models.json 里已有的 providerId/modelId。`,
           });
         } else {
           try {
-            await runtime.setConfigOption({ handle, key: 'model', value: opts.model });
+            await runtime.setConfigOption({ handle, key: 'model', value: sessionModel });
           } catch (err) {
             if (persistent && !resetFirst && isSessionRecoveryRequiredError(err)) return attempt(true);
             const detail = err instanceof Error ? err.message : String(err);
             throw new Error(
-              `设置会话模型“${opts.model}”失败（请确认该 agent 可用模型，或调整会话模型）：${detail}`,
+              `设置会话模型“${sessionModel}”失败（请确认该 agent 可用模型，或调整会话模型）：${detail}`,
               { cause: err },
             );
           }

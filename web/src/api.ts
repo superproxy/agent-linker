@@ -496,6 +496,14 @@ export class AdminClient {
     return (await this.request('/api/agents/by-node')) as AgentsByNode;
   }
 
+  /** 各 agent 可选模型，以及 pi 在本机 settings.json 里的默认模型 */
+  async modelCandidates(): Promise<{ candidates: Record<string, string[]>; defaults: Record<string, string> }> {
+    return (await this.request('/api/agents/candidates')) as {
+      candidates: Record<string, string[]>;
+      defaults: Record<string, string>;
+    };
+  }
+
   /** 运行时热更新 agent（启停 / 切换模型，仅内存生效，重启还原 config.yaml） */
   async patchAgent(id: string, patch: { model?: string | null; enabled?: boolean }): Promise<AgentDetail> {
     const data = (await this.request(`/api/agents/${encodeURIComponent(id)}`, {

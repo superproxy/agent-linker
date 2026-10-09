@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Divider, Input, Modal, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Divider, Input, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { StarFilled } from '@ant-design/icons';
-import { AdminClient, type AgentCatalogItem, type AgentDetail, type RemoteNodeAgentView } from '../api';
+import { AdminClient, ApiError, type AgentCatalogItem, type AgentDetail, type RemoteNodeAgentView } from '../api';
 import { useRefreshTick, type AuthErrorHandler } from '../lib/hooks';
 import { notify } from '../lib/notify';
 import { CopyableCode, EmptyHint, PageCard, StateTag } from '../components/common';
@@ -31,6 +31,8 @@ export function AgentsPage(props: {
     nodes: RemoteNodeAgentView[];
   } | null>(null);
   const [catalog, setCatalog] = useState<AgentCatalogItem[]>([]);
+  const [modelChoices, setModelChoices] = useState<Record<string, string[]>>({});
+  const [modelDefaults, setModelDefaults] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [install, setInstall] = useState<{
@@ -51,9 +53,18 @@ export function AgentsPage(props: {
         setData({ defaultAgentId: v.defaultAgentId ?? '', local: [], nodes: v.nodes });
         setCatalog([]);
       } else {
-        const [v, cat] = await Promise.all([admin.agentsByNode(), admin.catalog()]);
+        const [v, cat, models] = await Promise.all([
+          admin.agentsByNode(),
+          admin.catalog(),
+          admin.modelCandidates().catch((e: unknown) => {
+            if (e instanceof ApiError) throw e;
+            return { candidates: {}, defaults: {} };
+          }),
+        ]);
         setData({ defaultAgentId: v.defaultAgentId ?? '', local: v.local?.agents ?? [], nodes: v.nodes });
         setCatalog(cat);
+        setModelChoices(models.candidates ?? {});
+        setModelDefaults(models.defaults ?? {});
       }
       setErr(null);
     } catch (e) {
@@ -151,8 +162,36 @@ export function AgentsPage(props: {
       title: '模型',
       dataIndex: 'model',
       key: 'model',
-      responsive: ['lg'],
-      render: (v?: string) => (v ? <Text code style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">—</Text>),
+      width: 280,
+      render: (v: string | undefined, a) => {
+        const listed = modelChoices[a.id] ?? [];
+        const current = v ?? '';
+        const extra = current && !listed.includes(current) ? [current] : [];
+        const fallback = modelDefaults[a.id];
+        return (
+          <Select
+            size="small"
+            showSearch
+            optionFilterProp="label"
+            popupMatchSelectWidth={false}
+            value={current}
+            disabled={busyId === a.id}
+            style={{ width: '100%', maxWidth: 280 }}
+            options={[
+              { value: '', label: fallback ? `默认模型（${fallback}）` : '默认模型' },
+              ...[...extra, ...listed].map((id) => ({ value: id, label: id })),
+            ]}
+            onChange={(next: string) => {
+              const model = next.trim();
+              void run(
+                a.id,
+                () => admin.patchAgent(a.id, { model: model || null }),
+                model ? `已切换模型：${model}` : '已改用默认模型',
+              );
+            }}
+          />
+        );
+      },
     },
     {
       title: '状态',
@@ -281,7 +320,7 @@ export function AgentsPage(props: {
       {props.scope === 'local' ? (
       <PageCard
         title="本机（网关）"
-        subtitle="这台机器开通的 agent，来自网关配置，可在此启停、切模型、设为新任务默认。"
+        subtitle="这台机器开通的 agent。模型留空即默认；选定后，本机和同名远程 agent 的任务都用这个模型。"
         loading={data === null}
       >
         <Table
@@ -294,7 +333,7 @@ export function AgentsPage(props: {
           rowClassName={(a) => (a.id === defaultAgentId ? 'agent-default-row' : '')}
         />
         <p className="page-desc" style={{ marginTop: 12, marginBottom: 0 }}>
-          启停会写入 config.yaml，重启后保留；切模型仍为运行时热更新（重启网关后还原 yaml 中的 model）。
+          选「默认模型」不会下发模型：pi 用执行机 ~/.pi/agent/settings.json 的默认模型，并覆盖持久会话里残留的模型。选定具体模型后，下一次任务请求会带上它。启停写入 config.yaml；切模型只在本次运行生效，重启后回到 yaml 里的 model。
         </p>
 
         <Divider style={{ margin: '16px 0 12px' }} orientation="left" orientationMargin={0}>

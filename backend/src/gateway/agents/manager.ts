@@ -166,6 +166,15 @@ export class AgentManager {
     return out;
   }
 
+  /**
+   * 本机 agent 当前生效的会话模型。
+   * 空表示未指定：远程任务不下发 model，由执行机使用该 agent 的默认模型。
+   */
+  configuredModel(agentId: string): string | undefined {
+    const model = this.adapters.get(normalizeAgentId(agentId))?.model?.trim();
+    return model || undefined;
+  }
+
   /** (nodeId, agentId) 是否当前可路由（任务绑定校验用） */
   hasRoutingAgent(nodeId: string | undefined, agentId: string): boolean {
     return this.resolveForRouting(nodeId, agentId).kind === 'ok';

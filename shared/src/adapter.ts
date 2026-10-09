@@ -130,7 +130,7 @@ export interface AgentDefinition {
   /**
    * 会话默认模型：建会话后经 ACP session/set_config_option（configId "model"）下发。
    * 取值必须是该 agent 已注册的模型（pi 为 ~/.pi/agent/models.json 的 providerId/modelId）。
-   * 未设置则不调用，沿用 agent 自身默认（pi 读 ~/.pi/agent/settings.json）。
+   * 未设置时 pi 在执行机按 ~/.pi/agent/settings.json 的默认模型下发，覆盖持久会话里残留的模型。
    */
   model?: string;
   /** 是否启用；缺省 true。写入 config.yaml 后重启保留 */
@@ -156,6 +156,12 @@ export interface ChatRequest {
   sessionKey?: string;
   /** 会话工作目录：任务级 cwd 时传入；缺省用 agent 默认 cwd（definition.cwd / defaultCwd / 网关启动目录） */
   cwd?: string;
+  /**
+   * 本轮要使用的会话模型（providerId/modelId）。
+   * 远程节点据此 set_config_option；缺省表示用该 agent 自己的默认模型。
+   * 本机 AcpWrapper 仍用自身运行时模型，不读这个字段。
+   */
+  model?: string;
   /**
    * 启动 ACP 子进程时叠加的环境变量（默认任务任务管理 skill 的 LINKAGENT_*）。
    * 不写入 agents[].env，按会话隔离；acpx 的 agentProcessEnv 不落盘。
