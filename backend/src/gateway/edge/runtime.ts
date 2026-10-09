@@ -127,6 +127,38 @@ async function ensureFrp(
   return { frps, frpc };
 }
 
+/**
+ * 网关进程的 PATH 常常比登录 shell 短，`spawn('docker')` 会 ENOENT。
+ * 先查 PATH，再查常见安装位置（Linux `/usr/bin/docker`，Windows Docker Desktop）。
+ */
+export function dockerExecutable(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string | null {
+  const pathValue = env.PATH ?? env.Path ?? '';
+  const sep = platform === 'win32' ? ';' : ':';
+  const names = platform === 'win32' ? ['docker.exe', 'docker.cmd', 'docker'] : ['docker'];
+  for (const dir of pathValue.split(sep)) {
+    const trimmed = dir.trim();
+    if (!trimmed) continue;
+    for (const name of names) {
+      const candidate = join(trimmed, name);
+      if (exists(candidate)) return candidate;
+    }
+  }
+  const fixed = platform === 'win32'
+    ? [
+        join(env.ProgramFiles || 'C:\\Program Files', 'Docker', 'Docker', 'resources', 'bin', 'docker.exe'),
+        join(env.LOCALAPPDATA || '', 'Programs', 'DockerDesktop', 'resources', 'bin', 'docker.exe'),
+      ]
+    : ['/usr/bin/docker', '/usr/local/bin/docker'];
+  for (const candidate of fixed) {
+    if (candidate && exists(candidate)) return candidate;
+  }
+  return null;
+}
+
 function watchChild(name: string, child: EdgeChild): void {
   child.on('error', (err) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -161,7 +193,12 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
   const platform = opts.platform ?? process.platform;
   const arch = opts.arch ?? process.arch;
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const spawnFn = opts.spawnFn ?? (spawn as EdgeSpawn);
+  const dockerBin = opts.spawnFn ? 'docker' : dockerExecutable();
+  const spawnFn: EdgeSpawn = opts.spawnFn ?? ((command, args, options) => {
+    const bin = command === 'docker' ? (dockerBin ?? command) : command;
+    const shell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
+    return spawn(bin, args, shell ? { ...options, shell: true } : options);
+  });
   const extractFn = opts.extractFn ?? extractArchive;
   const children: EdgeChild[] = [];
   const noopEdge: GatewayEdge = {
@@ -180,7 +217,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         // 进程已退出
       }
     }
-    if (!composeFile) return;
+    if (!composeFile || (!opts.spawnFn && !dockerBin)) return;
     try {
       const down = spawnFn('docker', apisixComposeArgs(composeFile, 'down'), { windowsHide: true, stdio: 'ignore' });
       watchChild('apisix', down);
@@ -273,11 +310,18 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     }
 
     quitStockNginx(opts.runtimeDir, opts.toolsDir, platform, spawnFn);
+    if (!opts.spawnFn && !dockerBin) {
+      console.error('[edge] 未找到 docker，跳过 APISIX。登录 shell 的 which docker 若是 /usr/bin/docker，确认该文件存在后重启网关。');
+    } else if (dockerBin && dockerBin !== 'docker') {
+      console.log(`[edge] APISIX 使用 ${dockerBin}`);
+    }
+    if (opts.spawnFn || dockerBin) {
     const apisixChild = spawnFn('docker', apisixComposeArgs(composeFile, 'up'), { windowsHide: true, stdio: 'ignore' });
     watchChild('apisix', apisixChild);
     children.push(apisixChild);
-    if (!opts.spawnFn) await waitForApisix(adminUrl, adminKey, adminFetch);
+    if (!opts.spawnFn) await waitForApisix(adminUrl, apiKey, adminFetch);
     console.log(`[edge] APISIX 已在 ${NGINX_LISTEN_HOST}:${NGINX_LISTEN_PORT} 监听，管理接口 ${adminUrl}`);
+    }
   } catch (err) {
     console.error(`[edge] 安装或启动失败：${err instanceof Error ? err.message : String(err)}`);
   }

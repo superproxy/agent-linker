@@ -6,7 +6,7 @@ import test from 'node:test';
 import { FRP_VERSION, NGINX_VERSION, frpAsset, nginxAsset } from '../../src/gateway/edge/assets.js';
 import { renderFrpsConf, renderNginxConf } from '../../src/gateway/edge/render.js';
 import { TASK_PUBLIC_HOST } from '../../src/gateway/edge/apisix.ts';
-import { startGatewayEdge, type EdgeChild } from '../../src/gateway/edge/runtime.js';
+import { dockerExecutable, startGatewayEdge, type EdgeChild } from '../../src/gateway/edge/runtime.js';
 import { renderFrpcConfig } from '../../../nat-tunnel/src/tunnel.js';
 
 test('frp 安装包按平台选择官方发行文件', () => {
@@ -57,6 +57,16 @@ test('nginx 只监听回环，frps 控制口对外开放、面板在回环', () 
   assert.match(withPlugin, /addr = "127\.0\.0\.1:8787"/);
   assert.match(withPlugin, /path = "\/internal\/frp\/handler"/);
   assert.match(withPlugin, /ops = \["Login"\]/);
+});
+
+test('dockerExecutable：PATH 没有 docker 时用 /usr/bin/docker', () => {
+  const seen: string[] = [];
+  const found = dockerExecutable('linux', { PATH: '/usr/local/bin' }, (path) => {
+    seen.push(path);
+    return path === '/usr/bin/docker';
+  });
+  assert.equal(found, '/usr/bin/docker');
+  assert.equal(seen.includes('/usr/bin/docker'), true);
 });
 
 test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX', async () => {
