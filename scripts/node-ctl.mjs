@@ -43,9 +43,6 @@ export const NODE_LAUNCH_HELP = `用法
   FRPS_TOKEN                    不填则用 LINKAGENT_GATEWAY_TOKEN（nt_）。每台节点一枚
   FRPS_SERVER_ADDR              frps 地址，缺省 host.docker.internal
   FRPS_SERVER_PORT              frpc 控制口，缺省 7000
-  LINKAGENT_IDE_DOMAIN          code-server，缺省 ide.localhost:7080
-  LINKAGENT_DEV_DOMAIN          工作区 dev，缺省 dev.localhost:7080，容器内 5173
-  LINKAGENT_VNC_DOMAIN          noVNC，缺省 vnc.localhost:7080，容器内 6080
   LINKAGENT_WORKSPACE           宿主机任务根，缺省 code-server/node-docker/workspace
   LINKAGENT_NODE_USER           用户名。Docker 只挂载 <workspace>/<用户>，node 在这一层启动
   LINKAGENT_AGENT_HOME          宿主机 agent 配置目录，缺省 ~/.pi，挂到容器 /root/.pi

@@ -56,7 +56,7 @@ function frpcDomain(value: string | undefined, fallback: string): string {
   return text;
 }
 
-/** 主机模式缺省连旁边的 frps。容器里有 FRPS_SERVER_* / LINKAGENT_*_DOMAIN 时用那组地址。 */
+/** 主机模式缺省连旁边的 frps。SaaS 只配 FRPS_SERVER_*；customDomains 固定 dev/vnc.localhost，公网域名由 APISIX 改写 Host。 */
 export function renderWorkspaceFrpc(
   token: string,
   endpoint?: { serverAddr?: string; serverPort?: number; devDomain?: string; vncDomain?: string },
@@ -93,13 +93,11 @@ function frpcToken(file: string | undefined): string {
   return (process.env.FRPS_TOKEN ?? '').trim() || (process.env.LINKAGENT_GATEWAY_TOKEN ?? '').trim();
 }
 
-function frpcEndpointFromEnv(): { serverAddr?: string; serverPort?: number; devDomain?: string; vncDomain?: string } {
+function frpcEndpointFromEnv(): { serverAddr?: string; serverPort?: number } {
   const port = Number(process.env.FRPS_SERVER_PORT ?? '');
   return {
     serverAddr: process.env.FRPS_SERVER_ADDR,
     serverPort: Number.isInteger(port) && port > 0 ? port : undefined,
-    devDomain: process.env.LINKAGENT_DEV_DOMAIN,
-    vncDomain: process.env.LINKAGENT_VNC_DOMAIN,
   };
 }
 

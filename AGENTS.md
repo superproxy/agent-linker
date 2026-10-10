@@ -114,5 +114,6 @@ pnpm --filter @linkagent/web build    # 前端构建
 | [`docs/faq.md`](docs/faq.md) | 常用命令、测试方法、TS/ESM 坑、错误与密钥处理、已知遗留 |
 | [`docs/design.md`](docs/design.md) / [`docs/deployment.md`](docs/deployment.md) | 设计记录 / 部署说明 |
 | [`docs/edge-startup.md`](docs/edge-startup.md) | 网关 nginx / frps 与 nat-tunnel 启动顺序、端口和令牌 |
+| [`docs/edge-frpc-apisix.md`](docs/edge-frpc-apisix.md) | frpc 登记到 frps 的流程，以及 APISIX 的 web / code / vnc 路由 |
 | [`docs/pi.md`](docs/pi.md) | Pi 模型模板、云机自装、`pi-sandbox`（无 Docker）与缺 `rg`/`socat` 排障 |
 | [`skills/linkagent-tasks/SKILL.md`](skills/linkagent-tasks/SKILL.md) | 默认任务任务管理 skill：启动 pi 注入 `LINKAGENT_*`（`pat_`），创建/列出/切换任务 |

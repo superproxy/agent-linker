@@ -26,9 +26,9 @@ export function renderEmbeddedHttpFrpc(opts) {
   const serverAddr = plain(opts.serverAddr || 'host.docker.internal', 'frps 地址');
   const serverPort = Number(opts.serverPort ?? 7000);
   if (!Number.isInteger(serverPort) || serverPort <= 0) throw new Error('frps 端口无效');
-  const ideDomain = domainHost(opts.ideDomain || 'ide.localhost:7080', 'code-server 域名');
-  const devDomain = domainHost(opts.devDomain || 'dev.localhost:7080', 'dev 域名');
-  const vncDomain = domainHost(opts.vncDomain || 'vnc.localhost:7080', 'VNC 域名');
+  const ideDomain = domainHost(opts.ideDomain || 'ide.localhost', 'code-server 域名');
+  const devDomain = domainHost(opts.devDomain || 'dev.localhost', 'dev 域名');
+  const vncDomain = domainHost(opts.vncDomain || 'vnc.localhost', 'VNC 域名');
   return `serverAddr = "${serverAddr}"
 serverPort = ${serverPort}
 auth.method = "token"
@@ -70,9 +70,6 @@ if (isMain()) {
     token,
     serverAddr: process.env.FRPS_SERVER_ADDR,
     serverPort: process.env.FRPS_SERVER_PORT,
-    ideDomain: process.env.LINKAGENT_IDE_DOMAIN,
-    devDomain: process.env.LINKAGENT_DEV_DOMAIN,
-    vncDomain: process.env.LINKAGENT_VNC_DOMAIN,
   });
   const out = process.env.FRPC_OUT || '/etc/linkagent/frpc.toml';
   mkdirSync(dirname(out), { recursive: true });
