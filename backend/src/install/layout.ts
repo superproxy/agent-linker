@@ -27,8 +27,8 @@ export const SERVER_DEPLOY_MARKER = '.linkagent-server';
 /** 仓库内一行绝对路径，指向 {@link defaultInstallRoot} 或 LINKAGENT_INSTALL */
 export const INSTALL_PATH_FILE = '.linkagent-install';
 const BUNDLED_DIST_DIR = join('dist', 'linkagent');
-/** 与源码仓库并列的默认安装目录名（如 /root/agent-linker → /root/linkagent） */
-const DEFAULT_INSTALL_DIRNAME = 'linkagent';
+/** Linux 网关机默认运行安装目录（Release install.sh 同源） */
+const DEFAULT_INSTALL_UNIX = '/opt/agent-linker';
 const STATE_DIR = '.runtime-state';
 
 /** dist 独立包 / 仓库 dev 统一的运行时目录名（相对安装根） */
@@ -69,9 +69,13 @@ export function findInstallRoot(): string {
   return resolveRepoInstallRoot(findRepoRoot());
 }
 
-/** 默认安装目录：与 git 仓库同级 `<parent>/linkagent` */
-export function defaultInstallRoot(repoRoot: string): string {
-  return join(dirname(repoRoot), DEFAULT_INSTALL_DIRNAME);
+/** 默认运行安装目录（Release `install.sh` 默认 `/opt/agent-linker`） */
+export function defaultInstallRoot(_repoRoot: string): string {
+  if (process.platform === 'win32') {
+    const base = process.env.ProgramData ?? 'C:\\ProgramData';
+    return join(base, 'linkagent');
+  }
+  return DEFAULT_INSTALL_UNIX;
 }
 
 /** 读取 LINKAGENT_INSTALL 或仓库 `.linkagent-install` 中的一行路径 */

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 解析 linkagent 运行安装根（与 backend/src/install/layout.ts 一致）：
-#   LINKAGENT_HOME / LINKAGENT_INSTALL  >  .linkagent-install  >  <repo>/../linkagent  >  legacy dist
+# 解析 linkagent 运行安装根：
+#   LINKAGENT_HOME / LINKAGENT_INSTALL  >  .linkagent-install  >  /opt/agent-linker
+# shellcheck source=sync-install.sh
 linkagent_repo_root() {
   local here="$1"
   cd "$here" || exit 1
@@ -14,11 +15,6 @@ linkagent_repo_root() {
     cd "$parent" || exit 1
   done
   pwd
-}
-
-linkagent_default_install() {
-  local repo="$1"
-  echo "$(dirname "$repo")/linkagent"
 }
 
 linkagent_read_install_path() {
@@ -35,7 +31,13 @@ linkagent_read_install_path() {
       return
     fi
   fi
-  linkagent_default_install "$repo"
+  if [ -f "$(dirname "${BASH_SOURCE[0]}")/sync-install.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$(dirname "${BASH_SOURCE[0]}")/sync-install.sh"
+    linkagent_default_install_dir
+    return
+  fi
+  echo "/opt/agent-linker"
 }
 
 linkagent_install_root() {

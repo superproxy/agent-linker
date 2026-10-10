@@ -154,15 +154,26 @@ function copyPiSetup(destRoot) {
     cpSync(piAgentSrc, join(destRoot, 'config', 'pi-agent'), { recursive: true });
   }
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
-  for (const rel of ['setup-pi.mjs', 'setup-channels.mjs', 'edge.sh', 'config-init.mjs', 'config-init.sh']) {
+  mkdirSync(join(destRoot, 'scripts', 'lib'), { recursive: true });
+  for (const rel of [
+    'setup-pi.mjs',
+    'setup-channels.mjs',
+    'edge.sh',
+    'config-init.mjs',
+    'config-init.sh',
+    'install.sh',
+    'lib/sync-install.sh',
+    'lib/install-root.sh',
+  ]) {
     const src = join(REPO, 'scripts', rel);
     if (!existsSync(src)) continue;
-    cpSync(src, join(destRoot, 'scripts', rel));
+    const dest = join(destRoot, 'scripts', rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(src, dest);
   }
-  const installRootLib = join(REPO, 'scripts', 'lib', 'install-root.sh');
-  if (existsSync(installRootLib)) {
-    mkdirSync(join(destRoot, 'scripts', 'lib'), { recursive: true });
-    cpSync(installRootLib, join(destRoot, 'scripts', 'lib', 'install-root.sh'));
+  const pkgInstall = join(REPO, 'scripts', 'install.sh');
+  if (existsSync(pkgInstall)) {
+    cpSync(pkgInstall, join(destRoot, 'install.sh'));
   }
   const edgeDir = join(REPO, 'scripts', 'edge');
   if (existsSync(edgeDir)) {
@@ -562,6 +573,14 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 - \`weixin.yaml\`：个人微信渠道；单机包 \`mode: external\`，后台 /admin 扫码
 - \`node.yaml\`：本机节点连接器、\`node.agents\`（含 pi 等 ACP 权限）
 运行时变更（agent 启停、微信账号列表、子进程回连地址等）写入 \`.runtime-state/gateway/overlay.json\`，不改上述 yaml。
+
+## 安装到运行目录（Release 包）
+解压后在本目录执行（默认安装到 **/opt/agent-linker**，不覆盖已有 config 与登录态）：
+\`\`\`bash
+sudo ./install.sh
+sudo ./install.sh --restart
+LINKAGENT_INSTALL=$HOME/agent-linker ./install.sh
+\`\`\`
 
 ## 重新构建
 在源码仓库执行 \`pnpm build:dist\`，产物在 \`dist/linkagent/\`。

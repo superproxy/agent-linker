@@ -118,13 +118,10 @@ test('webRoot：dist 探测 <root>/web（index.html + assets 齐全才命中）'
   assert.equal(createInstallLayout(root).webRoot, join(root, 'web'));
 });
 
-test('resolveRepoInstallRoot：.linkagent-server 存在时归独立安装目录', () => {
+test('resolveRepoInstallRoot：.linkagent-server 存在时默认 /opt/agent-linker', () => {
   const repo = tmpRoot();
-  const install = defaultInstallRoot(repo);
-  mkdirSync(install, { recursive: true });
-  writeFileSync(join(install, '.linkagent-root'), 'install\n');
   writeFileSync(join(repo, '.linkagent-server'), 'server\n');
-  assert.equal(resolveRepoInstallRoot(repo), install);
+  assert.equal(resolveRepoInstallRoot(repo), defaultInstallRoot(repo));
 });
 
 test('resolveRepoInstallRoot：.linkagent-install 指定路径', () => {

@@ -340,8 +340,8 @@ Linux 可用 systemd 托管（以独立包为例）：
 Description=LinkAgent Gateway
 After=network-online.target
 [Service]
-WorkingDirectory=/opt/linkagent
-ExecStart=/usr/bin/pnpm start
+WorkingDirectory=/opt/agent-linker
+ExecStart=/opt/agent-linker/start.sh start
 Restart=always
 RestartSec=3
 [Install]
@@ -378,20 +378,40 @@ WantedBy=multi-user.target
 
 | 路径 | 含义 |
 |---|---|
-| `/root/agent-linker/dist/linkagent` | **构建/发布目录**（每次 build 可重建） |
-| `/root/linkagent`（默认） | **运行安装目录**（`config/`、`.runtime-state/`、运行中 `bin/`） |
+| `dist/linkagent`（仓库内或解压包） | **发布包**（含 `./install.sh`） |
+| **`/opt/agent-linker`**（默认） | **运行安装目录**（`config/`、`.runtime-state/`） |
 
 ```bash
 git clone https://github.com/superproxy/agent-linker.git /root/agent-linker
 cd /root/agent-linker
-bash scripts/server-update.sh --restart
+bash scripts/server-install-update.sh --restart
+# 或 pnpm server:install-update -- --restart
 ```
 
-`server-update.sh` 会把 **`backend/config`**、原 **`dist/linkagent/config`** 等 **迁入** 安装目录（缺文件才复制）；**`.runtime-state`（含登录账号）** 从旧 dist / 仓库根合并进安装目录。升级只同步 bin/web/scripts 等，**不覆盖** 安装目录已有 yaml 与运行态。
+**首次从旧布局迁到 `/opt/agent-linker`**（一次性，与 build 分离）：
 
-自定义安装路径：`LINKAGENT_INSTALL=/opt/linkagent bash scripts/server-update.sh`。
+```bash
+cd /root/agent-linker
+# 若曾在 dist/linkagent 或其它目录直接跑，可指定：
+# LINKAGENT_LEGACY_ROOT=/root/agent-linker/dist/linkagent bash scripts/migrate-to-install.sh
+bash scripts/migrate-to-install.sh
+bash scripts/server-install-update.sh --restart
+```
 
-**改配置 / 运维**：编辑 **`/root/linkagent/config/*.yaml`**，`cd /root/linkagent && ./start.sh restart`。
+`migrate-to-install.sh` 只复制**安装目录尚缺**的 `config/*.yaml` 与 `.runtime-state` 子路径（来源：`backend/config`、仓库 `config/`、`dist/linkagent`、可选 `LINKAGENT_LEGACY_ROOT`），**不打包进 dist**，也不随 `build:dist` 执行。
+
+| 场景 | 脚本 |
+|---|---|
+| 源码网关机（clone → build → deploy） | `scripts/server-install-update.sh` |
+| Release 解压包（仅 deploy） | 包内 `./install.sh` |
+
+日常升级：上述部署脚本只同步 bin/web/scripts 等，**不覆盖** 安装目录已有 yaml 与运行态。
+
+Release：`sudo ./install.sh --restart`（若尚无配置需先 migrate 或拷贝 config/state）。  
+源码：`bash scripts/server-install-update.sh --restart`（`--no-pull` / `--skip-build` 见 `--help`）。  
+自定义路径：`LINKAGENT_INSTALL=/opt/agent-linker`（默认）。
+
+**改配置 / 运维**：编辑 **`/opt/agent-linker/config/*.yaml`**，`cd /opt/agent-linker && ./start.sh restart`。
 
 重启边缘：
 
@@ -402,8 +422,8 @@ bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
 | 路径 | 说明 |
 |---|---|
 | `backend/config/*.template` | 入库模板 |
-| **`/root/linkagent/config/`** | 网关机**运行配置**（由原 backend/config 等迁入） |
-| **`/root/linkagent/.runtime-state/`** | **登录账号、节点、edge**（升级不覆盖） |
+| **`/opt/agent-linker/config/`** | 运行配置 |
+| **`/opt/agent-linker/.runtime-state/`** | 登录账号、节点、edge |
 | `dist/linkagent/` | 构建产物；升级时复制 bin/web 到安装目录 |
 | `.linkagent-server` | 网关机标记：`pnpm pm` / `edge.sh` 与 dist 同安装根；开发机勿创建 |
 

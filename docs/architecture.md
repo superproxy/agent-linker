@@ -63,7 +63,7 @@
 
 **执行机独立包** `dist/linkagent-node/` 是**另一个安装根**，形态相同（`bin/node.mjs` + `config/gateway.yaml` stub + `config/node.yaml`），不含 gateway/channels 全套 bin。
 
-**网关机**：`dist/linkagent` 仅构建产物；**运行安装目录**默认与仓库并列的 `../linkagent`（见 `.linkagent-install`）。`server-update.sh` 同步发布物到安装目录，**config / .runtime-state 留在安装目录**（含登录账号）。
+**网关机**：`dist/linkagent` 仅构建产物；**运行安装目录**默认 `/opt/agent-linker`（见 `.linkagent-install`）。`server-install-update.sh` 在 clone 仓库内完成 pull → build → deploy；**config / .runtime-state 留在安装目录**（含登录账号）。一次性迁入用 `migrate-to-install.sh`。
 
 ## 分层与依赖方向
 
