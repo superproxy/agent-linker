@@ -128,12 +128,18 @@ function copyPiSetup(destRoot) {
     cpSync(piAgentSrc, join(destRoot, 'server', 'config', 'pi-agent'), { recursive: true });
   }
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
-  cpSync(join(REPO, 'scripts', 'setup-pi.mjs'), join(destRoot, 'scripts', 'setup-pi.mjs'));
-  cpSync(join(REPO, 'scripts', 'setup-channels.mjs'), join(destRoot, 'scripts', 'setup-channels.mjs'));
-  cpSync(join(REPO, 'scripts', 'edge.sh'), join(destRoot, 'scripts', 'edge.sh'));
-  mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
-  cpSync(join(REPO, 'scripts', 'edge', 'docker-compose.yaml'), join(destRoot, 'scripts', 'edge', 'docker-compose.yaml'));
-  cpSync(join(REPO, 'scripts', 'edge', 'Dockerfile'), join(destRoot, 'scripts', 'edge', 'Dockerfile'));
+  for (const rel of ['setup-pi.mjs', 'setup-channels.mjs', 'edge.sh']) {
+    const src = join(REPO, 'scripts', rel);
+    if (existsSync(src)) cpSync(src, join(destRoot, 'scripts', rel));
+  }
+  const edgeDir = join(REPO, 'scripts', 'edge');
+  if (existsSync(edgeDir)) {
+    mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
+    for (const rel of ['docker-compose.yaml', 'Dockerfile']) {
+      const src = join(edgeDir, rel);
+      if (existsSync(src)) cpSync(src, join(destRoot, 'scripts', 'edge', rel));
+    }
+  }
 }
 
 /** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */
