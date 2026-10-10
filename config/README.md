@@ -10,5 +10,6 @@
 | `node.yaml` | 本机 node 连接器、serveWeb 等 |
 
 - 模板：`backend/config/*.template`；`build:dist` 会在 dist 内生成 yaml 并附带 `*.template`。
+- **网关机**：运维 yaml 放在 **`dist/linkagent/config/`**；`scripts/server-update.sh` 升级时**不覆盖**该目录已有 yaml。
 - 重置：`bash scripts/config-init.sh`（仓库根或 dist 内，仅需 node）。
 - 本目录下 `*.yaml` 已 gitignore；勿提交密钥。

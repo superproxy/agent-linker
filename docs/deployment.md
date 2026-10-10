@@ -371,16 +371,23 @@ WantedBy=multi-user.target
 | 本地 dev | 仓库根 | `pnpm pm` → tsx `backend/src/...` |
 | 网关机 | `dist/linkagent/` | `./start.sh` → `bin/*.mjs` |
 
-**不要**长期 tsx 跑线上；**不要**改 `backend/config/*.yaml`（仅模板）。`server-update` 会把 legacy 迁到 **`config/`**。
+**不要**长期 tsx 跑线上；**不要**改 `backend/config/*.yaml`（仅模板）。
 
-一键升级（只备份/恢复 **`.runtime-state`**，yaml 以仓库 **`config/`** 为准，build 打进 dist）：
+#### 标准流程：git clone → build → install target（不覆盖配置）
 
 ```bash
-bash scripts/server-update.sh           # pull + install + build:dist
-bash scripts/server-update.sh --restart # 同上 + dist 内 restart gateway
+# 首次
+git clone https://github.com/superproxy/agent-linker.git /root/agent-linker
+cd /root/agent-linker
+bash scripts/server-update.sh --restart
+
+# 后续升级（git pull → build:dist → npm install 到 dist/linkagent）
+bash scripts/server-update.sh --restart
 ```
 
-改配置（二选一）：编辑仓库 **`config/*.yaml`** 再 `server-update.sh`；或 build 后直接改 **`dist/linkagent/config/*.yaml`** 再 restart。重置为模板：`cd dist/linkagent && bash scripts/config-init.sh --force`。
+`server-update.sh` 在 build 前备份 **`dist/linkagent/config/`** 与 **`.runtime-state/`**，构建完成后**原样恢复**（线上 yaml 不被 build 模板覆盖）；仅刷新 **`config/*.template`**。自定义安装目录：`LINKAGENT_TARGET=/opt/linkagent bash scripts/server-update.sh`。
+
+**改配置**：直接编辑 **`dist/linkagent/config/*.yaml`** 后 `./start.sh restart`（升级脚本不会盖掉）。重置为模板：`cd dist/linkagent && bash scripts/config-init.sh --force`。
 
 重启边缘：
 
@@ -391,8 +398,8 @@ bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
 | 路径 | 说明 |
 |---|---|
 | `backend/config/*.template` | 入库模板 |
-| **`config/*.yaml`**（仓库根） | **dev / 网关机统一改这里**（gitignore） |
-| `dist/linkagent/config/` | build 拷贝；dist 网关读此目录 |
+| **`config/*.yaml`**（仓库根） | dev 可选；网关机以 **dist/config** 为准（升级不覆盖） |
+| `dist/linkagent/config/` | **运行中生效**；gateway/channels/node 均读此目录 |
 | `dist/linkagent/bin/` | esbuild 二进制 |
 | `dist/linkagent/.runtime-state/` | 用户、节点、edge、pm 日志；升级时脚本备份恢复 |
 | `.linkagent-server` | 网关机标记：`pnpm pm` / `edge.sh` 与 dist 同安装根；开发机勿创建 |

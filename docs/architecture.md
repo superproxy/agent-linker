@@ -63,7 +63,7 @@
 
 **执行机独立包** `dist/linkagent-node/` 是**另一个安装根**，形态相同（`bin/node.mjs` + `config/gateway.yaml` stub + `config/node.yaml`），不含 gateway/channels 全套 bin。
 
-**构建**：`pnpm build:dist` 生成 `dist/linkagent/{bin,config,scripts}`，并在 `config/` 写入默认 yaml 与 `*.template`（不依赖 pnpm 做安装时 init）。**网关机**：`bash scripts/server-update.sh --restart`。
+**网关机升级**：`git clone` → `bash scripts/server-update.sh --restart`（`git pull` + `build:dist` + install 到 `dist/linkagent`；**备份并恢复** target 内 `config/` 与 `.runtime-state/`，不覆盖线上 yaml）。
 
 ## 分层与依赖方向
 
