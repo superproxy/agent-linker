@@ -78,7 +78,7 @@ pnpm typecheck          # 可选：环境自检
 
 ### 4.1 配置
 
-在 **`<安装根>/config/`** 下编辑（dev = 仓库根 `config/`，dist = `dist/linkagent/config/`）。首次 `pnpm config:init`（模板在 `backend/config/*.template`）。独立包另有 **`bin/`**（进程）、**`scripts/`**（edge/setup）。推荐 **三文件**：
+在 **`<安装根>/config/`** 下编辑。**`pnpm build:dist` 会在 `dist/linkagent/config/` 生成默认 yaml 并附带 `*.template`**，网关机安装不依赖 pnpm。可选：仓库根 `bash scripts/config-init.sh`（dev）或 dist 内 `bash scripts/config-init.sh`（仅 node）。另有 **`bin/`**、**`scripts/`**。推荐 **三文件**：
 
 | 文件 | 说明 |
 |---|---|
@@ -380,7 +380,7 @@ bash scripts/server-update.sh           # pull + install + build:dist
 bash scripts/server-update.sh --restart # 同上 + dist 内 restart gateway
 ```
 
-改配置：编辑 **`/root/agent-linker/config/*.yaml`** → `server-update.sh --restart`。
+改配置（二选一）：编辑仓库 **`config/*.yaml`** 再 `server-update.sh`；或 build 后直接改 **`dist/linkagent/config/*.yaml`** 再 restart。重置为模板：`cd dist/linkagent && bash scripts/config-init.sh --force`。
 
 重启边缘：
 
@@ -399,7 +399,7 @@ bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
 
 #### 其他
 
-- 仅开发联调：`pnpm config:init` 后 `pnpm pm restart gateway`（tsx）；若本机误有 `.linkagent-server` 用 `LINKAGENT_DEV=1`；
+- 仅开发联调：无 `config/` 时 `bash scripts/config-init.sh`，再 `pnpm pm restart gateway`；若本机误有 `.linkagent-server` 用 `LINKAGENT_DEV=1`；
 - Release 独立包：解压替换 `dist/linkagent/`，**保留** `config/` 与 `.runtime-state/` 再重启；
 - 执行机：`build:dist:node` → `dist/linkagent-node/`，保留该目录下 `node.env` 与 `.runtime-state/node/`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。

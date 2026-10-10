@@ -125,6 +125,20 @@ function copySplitConfig(destDir, profile) {
       throw new Error(`缺少 config/${name}、server/config/${name}、backend/config/${name} 或 ${name}.template`);
     }
     cpSync(src, join(destDir, name));
+    if (existsSync(template)) {
+      cpSync(template, join(destDir, `${name}.template`));
+    }
+  }
+}
+
+/** 独立包内无 backend/ 时，config-init 仍可从 config/*.template 重新生成 yaml */
+function copyConfigTemplatesToDist(destConfigDir) {
+  mkdirSync(destConfigDir, { recursive: true });
+  for (const name of ['gateway.yaml', 'weixin.yaml', 'channels.yaml', 'node.yaml']) {
+    const template = join(REPO, 'backend', 'config', `${name}.template`);
+    if (existsSync(template)) {
+      cpSync(template, join(destConfigDir, `${name}.template`));
+    }
   }
 }
 
@@ -140,9 +154,10 @@ function copyPiSetup(destRoot) {
     cpSync(piAgentSrc, join(destRoot, 'config', 'pi-agent'), { recursive: true });
   }
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
-  for (const rel of ['setup-pi.mjs', 'setup-channels.mjs', 'edge.sh']) {
+  for (const rel of ['setup-pi.mjs', 'setup-channels.mjs', 'edge.sh', 'config-init.mjs', 'config-init.sh']) {
     const src = join(REPO, 'scripts', rel);
-    if (existsSync(src)) cpSync(src, join(destRoot, 'scripts', rel));
+    if (!existsSync(src)) continue;
+    cpSync(src, join(destRoot, 'scripts', rel));
   }
   const installRootLib = join(REPO, 'scripts', 'lib', 'install-root.sh');
   if (existsSync(installRootLib)) {
@@ -354,7 +369,7 @@ agents:
   - opencode
   - id: pi
     permissionMode: approve-all
-    # pi 会话 model 不写 yaml；本机执行 npm run setup:pi（server/config/pi-agent 模板 → ~/.pi/agent）
+    # pi 会话 model 不写 yaml；本机执行 npm run setup:pi（config/pi-agent 模板 → ~/.pi/agent）
   - workbuddy
   - trace-cli
   - id: cursor
@@ -395,7 +410,9 @@ async function buildFull(dist, skipInstall) {
   });
 
   step('4/6 复制运行资源', () => {
-    copySplitConfig(join(dist, 'config'), 'full');
+    const distCfg = join(dist, 'config');
+    copySplitConfig(distCfg, 'full');
+    copyConfigTemplatesToDist(distCfg);
     copyPiSetup(dist);
     cpSync(join(REPO, 'skills'), join(dist, 'skills'), { recursive: true });
     mkdirSync(join(dist, 'dev'), { recursive: true });
@@ -432,6 +449,7 @@ async function buildFull(dist, skipInstall) {
             'edge:restart': 'bash scripts/edge.sh restart',
             'edge:status': 'bash scripts/edge.sh status',
             'edge:build': 'bash scripts/edge.sh build',
+            'config:init': 'node scripts/config-init.mjs',
           },
           dependencies: runtimeDependenciesFull(),
         },
@@ -564,7 +582,9 @@ async function buildNode(dist, skipInstall) {
   step('3/4 生成配置 / 启停 / README', () => {
     mkdirSync(join(dist, 'config'), { recursive: true });
     mkdirSync(join(dist, 'bin'), { recursive: true });
-    copySplitConfig(join(dist, 'config'), 'node');
+    const distCfg = join(dist, 'config');
+    copySplitConfig(distCfg, 'node');
+    copyConfigTemplatesToDist(distCfg);
     writeFileSync(join(dist, 'bin', 'ctl.mjs'), NODE_CTL_SOURCE);
     writeFileSync(join(dist, '.linkagent-root'), 'linkagent-node standalone deployment root\n');
     writeFileSync(join(dist, 'node.env.example'), NODE_ENV_EXAMPLE);
@@ -588,6 +608,7 @@ async function buildNode(dist, skipInstall) {
             logs: 'node bin/ctl.mjs log',
             foreground: 'node bin/ctl.mjs foreground',
             'setup:pi': 'node scripts/setup-pi.mjs',
+            'config:init': 'node scripts/config-init.mjs',
           },
           dependencies: runtimeDependenciesNode(),
         },

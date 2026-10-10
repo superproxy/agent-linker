@@ -26,18 +26,44 @@
 
 测试与源码同构：`backend/test/<模块>/*.test.ts`。
 
-## 安装根布局（dev / dist 统一相对路径）
+## 安装根布局（推荐：单根 + 共享 bin/config）
 
-由 `backend/src/install/layout.ts` 解析 `<安装根>`（`LINKAGENT_HOME`、`.linkagent-root`、`.linkagent-server` 等）：
+多进程（gateway / channels / node / pm）**共用一个安装根**，不是每个进程各一套 `bin/`、`config/`。  
+由 `backend/src/install/layout.ts` 解析 `<安装根>`（`LINKAGENT_HOME`、`.linkagent-root`、`.linkagent-server` 等）。
 
-| 目录 | 内容 |
-|---|---|
-| `config/` | 启动 yaml（`gateway.yaml` 等）；模板在 `backend/config/*.template` |
-| `scripts/` | `edge.sh`、`setup-pi.mjs` 等（monorepo 在仓库根 `scripts/`） |
-| `bin/` | dist 内 esbuild 产物（`gateway.mjs`、`pm.mjs`…）；dev 仍 tsx 跑 `backend/src` |
-| `.runtime-state/` | 用户、节点、edge、pm 日志等 |
+```
+<安装根>/
+├── bin/                      # dist：全部进程二进制（共享）
+│   ├── gateway.mjs
+│   ├── channels.mjs
+│   ├── node.mjs
+│   ├── weixin.mjs            # 遗留单进程微信；常归 channels
+│   ├── pm.mjs                # 编排启停
+│   └── edge.mjs              # 写 frps/APISIX 配置（不常驻）
+├── config/                   # 共享目录；一文件对应一配置段（非 config/gateway/ 子树）
+│   ├── gateway.yaml          # 网关：server、auth、agents、tasks…
+│   ├── channels.yaml         # channel-gateway：企微/飞书/微信插件
+│   ├── weixin.yaml           # 个人微信 external 模式
+│   ├── node.yaml             # 本机 node 连接器 / serveWeb 等
+│   ├── *.template            # dist 构建附带，供 config-init 重置
+│   └── pi-agent/             # setup:pi 模板（非进程 yaml）
+├── scripts/                  # edge.sh、config-init.sh、setup-pi…
+├── web/、dev/                # dist 静态资源
+└── .runtime-state/           # 运行态；按模块分子目录 gateway/ nodes/ pm/ edge/
+```
 
-网关机 git 克隆：`config/` 在仓库根维护 → `pnpm build:dist` 拷入 `dist/linkagent/` → `./start.sh` 跑 `bin/`。
+| 角色 | dev 入口 | dist 入口 | 主要改动的 yaml |
+|---|---|---|---|
+| gateway | `backend/src/gateway/index.ts` | `bin/gateway.mjs` | `config/gateway.yaml` |
+| channels | `backend/src/channels/channel-gateway.ts` | `bin/channels.mjs` | `config/channels.yaml` |
+| node | `backend/src/node/connector.ts` | `bin/node.mjs` | `config/node.yaml` |
+| pm | `backend/src/supervisor/cli.ts` | `bin/pm.mjs` | 读 gateway 做健康检查与 enabled |
+
+各进程均调用 `loadSharedConfig()`：在 **同一 `configDir`** 读取 split 文件并合并为 `SharedConfig`（见 `backend/src/config/yaml.ts`）。运行时 overlay 在 `.runtime-state/gateway/`，不改 yaml 模板语义。
+
+**执行机独立包** `dist/linkagent-node/` 是**另一个安装根**，形态相同（`bin/node.mjs` + `config/gateway.yaml` stub + `config/node.yaml`），不含 gateway/channels 全套 bin。
+
+**构建**：`pnpm build:dist` 生成 `dist/linkagent/{bin,config,scripts}`，并在 `config/` 写入默认 yaml 与 `*.template`（不依赖 pnpm 做安装时 init）。**网关机**：`bash scripts/server-update.sh --restart`。
 
 ## 分层与依赖方向
 

@@ -54,8 +54,7 @@ elif [ ! -d "$REPO_CFG/pi-agent" ] && [ -d "$LEGACY_CFG/pi-agent" ]; then
   cp -a "$LEGACY_CFG/pi-agent" "$REPO_CFG/pi-agent"
 fi
 if [ ! -f "$REPO_CFG/gateway.yaml" ]; then
-  echo "→ 未找到 config/gateway.yaml，从模板初始化"
-  node "$ROOT/scripts/config-init.mjs" || true
+  echo "→ 未找到仓库 config/gateway.yaml（build:dist 仍会从模板写入 dist/config/）"
 fi
 
 PNPM="${PNPM:-pnpm}"

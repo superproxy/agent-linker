@@ -7,7 +7,7 @@
  *   node scripts/setup-pi.mjs --skip-install --home <dir>/.pi
  *   node scripts/setup-pi.mjs --force --sandbox
  *
- * 模板：backend/config/pi-agent/*.template（独立包为 server/config/pi-agent/）
+ * 模板：backend/config/pi-agent/*.template（独立包为 <安装根>/config/pi-agent/）
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

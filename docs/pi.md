@@ -18,7 +18,7 @@
 - 云机同时跑网关：在该机执行 `pnpm setup:pi`，再按需加沙箱。
 - 网关在别处：把这台 Linux 注册为节点，任务打到节点上的 pi。Windows 本机装沙箱无效。
 
-独立部署包含 `scripts/setup-pi.mjs` 与 `server/config/pi-agent/` 模板，包根执行 `npm run setup:pi`。源码仓库执行 `pnpm setup:pi`。
+独立部署包含 `scripts/setup-pi.mjs` 与 `config/pi-agent/` 模板，包根执行 `npm run setup:pi`。源码仓库执行 `pnpm setup:pi`。
 
 ## 2. 一键安装与生成配置
 
