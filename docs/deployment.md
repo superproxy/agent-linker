@@ -378,8 +378,9 @@ bash scripts/edge.sh restart            # frps / APISIX（仍在仓库 scripts/�
 
 | 路径 | 是否随 git/build 覆盖 | 说明 |
 |---|---|---|
-| `backend/config/`（仓库内） | 随 git 变 | 开发模板；**不是**线上生效配置 |
-| `dist/linkagent/server/config/` | build 会重写 | **线上改这里**；升级时用 `server-update.sh` 保留 |
+| `backend/config/`（仓库内） | 随 git 变 | 开发模板；**网关机 dist 模式不要在这里改** |
+| `dist/linkagent/server/config/` | build 会重写 | **线上生效配置**；升级时用 `server-update.sh` 保留 |
+| 仓库根 `.runtime-state/edge/` | 旧 dev 布局遗留 | dist 网关读 `dist/linkagent/.runtime-state/edge/`；`server-update.sh` 会合并进 dist |
 | `dist/linkagent/.runtime-state/` | build 会删掉 dist 内除 node_modules 外全部目录 | 用户、节点、edge 令牌等；**须**用 `server-update.sh` 备份恢复 |
 | `.runtime-state/`（仓库根） | 与 dev/tsx 模式共用 | 若仍用 `pnpm pm` 跑源码，状态在这里；切 dist 后建议统一到 dist 下 |
 

@@ -44,6 +44,29 @@ fi
 echo "→ pnpm install（构建用）"
 "$PNPM" install
 
+# 旧布局：配置在仓库 backend/config、edge 在仓库根 .runtime-state/edge。
+# dist 网关只读 dist/linkagent 下路径，构建前先并入 dist，避免仍改 agent-linker 根目录却不生效。
+REPO_CFG="$ROOT/backend/config"
+REPO_EDGE="$ROOT/.runtime-state/edge"
+if [ -d "$REPO_CFG" ]; then
+  mkdir -p "$CFG"
+  for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
+    if [ -f "$REPO_CFG/$f" ]; then
+      cp -a "$REPO_CFG/$f" "$CFG/$f"
+    fi
+  done
+  if [ -d "$REPO_CFG/pi-agent" ]; then
+    rm -rf "$CFG/pi-agent"
+    cp -a "$REPO_CFG/pi-agent" "$CFG/pi-agent"
+  fi
+  echo "→ 已把 backend/config 同步到 dist/server/config（线上请只改 dist 内 yaml）"
+fi
+if [ -d "$REPO_EDGE" ]; then
+  mkdir -p "$STATE/edge"
+  cp -a "$REPO_EDGE/." "$STATE/edge/"
+  echo "→ 已把仓库根 .runtime-state/edge 合并到 dist/.runtime-state/edge"
+fi
+
 BACKUP=""
 if [ -d "$CFG" ] || [ -d "$STATE" ]; then
   BACKUP="$(mktemp -d)"
