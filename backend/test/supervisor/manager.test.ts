@@ -29,7 +29,7 @@ function writeDistSplit(
   parts: { gateway: string; weixin?: string; node?: string },
 ): void {
   writeFileSync(join(root, '.linkagent-root'), 'test dist root\n');
-  const cfgDir = join(root, 'server', 'config');
+  const cfgDir = join(root, 'config');
   mkdirSync(cfgDir, { recursive: true });
   writeFileSync(join(cfgDir, 'gateway.yaml'), parts.gateway);
   if (parts.weixin !== undefined) writeFileSync(join(cfgDir, 'weixin.yaml'), parts.weixin);
@@ -179,7 +179,7 @@ auth: { mode: token, token: abc }
   assert.equal(pm.baseUrl, 'http://127.0.0.1:8787');
   const nodeSpec = (pm as unknown as { resolve(id: string): { command: string; args: string[] } }).resolve('node');
   assert.equal(nodeSpec.command, process.execPath);
-  assert.ok(nodeSpec.args[0].endsWith(join('server', 'node.mjs')));
+  assert.ok(nodeSpec.args[0].endsWith(join('bin', 'node.mjs')));
   // node 进程自己读 node.yaml；这些键置空，用来盖掉父进程继承值
   const nodeEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('node');
   assert.equal(nodeEnv.LINKAGENT_GATEWAY_URL, '');
@@ -189,11 +189,10 @@ auth: { mode: token, token: abc }
   const wxEnv = (pm as unknown as { envFor(id: string): Record<string, string> }).envFor('weixin');
   assert.equal(wxEnv.LINKAGENT_GATEWAY_URL, '');
   assert.equal(wxEnv.LINKAGENT_GATEWAY_TOKEN, '');
-  // 三目标 dist 入口都解析到 server/*.mjs
   const layout = createInstallLayout(root);
   assert.equal(layout.kind, 'dist');
   for (const id of ['gateway', 'channels', 'weixin', 'node'] as const) {
-    assert.ok(layout.entry(id).endsWith(join('server', `${id}.mjs`)), `${id} 入口应指向 server/${id}.mjs`);
+    assert.ok(layout.entry(id).endsWith(join('bin', `${id}.mjs`)), `${id} 入口应指向 bin/${id}.mjs`);
   }
 });
 
@@ -214,7 +213,7 @@ test('ProcessManager：weixin.accounts 多账号 → 合并为 channels 进程',
 test('ProcessManager：操作 weixin:<账号> 时停掉遗留的默认 weixin 进程', async () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
-  mkdirSync(join(root, 'server'), { recursive: true });
+  mkdirSync(join(root, 'bin'), { recursive: true });
   mkdirSync(join(root, '.runtime-state', 'pm'), { recursive: true });
   const child = spawnDetached({
     command: process.execPath,

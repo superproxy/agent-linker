@@ -9,6 +9,11 @@ backend/config/weixin.yaml
 backend/config/node.yaml
 backend/config/channels.yaml
 backend/config/config.yaml
+config/gateway.yaml
+config/weixin.yaml
+config/node.yaml
+config/channels.yaml
+config/config.yaml
 server/config/gateway.yaml
 server/config/weixin.yaml
 server/config/node.yaml

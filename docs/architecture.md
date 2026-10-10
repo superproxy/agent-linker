@@ -26,6 +26,19 @@
 
 测试与源码同构：`backend/test/<模块>/*.test.ts`。
 
+## 安装根布局（dev / dist 统一相对路径）
+
+由 `backend/src/install/layout.ts` 解析 `<安装根>`（`LINKAGENT_HOME`、`.linkagent-root`、`.linkagent-server` 等）：
+
+| 目录 | 内容 |
+|---|---|
+| `config/` | 启动 yaml（`gateway.yaml` 等）；模板在 `backend/config/*.template` |
+| `scripts/` | `edge.sh`、`setup-pi.mjs` 等（monorepo 在仓库根 `scripts/`） |
+| `bin/` | dist 内 esbuild 产物（`gateway.mjs`、`pm.mjs`…）；dev 仍 tsx 跑 `backend/src` |
+| `.runtime-state/` | 用户、节点、edge、pm 日志等 |
+
+网关机 git 克隆：`config/` 在仓库根维护 → `pnpm build:dist` 拷入 `dist/linkagent/` → `./start.sh` 跑 `bin/`。
+
 ## 分层与依赖方向
 
 - 单向分层：`api → service → store`，不要反向依赖或跨层。

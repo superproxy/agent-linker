@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 从 backend/config/*.template 生成仓库根 server/config/*.yaml（dev 与 build:dist 共用）。
+ * 从 backend/config/*.template 生成仓库根 config/*.yaml（dev 与 build:dist 共用）。
  *   pnpm config:init
  *   node scripts/config-init.mjs [--force]
  */
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE_DIR = join(REPO, 'backend', 'config');
-const OUT_DIR = join(REPO, 'server', 'config');
+const OUT_DIR = join(REPO, 'config');
 const force = process.argv.includes('--force');
 
 const FILES = ['gateway.yaml', 'weixin.yaml', 'channels.yaml', 'node.yaml'];
@@ -39,4 +39,4 @@ if (existsSync(piSrc) && (!existsSync(piDest) || force)) {
   console.log(`已同步：${piDest}`);
 }
 
-console.log('\n运行配置目录：<仓库根>/server/config（与 dist/linkagent/server/config 同结构）');
+console.log('\n安装根布局：config/（yaml）、scripts/（运维脚本）、dist 内另有 bin/（esbuild 二进制）');

@@ -78,7 +78,7 @@ pnpm typecheck          # 可选：环境自检
 
 ### 4.1 配置
 
-在 **`<安装根>/server/config/`** 下编辑（dev 为仓库根 `server/config/`，独立包为 `dist/linkagent/server/config/`）。首次可用 `pnpm config:init` 从 `backend/config/*.template` 生成。推荐 **三文件**：
+在 **`<安装根>/config/`** 下编辑（dev = 仓库根 `config/`，dist = `dist/linkagent/config/`）。首次 `pnpm config:init`（模板在 `backend/config/*.template`）。独立包另有 **`bin/`**（进程）、**`scripts/`**（edge/setup）。推荐 **三文件**：
 
 | 文件 | 说明 |
 |---|---|
@@ -355,23 +355,32 @@ WantedBy=multi-user.target
 
 #### 网关机（推荐：源码仓库 + dist 运行）
 
-在 `/root/agent-linker` 等**固定克隆目录**维护 git 源码，**进程用 dist 二进制跑**，配置与 dev 同路径 **`server/config/`**：
+安装根统一布局（dev 与 dist **相对路径一致**）：
 
-| 角色 | 安装根 | 配置 | 运行态 | 进程入口 |
-|---|---|---|---|---|
-| 本地 dev（tsx） | 仓库根 | `server/config/` | 仓库根 `.runtime-state/` | `pnpm pm` → `backend/src/**/*.ts` |
-| 网关机（构建） | `dist/linkagent/` | 构建时从 `server/config/` 拷入 `dist/.../server/config/` | `dist/linkagent/.runtime-state/` | `./start.sh` → `server/*.mjs` |
+```
+<安装根>/
+├── bin/           # gateway.mjs、pm.mjs、node.mjs…（仅 dist / build 产出；dev 用 tsx 跑 backend/src）
+├── config/        # gateway.yaml、weixin.yaml、node.yaml（运维改这里）
+├── scripts/       # edge.sh、setup-pi.mjs（仓库根 scripts/ 与 dist 内拷贝同源）
+├── web/           # 管理后台静态（dist）
+└── .runtime-state/
+```
 
-**不要**长期 `tsx` 直跑 `backend/src` 做线上；**不要**再改 `backend/config/*.yaml`（仅模板，legacy 会被 `server-update` 迁到 `server/config`）。
+| 角色 | 安装根 | 进程 |
+|---|---|---|
+| 本地 dev | 仓库根 | `pnpm pm` → tsx `backend/src/...` |
+| 网关机 | `dist/linkagent/` | `./start.sh` → `bin/*.mjs` |
 
-一键升级（**只备份/恢复 `.runtime-state`**，配置以仓库 `server/config` 为准，每次 build 打进 dist）：
+**不要**长期 tsx 跑线上；**不要**改 `backend/config/*.yaml`（仅模板）。`server-update` 会把 legacy 迁到 **`config/`**。
+
+一键升级（只备份/恢复 **`.runtime-state`**，yaml 以仓库 **`config/`** 为准，build 打进 dist）：
 
 ```bash
 bash scripts/server-update.sh           # pull + install + build:dist
 bash scripts/server-update.sh --restart # 同上 + dist 内 restart gateway
 ```
 
-改配置流程：编辑 **`/root/agent-linker/server/config/*.yaml`** → 再跑 `server-update.sh --restart`（或 `pnpm build:dist` 后 restart）。
+改配置：编辑 **`/root/agent-linker/config/*.yaml`** → `server-update.sh --restart`。
 
 重启边缘：
 
@@ -381,16 +390,17 @@ bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
 
 | 路径 | 说明 |
 |---|---|
-| `backend/config/*.template` | 入库模板；`pnpm config:init` 生成到 `server/config/` |
-| **`server/config/*.yaml`** | **dev 与网关机统一改这里**（gitignore） |
-| `dist/linkagent/server/config/` | build 产物；运行中 dist 网关读此目录 |
+| `backend/config/*.template` | 入库模板 |
+| **`config/*.yaml`**（仓库根） | **dev / 网关机统一改这里**（gitignore） |
+| `dist/linkagent/config/` | build 拷贝；dist 网关读此目录 |
+| `dist/linkagent/bin/` | esbuild 二进制 |
 | `dist/linkagent/.runtime-state/` | 用户、节点、edge、pm 日志；升级时脚本备份恢复 |
 | `.linkagent-server` | 网关机标记：`pnpm pm` / `edge.sh` 与 dist 同安装根；开发机勿创建 |
 
 #### 其他
 
 - 仅开发联调：`pnpm config:init` 后 `pnpm pm restart gateway`（tsx）；若本机误有 `.linkagent-server` 用 `LINKAGENT_DEV=1`；
-- Release 独立包：解压替换 `dist/linkagent/` 或整目录，**同样保留** `server/config` 与 `.runtime-state` 再重启；
+- Release 独立包：解压替换 `dist/linkagent/`，**保留** `config/` 与 `.runtime-state/` 再重启；
 - 执行机：`build:dist:node` → `dist/linkagent-node/`，保留该目录下 `node.env` 与 `.runtime-state/node/`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。
 

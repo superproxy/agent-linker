@@ -30,7 +30,7 @@ function runtimeDirFor(dir: string): string {
 }
 
 function writeConfig(dir: string, content: string, kind: 'dev' | 'dist' = 'dev'): string {
-  const cfgDir = kind === 'dist' ? join(dir, 'server', 'config') : join(dir, 'backend', 'config');
+  const cfgDir = join(dir, 'config');
   mkdirSync(cfgDir, { recursive: true });
   const file = join(cfgDir, 'gateway.yaml');
   writeFileSync(file, content);

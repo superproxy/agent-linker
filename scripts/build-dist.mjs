@@ -5,11 +5,8 @@
  *   pnpm build:dist:node                    执行机包 dist/linkagent-node（仅节点连接器）
  *   node scripts/build-dist.mjs --target=node --skip-install --out=<dir>
  *
- * 整包：
- *   server/gateway.mjs / weixin.mjs / node.mjs / pm.mjs / edge.mjs
- *   web/ 后台、dev/ 聊天页、vendor/openclaw
- * 节点包：
- *   server/node.mjs + server/ctl.mjs（启停）+ 精简运行时依赖（acpx / ws）
+ * 整包：bin/*.mjs、config/、scripts/、web/、dev/
+ * 节点包：bin/node.mjs + bin/ctl.mjs（启停）+ config/
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -113,30 +110,34 @@ function copySplitConfig(destDir, profile) {
     return;
   }
   for (const name of ['gateway.yaml', 'weixin.yaml', 'channels.yaml', 'node.yaml']) {
+    const configLive = join(REPO, 'config', name);
     const serverLive = join(REPO, 'server', 'config', name);
     const backendLive = join(REPO, 'backend', 'config', name);
     const template = join(REPO, 'backend', 'config', `${name}.template`);
-    const src = existsSync(serverLive)
-      ? serverLive
-      : existsSync(backendLive)
-        ? backendLive
-        : template;
+    const src = existsSync(configLive)
+      ? configLive
+      : existsSync(serverLive)
+        ? serverLive
+        : existsSync(backendLive)
+          ? backendLive
+          : template;
     if (!existsSync(src)) {
-      throw new Error(`缺少 server/config/${name}、backend/config/${name} 或 ${name}.template`);
+      throw new Error(`缺少 config/${name}、server/config/${name}、backend/config/${name} 或 ${name}.template`);
     }
     cpSync(src, join(destDir, name));
   }
 }
 
-/** destRoot = 独立包根（含 server/config、scripts） */
+/** destRoot = 独立包根（bin/、config/、scripts/） */
 function copyPiSetup(destRoot) {
   const piAgentCandidates = [
+    join(REPO, 'config', 'pi-agent'),
     join(REPO, 'server', 'config', 'pi-agent'),
     join(REPO, 'backend', 'config', 'pi-agent'),
   ];
   const piAgentSrc = piAgentCandidates.find((d) => existsSync(d));
   if (piAgentSrc) {
-    cpSync(piAgentSrc, join(destRoot, 'server', 'config', 'pi-agent'), { recursive: true });
+    cpSync(piAgentSrc, join(destRoot, 'config', 'pi-agent'), { recursive: true });
   }
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
   for (const rel of ['setup-pi.mjs', 'setup-channels.mjs', 'edge.sh']) {
@@ -193,7 +194,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const stateDir = join(root, '.runtime-state');
 const pidFile = join(stateDir, 'node.pid');
 const logFile = join(stateDir, 'node.log');
-const entry = join(root, 'server', 'node.mjs');
+const entry = join(root, 'bin', 'node.mjs');
 const cmd = (process.argv[2] ?? 'start').toLowerCase();
 
 function readPid() {
@@ -280,7 +281,7 @@ if (cmd === 'foreground' || cmd === 'fg' || cmd === 'run') {
   child.unref();
   console.log(\`✅ 节点已启动 (pid \${child.pid}，日志 \${logFile})\`);
 } else {
-  console.error('用法: node server/ctl.mjs {start|stop|restart|status|log|foreground}');
+  console.error('用法: node bin/ctl.mjs {start|stop|restart|status|log|foreground}');
   process.exit(1);
 }
 `;
@@ -296,19 +297,19 @@ const NODE_README = `# linkagent-node 执行节点独立包
 ## 目录
 \`\`\`
 linkagent-node/
-├── server/node.mjs          节点连接器
-├── server/ctl.mjs           启停
-├── server/config/gateway.yaml   # 仅推导缺省回连地址
-├── server/config/node.yaml      # 自报 agent、pi 权限与 setup:pi 说明
-├── server/config/pi-agent/      # npm run setup:pi 模板
+├── bin/node.mjs             节点连接器
+├── bin/ctl.mjs              启停
+├── config/gateway.yaml      # 仅推导缺省回连地址
+├── config/node.yaml         # 自报 agent、pi 权限与 setup:pi 说明
+├── config/pi-agent/         # npm run setup:pi 模板
 ├── start.sh / start.bat
 └── node_modules/
 \`\`\`
 
 ## 配置
-优先级：**命令行** > **环境变量 / \`node.env\`** > \`server/config/node.yaml\` > 缺省推导。
+优先级：**命令行** > **环境变量 / \`node.env\`** > \`config/node.yaml\` > 缺省推导。
 
-复制 \`node.env.example\` 为 \`node.env\` 并填写 \`LINKAGENT_GATEWAY_URL\`、\`LINKAGENT_NODE_CLAIM\`（或 \`LINKAGENT_GATEWAY_TOKEN\`）等；也可写 yaml 作兜底。pi 模型清单不在 yaml：在本机执行 \`npm run setup:pi\`（模板在 \`server/config/pi-agent/\`）。
+复制 \`node.env.example\` 为 \`node.env\` 并填写 \`LINKAGENT_GATEWAY_URL\`、\`LINKAGENT_NODE_CLAIM\`（或 \`LINKAGENT_GATEWAY_TOKEN\`）等；也可写 yaml 作兜底。pi 模型清单不在 yaml：在本机执行 \`npm run setup:pi\`（模板在 \`config/pi-agent/\`）。
 
 ## 启动
 \`\`\`bash
@@ -388,13 +389,13 @@ async function buildFull(dist, skipInstall) {
         pm: join(src, 'supervisor', 'cli.ts'),
         edge: join(src, 'gateway', 'edge', 'cli.ts'),
       },
-      join(dist, 'server'),
+      join(dist, 'bin'),
       FULL_EXTERNAL,
     );
   });
 
   step('4/6 复制运行资源', () => {
-    copySplitConfig(join(dist, 'server', 'config'), 'full');
+    copySplitConfig(join(dist, 'config'), 'full');
     copyPiSetup(dist);
     cpSync(join(REPO, 'skills'), join(dist, 'skills'), { recursive: true });
     mkdirSync(join(dist, 'dev'), { recursive: true });
@@ -418,12 +419,12 @@ async function buildFull(dist, skipInstall) {
           description: 'OpenAI 兼容网关独立部署包：Chatbox/Open WebUI → Gateway → ACP → agent',
           engines: { node: '>=22.13' },
           scripts: {
-            start: 'node server/pm.mjs start',
-            stop: 'node server/pm.mjs stop',
-            restart: 'node server/pm.mjs restart',
-            status: 'node server/pm.mjs status',
-            logs: 'node server/pm.mjs logs',
-            gateway: 'node server/gateway.mjs',
+            start: 'node bin/pm.mjs start',
+            stop: 'node bin/pm.mjs stop',
+            restart: 'node bin/pm.mjs restart',
+            status: 'node bin/pm.mjs status',
+            logs: 'node bin/pm.mjs logs',
+            gateway: 'node bin/gateway.mjs',
             'setup:pi': 'node scripts/setup-pi.mjs',
             'setup:channels': 'node scripts/setup-channels.mjs',
             'edge:start': 'bash scripts/edge.sh start',
@@ -457,10 +458,10 @@ export LINKAGENT_HOME="$DIR"
 CMD="\${1:-start}"
 TARGET="\${2:-all}"
 case "$CMD" in
-  start|stop|restart) exec node server/pm.mjs "$CMD" "$TARGET" ;;
-  status) exec node server/pm.mjs status ;;
-  logs) exec node server/pm.mjs logs "$TARGET" ;;
-  foreground|fg|run) exec node server/pm.mjs foreground "$TARGET" ;;
+  start|stop|restart) exec node bin/pm.mjs "$CMD" "$TARGET" ;;
+  status) exec node bin/pm.mjs status ;;
+  logs) exec node bin/pm.mjs logs "$TARGET" ;;
+  foreground|fg|run) exec node bin/pm.mjs foreground "$TARGET" ;;
   *) echo "用法: $0 {start|stop|restart|status|logs|foreground} [all|gateway|weixin|node]"; exit 1 ;;
 esac
 `,
@@ -476,7 +477,7 @@ set "CMD=%~1"
 if "%CMD%"=="" set "CMD=start"
 set "TARGET=%~2"
 if "%TARGET%"=="" set "TARGET=all"
-node server\\pm.mjs %CMD% %TARGET%
+node bin\\pm.mjs %CMD% %TARGET%
 `,
     );
 
@@ -504,16 +505,13 @@ OpenAI 兼容网关：Chatbox / Open WebUI → \`/v1\` → ACP(acpx) → 本地 
 ## 目录结构
 \`\`\`
 linkagent/
-├── server/
-│   ├── gateway.mjs       网关（OpenAI 兼容 API + 后台 + 节点接入）
-│   ├── weixin.mjs        个人微信 bot（独立进程，external 模式）
-│   ├── node.mjs          本机 node 节点连接器（反向 WS 连入网关）
-│   ├── pm.mjs            单机进程管理器（编排上面三进程）
-│   └── config/               gateway.yaml / weixin.yaml / node.yaml（改完需 restart）
+├── bin/                  gateway / pm / node / edge 等 .mjs
+├── config/               gateway.yaml / weixin.yaml / node.yaml
+├── scripts/              edge.sh、setup-pi 等
 ├── dev/                  内置聊天页
-├── web/                  后台管理端（TS/React，挂载 /admin）
-├── node_modules/         运行时依赖
-└── .runtime-state/       运行态（登录态、会话、pm 日志/pid）
+├── web/                  后台管理端
+├── node_modules/
+└── .runtime-state/
 \`\`\`
 
 ## 启动（单机三进程：gateway + 微信 + node）
@@ -529,7 +527,7 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 \`\`\`
 
 进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；进程崩溃后重新执行 \`./start.sh start\` 即可。
-网关开启 \`auth\` 时，微信/node 进程自动读取 \`server/config/gateway.yaml\` 的静态 token 回连，无需单独配置。
+网关开启 \`auth\` 时，微信/node 进程自动读取 \`config/gateway.yaml\` 的静态 token 回连，无需单独配置。
 微信首次使用需先在后台 \`/admin\` 扫码登录。
 
 启动后：
@@ -541,7 +539,7 @@ start.bat               # Windows：后台启动全部；start.bat stop/status/l
 安装根可用 \`LINKAGENT_HOME\` 显式指定。
 
 ## 配置
-编辑 \`server/config/\` 下三文件（修改后 \`./start.sh restart\`）：
+编辑 \`config/\` 下三文件（修改后 \`./start.sh restart\`）：
 - \`gateway.yaml\`：\`server.host/port\`、\`auth\`、网关侧 \`agents\` / \`tasks\` / \`plugins\` / \`channels\`
 - \`weixin.yaml\`：个人微信渠道；单机包 \`mode: external\`，后台 /admin 扫码
 - \`node.yaml\`：本机节点连接器、\`node.agents\`（含 pi 等 ACP 权限）
@@ -560,13 +558,14 @@ async function buildNode(dist, skipInstall) {
 
   step('2/4 esbuild 打包节点连接器', async () => {
     const src = join(REPO, 'backend', 'src');
-    await esbuildServerBundle({ node: join(src, 'node', 'connector.ts') }, join(dist, 'server'), NODE_EXTERNAL);
+    await esbuildServerBundle({ node: join(src, 'node', 'connector.ts') }, join(dist, 'bin'), NODE_EXTERNAL);
   });
 
   step('3/4 生成配置 / 启停 / README', () => {
-    mkdirSync(join(dist, 'server', 'config'), { recursive: true });
-    copySplitConfig(join(dist, 'server', 'config'), 'node');
-    writeFileSync(join(dist, 'server', 'ctl.mjs'), NODE_CTL_SOURCE);
+    mkdirSync(join(dist, 'config'), { recursive: true });
+    mkdirSync(join(dist, 'bin'), { recursive: true });
+    copySplitConfig(join(dist, 'config'), 'node');
+    writeFileSync(join(dist, 'bin', 'ctl.mjs'), NODE_CTL_SOURCE);
     writeFileSync(join(dist, '.linkagent-root'), 'linkagent-node standalone deployment root\n');
     writeFileSync(join(dist, 'node.env.example'), NODE_ENV_EXAMPLE);
     writeFileSync(join(dist, 'README.md'), NODE_README);
@@ -582,12 +581,12 @@ async function buildNode(dist, skipInstall) {
           description: 'LinkAgent 执行节点独立包：出站 WS 连入网关，本机跑 ACP agent',
           engines: { node: '>=22.13' },
           scripts: {
-            start: 'node server/ctl.mjs start',
-            stop: 'node server/ctl.mjs stop',
-            restart: 'node server/ctl.mjs restart',
-            status: 'node server/ctl.mjs status',
-            logs: 'node server/ctl.mjs log',
-            foreground: 'node server/ctl.mjs foreground',
+            start: 'node bin/ctl.mjs start',
+            stop: 'node bin/ctl.mjs stop',
+            restart: 'node bin/ctl.mjs restart',
+            status: 'node bin/ctl.mjs status',
+            logs: 'node bin/ctl.mjs log',
+            foreground: 'node bin/ctl.mjs foreground',
             'setup:pi': 'node scripts/setup-pi.mjs',
           },
           dependencies: runtimeDependenciesNode(),
@@ -603,7 +602,8 @@ set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 CMD="\${1:-start}"
-exec node server/ctl.mjs "$CMD"
+export LINKAGENT_HOME="$DIR"
+exec node bin/ctl.mjs "$CMD"
 `,
       { mode: 0o755 },
     );
@@ -613,7 +613,7 @@ exec node server/ctl.mjs "$CMD"
 cd /d "%~dp0"
 set "CMD=%~1"
 if "%CMD%"=="" set "CMD=start"
-node server\\ctl.mjs %CMD%
+node bin\\ctl.mjs %CMD%
 `,
     );
   });

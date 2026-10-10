@@ -2,9 +2,9 @@
  * 安装布局（install layout）——形态判定与所有运行态路径的唯一真相源。
  *
  * 两种运行形态：
- *   - dev（仓库源码）：monorepo 根，TS 源码；**运行配置** `<root>/server/config`（与 dist 同路径）
- *   - dist（独立部署包）：含 `.linkagent-root` 的目录，server/*.mjs / server/config / web
- *   - 模板仍在 backend/config/*.template；legacy backend/config/*.yaml 只作迁移兜底
+ *   - dev（仓库源码）：monorepo 根；配置 `<root>/config/`；脚本 `scripts/`；tsx 跑 backend/src
+ *   - dist（独立部署包）：`bin/*.mjs` + `config/` + `scripts/` + web
+ *   - 模板在 backend/config/*.template；legacy server/config、backend/config 仅迁移兜底
  *
  * 历史上形态判定（existsSync('.linkagent-root')）、配置双候选、.runtime-state 子目录、
  * dev/dist 进程入口表、内置页面与 web 根的相对路径拼接散落在 gateway/config、gateway/index、
@@ -26,6 +26,11 @@ const DEPLOY_MARKER = '.linkagent-root';
 export const SERVER_DEPLOY_MARKER = '.linkagent-server';
 const BUNDLED_DIST_DIR = join('dist', 'linkagent');
 const STATE_DIR = '.runtime-state';
+
+/** dist 独立包 / 仓库 dev 统一的运行时目录名（相对安装根） */
+export const INSTALL_BIN_DIR = 'bin';
+export const INSTALL_CONFIG_DIR = 'config';
+export const INSTALL_SCRIPTS_DIR = 'scripts';
 
 /** 从任一子目录向上定位 monorepo 根（含 pnpm-workspace.yaml） */
 export function findRepoRoot(start: string = process.cwd()): string {
@@ -61,7 +66,7 @@ export function findInstallRoot(): string {
 }
 
 /**
- * monorepo 根上的安装根：默认 dev（`<repo>/server/config`）；
+ * monorepo 根上的安装根：默认 dev（`<repo>/config`）；
  * 若已构建 dist 且存在 {@link SERVER_DEPLOY_MARKER}，则归 dist/linkagent（除非 LINKAGENT_DEV=1）。
  */
 export function resolveRepoInstallRoot(repoRoot: string): string {
@@ -91,10 +96,13 @@ function tsxLoaderFor(root: string): string {
 
 /** 三个托管进程的 dev/dist 入口（相对安装根） */
 const PROCESS_ENTRIES: Record<ProcessTargetId, { dev: string; dist: string }> = {
-  gateway: { dev: join('backend', 'src', 'gateway', 'index.ts'), dist: join('server', 'gateway.mjs') },
-  weixin: { dev: join('backend', 'src', 'channels', 'weixin-bot.ts'), dist: join('server', 'weixin.mjs') },
-  node: { dev: join('backend', 'src', 'node', 'connector.ts'), dist: join('server', 'node.mjs') },
-  channels: { dev: join('backend', 'src', 'channels', 'channel-gateway.ts'), dist: join('server', 'channels.mjs') },
+  gateway: { dev: join('backend', 'src', 'gateway', 'index.ts'), dist: join(INSTALL_BIN_DIR, 'gateway.mjs') },
+  weixin: { dev: join('backend', 'src', 'channels', 'weixin-bot.ts'), dist: join(INSTALL_BIN_DIR, 'weixin.mjs') },
+  node: { dev: join('backend', 'src', 'node', 'connector.ts'), dist: join(INSTALL_BIN_DIR, 'node.mjs') },
+  channels: {
+    dev: join('backend', 'src', 'channels', 'channel-gateway.ts'),
+    dist: join(INSTALL_BIN_DIR, 'channels.mjs'),
+  },
 };
 
 export interface InstallLayout {
@@ -152,8 +160,9 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
   const kind: InstallKind = existsSync(join(root, DEPLOY_MARKER)) ? 'dist' : 'dev';
   const state = (...segments: string[]) => join(root, STATE_DIR, ...segments);
 
-  // dev / dist 统一优先 <installRoot>/server/config；dev 可兜底 legacy backend/config
+  // dev / dist 统一 <installRoot>/config；legacy server/config、backend/config 兜底
   const configCandidates = [
+    join(root, INSTALL_CONFIG_DIR, CONFIG_BASENAMES.gateway),
     join(root, 'server', 'config', CONFIG_BASENAMES.gateway),
     join(root, 'backend', 'config', CONFIG_BASENAMES.gateway),
   ];

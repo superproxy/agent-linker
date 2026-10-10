@@ -38,6 +38,7 @@ export function parseSetupPiArgs(argv) {
 export function resolveTemplateDir(explicit) {
   if (explicit) return resolve(explicit);
   const candidates = [
+    join(REPO, 'config', 'pi-agent'),
     join(REPO, 'server', 'config', 'pi-agent'),
     join(REPO, 'backend', 'config', 'pi-agent'),
   ];

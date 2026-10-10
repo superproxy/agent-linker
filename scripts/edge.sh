@@ -18,7 +18,9 @@ APISIX_LOG="$RUNTIME/apisix.log"
 prepare() {
   mkdir -p "$RUNTIME"
   local out
-  if [ -f "$ROOT/server/edge.mjs" ]; then
+  if [ -f "$ROOT/bin/edge.mjs" ]; then
+    out="$(cd "$ROOT" && node bin/edge.mjs)"
+  elif [ -f "$ROOT/server/edge.mjs" ]; then
     out="$(cd "$ROOT" && node server/edge.mjs)"
   else
     out="$(cd "$ROOT" && pnpm --silent --filter @linkagent/backend exec tsx src/gateway/edge/cli.ts)"

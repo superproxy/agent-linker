@@ -37,9 +37,9 @@ test('applyDotenvFile：不覆盖已有环境变量', () => {
 test('loadNodeConnectorEnvFiles：安装根 node.env 注入 LINKAGENT_GATEWAY_URL', () => {
   const root = mkdtempSync(join(tmpdir(), 'la-node-root-'));
   writeFileSync(join(root, '.linkagent-root'), '', 'utf8');
-  mkdirSync(join(root, 'server', 'config'), { recursive: true });
+  mkdirSync(join(root, 'config'), { recursive: true });
   writeFileSync(
-    join(root, 'server', 'config', 'gateway.yaml'),
+    join(root, 'config', 'gateway.yaml'),
     'server:\n  host: 127.0.0.1\n  port: 8787\nauth:\n  mode: local\n  token: ""\n',
     'utf8',
   );

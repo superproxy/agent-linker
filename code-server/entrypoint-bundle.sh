@@ -19,6 +19,9 @@ entry_pid=$!
 
 (
   cd "${LINKAGENT_NODE_WORKSPACE:-/root/workspace}" || exit 1
+  if [ -f "$LINKAGENT_HOME/bin/node.mjs" ]; then
+    exec node "$LINKAGENT_HOME/bin/node.mjs"
+  fi
   exec node "$LINKAGENT_HOME/server/node.mjs"
 ) &
 node_pid=$!

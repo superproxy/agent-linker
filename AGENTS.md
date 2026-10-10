@@ -79,7 +79,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 - **单向分层**：`api → service → store`；共享契约放 `shared/src`，不重复定义；持久化复用 `gateway/store/` KV，不新造裸文件读写。
 - **鉴权**统一走 `users/auth.ts` 的 `AuthGuard`，不在 handler 内另判凭据；新增凭据类型需同步 auth/me、store/api、shared、测试（凭据分级见 `docs/architecture.md`）。
 - 错误用 `openaiError(...)`（/v1）或 `errBody(...)`（管理接口）；密码 scrypt 加盐，不提交明文密钥。
-- 启动前配置：运行态统一 **`<安装根>/server/config/`** 下 `gateway.yaml` / `weixin.yaml` / `node.yaml`（模板在 `backend/config/*.template`，`pnpm config:init`）；legacy `backend/config/*.yaml` 仅兜底；`.runtime-state/` 与 yaml 不入库；`.codebuddy/` 是项目数据目录，**不要删除**。
+- 安装根布局：**`config/`**（yaml）、**`scripts/`**（edge/setup）、dist 内 **`bin/`**（esbuild 进程）；`pnpm config:init` 从 `backend/config/*.template` 生成；legacy `server/config`、`backend/config` 仅兜底；`.runtime-state/` 不入库；`.codebuddy/` **不要删除**。
 - **新增功能必须补测试**，重构后保持全量通过。
 
 ## 开发流程（强制）

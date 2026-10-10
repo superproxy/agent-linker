@@ -18,12 +18,11 @@ test('dev 形态：无 marker 时 kind=dev，配置/入口/页面走 backend 源
   const layout = createInstallLayout(root);
   assert.equal(layout.kind, 'dev');
   assert.equal(layout.root, root);
-  // 配置候选：dev / dist 统一 server/config 优先，legacy backend/config 兜底
-  assert.equal(layout.configCandidates[0], join(root, 'server', 'config', 'gateway.yaml'));
-  assert.equal(layout.configCandidates[1], join(root, 'backend', 'config', 'gateway.yaml'));
-  assert.equal(layout.configFile, layout.configCandidates[0]);
-  // dev 入口走 tsx TS 源码
+  // 配置候选：config/ 优先，legacy server/config、backend/config 兜底
+  assert.equal(layout.configCandidates[0], join(root, 'config', 'gateway.yaml'));
+  assert.equal(layout.configCandidates[1], join(root, 'server', 'config', 'gateway.yaml'));
   assert.ok(layout.entry('gateway').endsWith(join('backend', 'src', 'gateway', 'index.ts')));
+  assert.equal(layout.configFile, layout.configCandidates[0]);
   assert.ok(layout.entry('weixin').endsWith(join('backend', 'src', 'channels', 'weixin-bot.ts')));
   assert.ok(layout.entry('node').endsWith(join('backend', 'src', 'node', 'connector.ts')));
   assert.ok(layout.entry('channels').endsWith(join('backend', 'src', 'channels', 'channel-gateway.ts')));
@@ -43,11 +42,11 @@ test('dist 形态：有 .linkagent-root 时 kind=dist，配置/入口/页面走�
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
   const layout = createInstallLayout(root);
   assert.equal(layout.kind, 'dist');
-  assert.equal(layout.configCandidates[0], join(root, 'server', 'config', 'gateway.yaml'));
-  assert.ok(layout.entry('gateway').endsWith(join('server', 'gateway.mjs')));
-  assert.ok(layout.entry('weixin').endsWith(join('server', 'weixin.mjs')));
-  assert.ok(layout.entry('node').endsWith(join('server', 'node.mjs')));
-  assert.ok(layout.entry('channels').endsWith(join('server', 'channels.mjs')));
+  assert.equal(layout.configCandidates[0], join(root, 'config', 'gateway.yaml'));
+  assert.ok(layout.entry('gateway').endsWith(join('bin', 'gateway.mjs')));
+  assert.ok(layout.entry('weixin').endsWith(join('bin', 'weixin.mjs')));
+  assert.ok(layout.entry('node').endsWith(join('bin', 'node.mjs')));
+  assert.ok(layout.entry('channels').endsWith(join('bin', 'channels.mjs')));
   // 页面随代码走，dist 形态下仍解析到 bundle 旁的 dev 目录（此处仅校验命名规则）
   assert.ok(layout.page('chat').endsWith(join('dev', 'chat.html')));
   // dist 态无 pnpm，只引导后台；重启提示走 start 脚本
@@ -65,23 +64,23 @@ test('configFile：legacy backend/config 存在 gateway.yaml 时 split', () => {
   assert.equal(layout.configFile, join(root, 'backend', 'config', 'gateway.yaml'));
 });
 
-test('configFile：server/config 优先于 backend/config', () => {
+test('configFile：config/ 优先于 legacy backend/config', () => {
   const root = tmpRoot();
   mkdirSync(join(root, 'backend', 'config'), { recursive: true });
-  mkdirSync(join(root, 'server', 'config'), { recursive: true });
+  mkdirSync(join(root, 'config'), { recursive: true });
   writeFileSync(join(root, 'backend', 'config', 'gateway.yaml'), 'server:\n  port: 8788\n');
-  writeFileSync(join(root, 'server', 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
+  writeFileSync(join(root, 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
   const layout = createInstallLayout(root);
-  assert.equal(layout.configFile, join(root, 'server', 'config', 'gateway.yaml'));
+  assert.equal(layout.configFile, join(root, 'config', 'gateway.yaml'));
 });
 
-test('configFile：dist 形态选中 server/config/gateway.yaml', () => {
+test('configFile：dist 形态选中 config/gateway.yaml', () => {
   const root = tmpRoot();
   writeFileSync(join(root, '.linkagent-root'), 'marker\n');
-  mkdirSync(join(root, 'server', 'config'), { recursive: true });
-  writeFileSync(join(root, 'server', 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
+  mkdirSync(join(root, 'config'), { recursive: true });
+  writeFileSync(join(root, 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
   const layout = createInstallLayout(root);
-  assert.equal(layout.configFile, join(root, 'server', 'config', 'gateway.yaml'));
+  assert.equal(layout.configFile, join(root, 'config', 'gateway.yaml'));
 });
 
 test('运行态目录：state() 与语义化快捷方式一致', () => {
