@@ -172,7 +172,7 @@ export class ProcessManager {
 
   /** 组装某目标的启动命令与环境变量（入口由布局层按形态给出：dist→server/*.mjs，dev→tsx 直跑 TS） */
   private resolve(id: ProcessInstanceId): { command: string; args: string[]; env: Record<string, string> } {
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = { LINKAGENT_HOME: this.layout.root };
     const entry = this.layout.entry(instOf(id).base);
     const args =
       this.layout.kind === 'dist'

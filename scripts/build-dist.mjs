@@ -132,6 +132,11 @@ function copyPiSetup(destRoot) {
     const src = join(REPO, 'scripts', rel);
     if (existsSync(src)) cpSync(src, join(destRoot, 'scripts', rel));
   }
+  const installRootLib = join(REPO, 'scripts', 'lib', 'install-root.sh');
+  if (existsSync(installRootLib)) {
+    mkdirSync(join(destRoot, 'scripts', 'lib'), { recursive: true });
+    cpSync(installRootLib, join(destRoot, 'scripts', 'lib', 'install-root.sh'));
+  }
   const edgeDir = join(REPO, 'scripts', 'edge');
   if (existsSync(edgeDir)) {
     mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
@@ -437,6 +442,7 @@ async function buildFull(dist, skipInstall) {
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
+export LINKAGENT_HOME="$DIR"
 CMD="\${1:-start}"
 TARGET="\${2:-all}"
 case "$CMD" in

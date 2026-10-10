@@ -382,11 +382,12 @@ bash scripts/edge.sh restart            # frps / APISIX（仍在仓库 scripts/�
 | `dist/linkagent/server/config/` | build 会重写 | **线上生效配置**；升级时用 `server-update.sh` 保留 |
 | 仓库根 `.runtime-state/edge/` | 旧 dev 布局遗留 | dist 网关读 `dist/linkagent/.runtime-state/edge/`；`server-update.sh` 会合并进 dist |
 | `dist/linkagent/.runtime-state/` | build 会删掉 dist 内除 node_modules 外全部目录 | 用户、节点、edge 令牌等；**须**用 `server-update.sh` 备份恢复 |
-| `.runtime-state/`（仓库根） | 与 dev/tsx 模式共用 | 若仍用 `pnpm pm` 跑源码，状态在这里；切 dist 后建议统一到 dist 下 |
+| `.runtime-state/`（仓库根） | 与 dev/tsx 模式共用 | **网关机**跑过 `server-update.sh` 后会写 `.linkagent-server`，此后 `pnpm pm` / `edge.sh` 与网关同读 `dist/linkagent` |
+| `.linkagent-server`（仓库根，gitignore） | 本地标记，不入库 | 表示「git 克隆 + dist 运行」；开发机勿创建；强制源码 dev 时 `LINKAGENT_DEV=1` |
 
 #### 其他
 
-- 仅开发联调：`git pull && pnpm install` 后 `pnpm server:restart` / `pnpm pm restart gateway`（tsx 源码）；
+- 仅开发联调：`git pull && pnpm install` 后 `pnpm server:restart` / `pnpm pm restart gateway`（tsx 源码；本机已 build dist 且误建 `.linkagent-server` 时用 `LINKAGENT_DEV=1`）；
 - Release 独立包：解压替换 `dist/linkagent/` 或整目录，**同样保留** `server/config` 与 `.runtime-state` 再重启；
 - 执行机：`build:dist:node` → `dist/linkagent-node/`，保留该目录下 `node.env` 与 `.runtime-state/node/`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。

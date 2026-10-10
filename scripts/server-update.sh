@@ -28,8 +28,16 @@ for arg in "$@"; do
 done
 
 cd "$ROOT"
+# shellcheck source=lib/install-root.sh
+. "$ROOT/scripts/lib/install-root.sh"
+
 echo "→ git pull --ff-only"
 git pull --ff-only
+
+if [ -f "$DIST/.linkagent-root" ]; then
+  touch "$ROOT/.linkagent-server"
+  echo "→ 已标记网关机模式（.linkagent-server）：pnpm pm / edge 将使用 dist/linkagent 为安装根"
+fi
 
 PNPM="${PNPM:-pnpm}"
 if ! command -v "$PNPM" >/dev/null 2>&1; then

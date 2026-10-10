@@ -3,7 +3,11 @@
 #   scripts/edge.sh start|stop|restart|status|log|build
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/install-root.sh
+. "$REPO/scripts/lib/install-root.sh"
+ROOT="$(linkagent_install_root "$REPO")"
+export LINKAGENT_HOME="${LINKAGENT_HOME:-$ROOT}"
 RUNTIME="$ROOT/.runtime-state/edge"
 COMPOSE_FILE="$ROOT/scripts/edge/docker-compose.yaml"
 export LINKAGENT_EDGE_DIR="$RUNTIME"

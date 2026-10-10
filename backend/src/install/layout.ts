@@ -21,6 +21,9 @@ export type InstallKind = 'dev' | 'dist';
 export type ProcessTargetId = 'gateway' | 'weixin' | 'channels' | 'node';
 
 const DEPLOY_MARKER = '.linkagent-root';
+/** 网关机 git 克隆 + dist 并存：仓库根此文件表示运行态归 dist/linkagent，而非 backend/config */
+export const SERVER_DEPLOY_MARKER = '.linkagent-server';
+const BUNDLED_DIST_DIR = join('dist', 'linkagent');
 const STATE_DIR = '.runtime-state';
 
 /** 从任一子目录向上定位 monorepo 根（含 pnpm-workspace.yaml） */
@@ -53,7 +56,28 @@ export function findInstallRoot(): string {
     if (parent === dir) break;
     dir = parent;
   }
-  return findRepoRoot();
+  return resolveRepoInstallRoot(findRepoRoot());
+}
+
+/**
+ * monorepo 根上的安装根：默认 dev（backend/config）；
+ * 若已构建 dist 且存在 {@link SERVER_DEPLOY_MARKER}，则归 dist/linkagent（除非 LINKAGENT_DEV=1）。
+ */
+export function resolveRepoInstallRoot(repoRoot: string): string {
+  if (process.env.LINKAGENT_DEV === '1') return repoRoot;
+  const distRoot = join(repoRoot, BUNDLED_DIST_DIR);
+  if (
+    existsSync(join(distRoot, DEPLOY_MARKER)) &&
+    existsSync(join(repoRoot, SERVER_DEPLOY_MARKER))
+  ) {
+    return distRoot;
+  }
+  return repoRoot;
+}
+
+/** 仓库内嵌 dist 包路径（存在 .linkagent-root 时有效） */
+export function bundledDistRoot(repoRoot: string = findRepoRoot()): string {
+  return join(repoRoot, BUNDLED_DIST_DIR);
 }
 
 /** dev 形态下 tsx 的 ESM loader 入口（相对给定安装根） */

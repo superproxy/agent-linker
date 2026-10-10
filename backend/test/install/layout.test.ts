@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInstallLayout } from '../../src/install/layout.js';
+import { createInstallLayout, resolveRepoInstallRoot } from '../../src/install/layout.js';
 
 /** 随代码走的内置页面目录：src/install/../dev */
 const srcDevDir = join(fileURLToPath(new URL('../../src/install/layout.js', import.meta.url)), '..', '..', 'dev');
@@ -104,6 +104,29 @@ test('webRoot：dist 探测 <root>/web（index.html + assets 齐全才命中）'
   // 补齐 assets → 命中
   mkdirSync(join(root, 'web', 'assets'), { recursive: true });
   assert.equal(createInstallLayout(root).webRoot, join(root, 'web'));
+});
+
+test('resolveRepoInstallRoot：.linkagent-server 存在时归 dist/linkagent', () => {
+  const repo = tmpRoot();
+  mkdirSync(join(repo, 'dist', 'linkagent'), { recursive: true });
+  writeFileSync(join(repo, 'dist', 'linkagent', '.linkagent-root'), 'dist\n');
+  writeFileSync(join(repo, '.linkagent-server'), 'server\n');
+  assert.equal(resolveRepoInstallRoot(repo), join(repo, 'dist', 'linkagent'));
+});
+
+test('resolveRepoInstallRoot：LINKAGENT_DEV=1 时仍用仓库根', () => {
+  const repo = tmpRoot();
+  mkdirSync(join(repo, 'dist', 'linkagent'), { recursive: true });
+  writeFileSync(join(repo, 'dist', 'linkagent', '.linkagent-root'), 'dist\n');
+  writeFileSync(join(repo, '.linkagent-server'), 'server\n');
+  const prev = process.env.LINKAGENT_DEV;
+  process.env.LINKAGENT_DEV = '1';
+  try {
+    assert.equal(resolveRepoInstallRoot(repo), repo);
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_DEV;
+    else process.env.LINKAGENT_DEV = prev;
+  }
 });
 
 test('webRoot：dev 探测 web/dist（vite 产物），而非源码 web/', () => {
