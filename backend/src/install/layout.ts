@@ -89,8 +89,9 @@ export function readConfiguredInstallRoot(repoRoot: string): string | undefined 
 }
 
 /**
- * monorepo 根上的运行安装根：默认 dev（`<repo>/config`）；
- * 网关机（{@link SERVER_DEPLOY_MARKER}）→ 独立安装目录，**不是** dist/linkagent 构建产物目录。
+ * monorepo 上的运行根：默认即 **仓库根**（开发目录 = 运行目录，`config/` + `.runtime-state/`）。
+ * 仅当存在 {@link SERVER_DEPLOY_MARKER} 且 `.linkagent-install` / `LINKAGENT_INSTALL` 显式指向外部路径时，
+ * 才用独立安装目录（如 `/opt/agent-linker`）；不凭 marker  alone 跳到默认系统路径。
  */
 export function resolveRepoInstallRoot(repoRoot: string): string {
   if (process.env.LINKAGENT_DEV === '1') return repoRoot;
@@ -99,14 +100,11 @@ export function resolveRepoInstallRoot(repoRoot: string): string {
   const configured = readConfiguredInstallRoot(repoRoot);
   if (configured) return configured;
 
-  const preferred = defaultInstallRoot(repoRoot);
-  if (existsSync(join(preferred, DEPLOY_MARKER))) return preferred;
-
   // legacy：曾把 dist 当安装根，便于迁移前仍能启动
   const distRoot = join(repoRoot, BUNDLED_DIST_DIR);
   if (existsSync(join(distRoot, DEPLOY_MARKER))) return distRoot;
 
-  return preferred;
+  return repoRoot;
 }
 
 /** 仓库内嵌 dist 包路径（存在 .linkagent-root 时有效） */

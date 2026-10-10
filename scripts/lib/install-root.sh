@@ -31,13 +31,8 @@ linkagent_read_install_path() {
       return
     fi
   fi
-  if [ -f "$(dirname "${BASH_SOURCE[0]}")/sync-install.sh" ]; then
-    # shellcheck disable=SC1091
-    . "$(dirname "${BASH_SOURCE[0]}")/sync-install.sh"
-    linkagent_default_install_dir
-    return
-  fi
-  echo "/opt/agent-linker"
+  # 无 .linkagent-install 时运行根=仓库（与 layout.ts resolveRepoInstallRoot 一致）
+  echo "$repo"
 }
 
 linkagent_install_root() {

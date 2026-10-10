@@ -22,7 +22,7 @@ for arg in "$@"; do
     LINKAGENT_INSTALL（默认 /opt/agent-linker）
 
   不覆盖安装目录已有 config/*.yaml 与 .runtime-state/（含登录账号）。
-  从旧目录迁入配置/登录态：在源码仓库执行 bash scripts/migrate-to-install.sh（一次性，不随本脚本执行）。
+  迁入：migrate-repo-layout.sh（仓库）或 migrate-copy-install.sh（外部目录），不随本脚本执行。
 EOF
       exit 0
       ;;

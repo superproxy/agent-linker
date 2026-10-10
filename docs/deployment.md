@@ -374,62 +374,85 @@ WantedBy=multi-user.target
 
 **不要**长期 tsx 跑线上；**不要**改 `backend/config/*.yaml`（仅模板）。
 
-#### 标准流程：git clone → build → 安装到独立目录（不覆盖配置）
+#### 迁移脚本（一次性，与 build 分离，不删源）
+
+| 脚本 | 用途 |
+|---|---|
+| **`migrate-repo-layout`** | **开发/运行迁移**：在 **clone 目录** 内合并 `config/`、`.runtime-state/`（来源含 `backend/config`、`dist/linkagent` 等）；去掉外部安装 marker；**运行根=仓库** |
+| **`migrate-copy-install`** | **目录切换**：复制到 **另一路径**（如 `/opt/agent-linker`），写 `.linkagent-install`；再 `server-install-update` 同步 dist 程序 |
+
+**从旧布局迁到 /opt（服务器推荐一条命令，内部两步）：**
+
+```bash
+cd /root/agent-linker
+# 默认 LEGACY=dist/linkagent，INSTALL=/opt/agent-linker
+bash scripts/migrate-server-from-legacy.sh
+bash scripts/server-install-update.sh --restart
+```
+
+等价于：
+
+```bash
+LINKAGENT_LEGACY_ROOT=/root/agent-linker/dist/linkagent bash scripts/migrate-repo-layout.sh
+LINKAGENT_INSTALL=/opt/agent-linker bash scripts/migrate-copy-install.sh
+```
+
+**不要**跳过第 1 步直接 `migrate-copy-install`（会从分散路径拼数据，易漏/不一致）。
+
+仅在仓库内运行、不用 /opt：
+
+```bash
+bash scripts/migrate-repo-layout.sh
+```
+
+本机：`pnpm migrate:repo` / `pnpm migrate:copy`。  
+两脚本均只复制**目标尚缺**的文件，不覆盖已有配置/登录态。
+
+#### 标准流程
+
+**A. 仓库即运行目录**（推荐与开发一致）
+
+```bash
+cd /root/agent-linker
+bash scripts/migrate-repo-layout.sh   # 首次整理
+pnpm dev   # 或 build 后 pm / dist 启停
+```
+
+运维改 **`/root/agent-linker/config/*.yaml`**，运行态 **`/root/agent-linker/.runtime-state/`**。
+
+**B. 独立安装目录**（clone 仅构建，运行在 `/opt/agent-linker`）
+
+```bash
+bash scripts/migrate-copy-install.sh
+bash scripts/server-install-update.sh --restart
+```
 
 | 路径 | 含义 |
 |---|---|
-| `dist/linkagent`（仓库内或解压包） | **发布包**（含 `./install.sh`） |
-| **`/opt/agent-linker`**（默认） | **运行安装目录**（`config/`、`.runtime-state/`） |
-
-```bash
-git clone https://github.com/superproxy/agent-linker.git /root/agent-linker
-cd /root/agent-linker
-bash scripts/server-install-update.sh --restart
-# 或 pnpm server:install-update -- --restart
-```
-
-**首次从旧布局迁到 `/opt/agent-linker`**（一次性，与 build 分离）：
-
-```bash
-cd /root/agent-linker
-# 若曾在 dist/linkagent 或其它目录直接跑，可指定：
-# LINKAGENT_LEGACY_ROOT=/root/agent-linker/dist/linkagent bash scripts/migrate-to-install.sh
-bash scripts/migrate-to-install.sh
-bash scripts/server-install-update.sh --restart
-```
-
-`migrate-to-install.sh` 只复制**安装目录尚缺**的 `config/*.yaml` 与 `.runtime-state` 子路径（来源：`backend/config`、仓库 `config/`、`dist/linkagent`、可选 `LINKAGENT_LEGACY_ROOT`），**不打包进 dist**，也不随 `build:dist` 执行。
+| `dist/linkagent` | 构建发布包（可重建） |
+| `<repo>/config` + `.runtime-state` | 模式 A 运行数据 |
+| **`/opt/agent-linker`** | 模式 B 运行目录（`.linkagent-install` 指向） |
 
 | 场景 | 脚本 |
 |---|---|
-| 源码网关机（clone → build → deploy） | `scripts/server-install-update.sh` |
-| Release 解压包（仅 deploy） | 包内 `./install.sh` |
+| 源码 build + deploy 到外部目录 | `server-install-update.sh` |
+| Release 解压 | `./install.sh` |
 
-日常升级：上述部署脚本只同步 bin/web/scripts 等，**不覆盖** 安装目录已有 yaml 与运行态。
+日常升级（模式 B）：`server-install-update` 只同步程序，**不覆盖** 安装目录 yaml 与运行态。
 
-Release：`sudo ./install.sh --restart`（若尚无配置需先 migrate 或拷贝 config/state）。  
-源码：`bash scripts/server-install-update.sh --restart`（`--no-pull` / `--skip-build` 见 `--help`）。  
-自定义路径：`LINKAGENT_INSTALL=/opt/agent-linker`（默认）。
-
-**改配置 / 运维**：编辑 **`/opt/agent-linker/config/*.yaml`**，`cd /opt/agent-linker && ./start.sh restart`。
-
-重启边缘：
-
-```bash
-bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
-```
+重启边缘：`bash scripts/edge.sh restart`（安装根由 `.linkagent-install` 或仓库根解析）。
 
 | 路径 | 说明 |
 |---|---|
 | `backend/config/*.template` | 入库模板 |
-| **`/opt/agent-linker/config/`** | 运行配置 |
-| **`/opt/agent-linker/.runtime-state/`** | 登录账号、节点、edge |
-| `dist/linkagent/` | 构建产物；升级时复制 bin/web 到安装目录 |
-| `.linkagent-server` | 网关机标记：`pnpm pm` / `edge.sh` 与 dist 同安装根；开发机勿创建 |
+| `<运行根>/config/` | 实际运维 yaml |
+| `<运行根>/.runtime-state/` | 登录、节点、edge |
+| `.linkagent-install` | 仅模式 B：一行绝对路径 |
 
 #### 其他
 
-- 仅开发联调：无 `config/` 时 `bash scripts/config-init.sh`，再 `pnpm pm restart gateway`；若本机误有 `.linkagent-server` 用 `LINKAGENT_DEV=1`；
+- 无 yaml：`pnpm config:init`；
+- 无 yaml 时 `pnpm config:init`，再 `pnpm pm restart gateway`；
 - Release 独立包：解压替换 `dist/linkagent/`，**保留** `config/` 与 `.runtime-state/` 再重启；
 - 执行机：`build:dist:node` → `dist/linkagent-node/`，保留该目录下 `node.env` 与 `.runtime-state/node/`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。

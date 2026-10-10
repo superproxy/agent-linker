@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 源码网关机：在 git clone 的仓库根执行 — 同步源码 → 构建 dist → 部署到运行安装目录。
-# 与 Release 包 ./install.sh 不同：本脚本需要 pnpm monorepo，不负责从旧目录迁入 config（见 migrate-to-install.sh）。
+# 与 Release 包 ./install.sh 不同：本脚本需要 pnpm monorepo，不负责迁入（见 migrate-repo-layout / migrate-copy-install）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,7 +26,7 @@ for arg in "$@"; do
     2/3 构建       pnpm install && pnpm build:dist → $BUILD
     3/3 部署       发布包同步到 LINKAGENT_INSTALL（默认 /opt/agent-linker）
 
-  首次若安装目录无 config/登录态：先 bash scripts/migrate-to-install.sh
+  首次从旧布局：bash scripts/migrate-server-from-legacy.sh（先 repo 再 LINKAGENT_INSTALL）
 
   --skip-build       仅部署（假定 dist/linkagent 已构建）
   --skip-deploy-npm  部署时不于安装目录执行 npm install
@@ -58,7 +58,7 @@ echo "==> 构建产物：$BUILD"
 echo "==> 部署目标：$INSTALL"
 
 if [ ! -f "$INSTALL_CFG/gateway.yaml" ] && [ ! -d "$INSTALL_STATE/users" ]; then
-  echo "提示：安装目录尚无配置/登录态，请先：bash scripts/migrate-to-install.sh" >&2
+  echo "提示：请先：bash scripts/migrate-server-from-legacy.sh" >&2
 fi
 
 PNPM="${PNPM:-pnpm}"

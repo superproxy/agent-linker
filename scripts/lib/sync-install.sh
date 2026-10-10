@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 将发布包目录（含 .linkagent-root）同步到运行安装目录，保留已有 config / .runtime-state。
-# 供 dist/install.sh 与 server-install-update.sh 共用。旧目录迁入请用 scripts/migrate-to-install.sh。
+# 供 dist/install.sh 与 server-install-update.sh 共用。迁入见 migrate-repo-layout / migrate-copy-install。
 
 linkagent_default_install_dir() {
   echo "/opt/agent-linker"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一次性迁入：旧目录 config / .runtime-state → 运行安装目录。
-# 仅由 scripts/migrate-to-install.sh 使用，不打包进 dist，不与 build/install 混跑。
+# 由 migrate-repo-layout / migrate-copy-install 使用，不打包进 dist。
 
 linkagent_migrate_config_into() {
   local dest="$1"
