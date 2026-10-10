@@ -113,18 +113,29 @@ function copySplitConfig(destDir, profile) {
     return;
   }
   for (const name of ['gateway.yaml', 'weixin.yaml', 'channels.yaml', 'node.yaml']) {
-    const live = join(REPO, 'backend', 'config', name);
+    const serverLive = join(REPO, 'server', 'config', name);
+    const backendLive = join(REPO, 'backend', 'config', name);
     const template = join(REPO, 'backend', 'config', `${name}.template`);
-    const src = existsSync(live) ? live : template;
-    if (!existsSync(src)) throw new Error(`缺少 backend/config/${name} 或 ${name}.template`);
+    const src = existsSync(serverLive)
+      ? serverLive
+      : existsSync(backendLive)
+        ? backendLive
+        : template;
+    if (!existsSync(src)) {
+      throw new Error(`缺少 server/config/${name}、backend/config/${name} 或 ${name}.template`);
+    }
     cpSync(src, join(destDir, name));
   }
 }
 
 /** destRoot = 独立包根（含 server/config、scripts） */
 function copyPiSetup(destRoot) {
-  const piAgentSrc = join(REPO, 'backend', 'config', 'pi-agent');
-  if (existsSync(piAgentSrc)) {
+  const piAgentCandidates = [
+    join(REPO, 'server', 'config', 'pi-agent'),
+    join(REPO, 'backend', 'config', 'pi-agent'),
+  ];
+  const piAgentSrc = piAgentCandidates.find((d) => existsSync(d));
+  if (piAgentSrc) {
     cpSync(piAgentSrc, join(destRoot, 'server', 'config', 'pi-agent'), { recursive: true });
   }
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });

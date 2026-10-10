@@ -38,8 +38,8 @@ export function parseSetupPiArgs(argv) {
 export function resolveTemplateDir(explicit) {
   if (explicit) return resolve(explicit);
   const candidates = [
-    join(REPO, 'backend', 'config', 'pi-agent'),
     join(REPO, 'server', 'config', 'pi-agent'),
+    join(REPO, 'backend', 'config', 'pi-agent'),
   ];
   const hit = candidates.find((d) => existsSync(join(d, 'models.json.template')));
   if (!hit) throw new Error(`找不到 models.json.template（试过 ${candidates.join('、')}）`);

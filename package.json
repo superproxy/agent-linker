@@ -8,6 +8,7 @@
     "node": ">=22.13"
   },
   "scripts": {
+    "config:init": "node scripts/config-init.mjs",
     "setup:pi": "node scripts/setup-pi.mjs",
     "setup:channels": "node scripts/setup-channels.mjs",
     "dev": "pnpm --filter @linkagent/backend dev",

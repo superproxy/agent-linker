@@ -18,10 +18,9 @@ test('dev 形态：无 marker 时 kind=dev，配置/入口/页面走 backend 源
   const layout = createInstallLayout(root);
   assert.equal(layout.kind, 'dev');
   assert.equal(layout.root, root);
-  // 配置候选：dev 优先 backend/config，兜底 server/config
-  assert.equal(layout.configCandidates[0], join(root, 'backend', 'config', 'gateway.yaml'));
-  assert.equal(layout.configCandidates[1], join(root, 'server', 'config', 'gateway.yaml'));
-  // 无配置文件时 configFile 回退形态默认（首个候选）
+  // 配置候选：dev / dist 统一 server/config 优先，legacy backend/config 兜底
+  assert.equal(layout.configCandidates[0], join(root, 'server', 'config', 'gateway.yaml'));
+  assert.equal(layout.configCandidates[1], join(root, 'backend', 'config', 'gateway.yaml'));
   assert.equal(layout.configFile, layout.configCandidates[0]);
   // dev 入口走 tsx TS 源码
   assert.ok(layout.entry('gateway').endsWith(join('backend', 'src', 'gateway', 'index.ts')));
@@ -57,13 +56,23 @@ test('dist 形态：有 .linkagent-root 时 kind=dist，配置/入口/页面走�
   assert.match(layout.restartWeixinHint, /start\.sh restart weixin/);
 });
 
-test('configFile：存在 gateway.yaml 时 split', () => {
+test('configFile：legacy backend/config 存在 gateway.yaml 时 split', () => {
   const root = tmpRoot();
   mkdirSync(join(root, 'backend', 'config'), { recursive: true });
   writeFileSync(join(root, 'backend', 'config', 'gateway.yaml'), 'server:\n  port: 8788\n');
   const layout = createInstallLayout(root);
   assert.equal(layout.configMode, 'split');
   assert.equal(layout.configFile, join(root, 'backend', 'config', 'gateway.yaml'));
+});
+
+test('configFile：server/config 优先于 backend/config', () => {
+  const root = tmpRoot();
+  mkdirSync(join(root, 'backend', 'config'), { recursive: true });
+  mkdirSync(join(root, 'server', 'config'), { recursive: true });
+  writeFileSync(join(root, 'backend', 'config', 'gateway.yaml'), 'server:\n  port: 8788\n');
+  writeFileSync(join(root, 'server', 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
+  const layout = createInstallLayout(root);
+  assert.equal(layout.configFile, join(root, 'server', 'config', 'gateway.yaml'));
 });
 
 test('configFile：dist 形态选中 server/config/gateway.yaml', () => {

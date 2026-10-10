@@ -9,6 +9,11 @@ backend/config/weixin.yaml
 backend/config/node.yaml
 backend/config/channels.yaml
 backend/config/config.yaml
+server/config/gateway.yaml
+server/config/weixin.yaml
+server/config/node.yaml
+server/config/channels.yaml
+server/config/config.yaml
 .runtime-state/
 .linkagent-server
 code-server/node-docker/node.env

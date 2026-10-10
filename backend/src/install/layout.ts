@@ -2,8 +2,9 @@
  * 安装布局（install layout）——形态判定与所有运行态路径的唯一真相源。
  *
  * 两种运行形态：
- *   - dev（仓库源码）：monorepo 根（含 pnpm-workspace.yaml），TS 源码 / backend/config / web/dist
- *   - dist（独立部署包）：含部署 marker `.linkagent-root` 的目录，server/*.mjs / server/config / web
+ *   - dev（仓库源码）：monorepo 根，TS 源码；**运行配置** `<root>/server/config`（与 dist 同路径）
+ *   - dist（独立部署包）：含 `.linkagent-root` 的目录，server/*.mjs / server/config / web
+ *   - 模板仍在 backend/config/*.template；legacy backend/config/*.yaml 只作迁移兜底
  *
  * 历史上形态判定（existsSync('.linkagent-root')）、配置双候选、.runtime-state 子目录、
  * dev/dist 进程入口表、内置页面与 web 根的相对路径拼接散落在 gateway/config、gateway/index、
@@ -21,7 +22,7 @@ export type InstallKind = 'dev' | 'dist';
 export type ProcessTargetId = 'gateway' | 'weixin' | 'channels' | 'node';
 
 const DEPLOY_MARKER = '.linkagent-root';
-/** 网关机 git 克隆 + dist 并存：仓库根此文件表示运行态归 dist/linkagent，而非 backend/config */
+/** 网关机 git 克隆 + dist 并存：仓库根此文件表示运行态归 dist/linkagent */
 export const SERVER_DEPLOY_MARKER = '.linkagent-server';
 const BUNDLED_DIST_DIR = join('dist', 'linkagent');
 const STATE_DIR = '.runtime-state';
@@ -60,7 +61,7 @@ export function findInstallRoot(): string {
 }
 
 /**
- * monorepo 根上的安装根：默认 dev（backend/config）；
+ * monorepo 根上的安装根：默认 dev（`<repo>/server/config`）；
  * 若已构建 dist 且存在 {@link SERVER_DEPLOY_MARKER}，则归 dist/linkagent（除非 LINKAGENT_DEV=1）。
  */
 export function resolveRepoInstallRoot(repoRoot: string): string {
@@ -151,19 +152,21 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
   const kind: InstallKind = existsSync(join(root, DEPLOY_MARKER)) ? 'dist' : 'dev';
   const state = (...segments: string[]) => join(root, STATE_DIR, ...segments);
 
-  // 配置候选：形态优先，另一形态作为兜底（两形态目录互不存在，结果与历史双候选一致）
-  const configCandidates =
-    kind === 'dist'
-      ? [join(root, 'server', 'config', CONFIG_BASENAMES.gateway), join(root, 'backend', 'config', CONFIG_BASENAMES.gateway)]
-      : [join(root, 'backend', 'config', CONFIG_BASENAMES.gateway), join(root, 'server', 'config', CONFIG_BASENAMES.gateway)];
-
-  const configDir = dirname(configCandidates[0]!);
-  const splitGateway = join(configDir, CONFIG_BASENAMES.gateway);
+  // dev / dist 统一优先 <installRoot>/server/config；dev 可兜底 legacy backend/config
+  const configCandidates = [
+    join(root, 'server', 'config', CONFIG_BASENAMES.gateway),
+    join(root, 'backend', 'config', CONFIG_BASENAMES.gateway),
+  ];
+  let configDir = dirname(configCandidates[0]!);
   let configMode: InstallLayout['configMode'] = 'none';
   let configFile = configCandidates[0]!;
-  if (existsSync(splitGateway)) {
-    configMode = 'split';
-    configFile = splitGateway;
+  for (const candidate of configCandidates) {
+    if (existsSync(candidate)) {
+      configDir = dirname(candidate);
+      configMode = 'split';
+      configFile = candidate;
+      break;
+    }
   }
 
   // web 管理端：dist 为 <root>/web；dev 为 vite 产物 <root>/web/dist（兜底 <root>/web）

@@ -78,7 +78,7 @@ pnpm typecheck          # 可选：环境自检
 
 ### 4.1 配置
 
-在 `backend/config/` 下复制模板并编辑（推荐 **三文件**，各进程各改各的）：
+在 **`<安装根>/server/config/`** 下编辑（dev 为仓库根 `server/config/`，独立包为 `dist/linkagent/server/config/`）。首次可用 `pnpm config:init` 从 `backend/config/*.template` 生成。推荐 **三文件**：
 
 | 文件 | 说明 |
 |---|---|
@@ -355,39 +355,41 @@ WantedBy=multi-user.target
 
 #### 网关机（推荐：源码仓库 + dist 运行）
 
-在 `/root/agent-linker` 等**固定克隆目录**维护 git 源码，**运行态与业务配置落在 `dist/linkagent/`**，不要长期用 `tsx` 直跑 `backend/src`：
+在 `/root/agent-linker` 等**固定克隆目录**维护 git 源码，**进程用 dist 二进制跑**，配置与 dev 同路径 **`server/config/`**：
 
-1. `git pull --ff-only` 更新源码；
-2. `pnpm build:dist` 生成/刷新 `dist/linkagent/`（esbuild 产物 + web + `server/pm.mjs` 等）；
-3. 在 `dist/linkagent/` 内 `npm install`（`build:dist` 默认会执行；增量时可只跑 install）；
-4. **复用已有配置**：保留 `dist/linkagent/server/config/*.yaml` 与 `dist/linkagent/.runtime-state/`。`build:dist` 会从仓库 `backend/config/` 再写一份模板进 dist，**会覆盖** dist 里已改过的 yaml，升级前需备份并恢复，或使用脚本。
+| 角色 | 安装根 | 配置 | 运行态 | 进程入口 |
+|---|---|---|---|---|
+| 本地 dev（tsx） | 仓库根 | `server/config/` | 仓库根 `.runtime-state/` | `pnpm pm` → `backend/src/**/*.ts` |
+| 网关机（构建） | `dist/linkagent/` | 构建时从 `server/config/` 拷入 `dist/.../server/config/` | `dist/linkagent/.runtime-state/` | `./start.sh` → `server/*.mjs` |
 
-一键脚本（备份并恢复 `server/config`，不删 `.runtime-state`）：
+**不要**长期 `tsx` 直跑 `backend/src` 做线上；**不要**再改 `backend/config/*.yaml`（仅模板，legacy 会被 `server-update` 迁到 `server/config`）。
+
+一键升级（**只备份/恢复 `.runtime-state`**，配置以仓库 `server/config` 为准，每次 build 打进 dist）：
 
 ```bash
 bash scripts/server-update.sh           # pull + install + build:dist
-bash scripts/server-update.sh --restart # 同上，并在 dist 内 restart gateway
+bash scripts/server-update.sh --restart # 同上 + dist 内 restart gateway
 ```
 
-重启边缘与路由：
+改配置流程：编辑 **`/root/agent-linker/server/config/*.yaml`** → 再跑 `server-update.sh --restart`（或 `pnpm build:dist` 后 restart）。
+
+重启边缘：
 
 ```bash
-cd dist/linkagent && ./start.sh restart gateway
-bash scripts/edge.sh restart            # frps / APISIX（仍在仓库 scripts/，或 dist 内 edge 脚本）
+bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
 ```
 
-| 路径 | 是否随 git/build 覆盖 | 说明 |
-|---|---|---|
-| `backend/config/`（仓库内） | 随 git 变 | 开发模板；**网关机 dist 模式不要在这里改** |
-| `dist/linkagent/server/config/` | build 会重写 | **线上生效配置**；升级时用 `server-update.sh` 保留 |
-| 仓库根 `.runtime-state/edge/` | 旧 dev 布局遗留 | dist 网关读 `dist/linkagent/.runtime-state/edge/`；`server-update.sh` 会合并进 dist |
-| `dist/linkagent/.runtime-state/` | build 会删掉 dist 内除 node_modules 外全部目录 | 用户、节点、edge 令牌等；**须**用 `server-update.sh` 备份恢复 |
-| `.runtime-state/`（仓库根） | 与 dev/tsx 模式共用 | **网关机**跑过 `server-update.sh` 后会写 `.linkagent-server`，此后 `pnpm pm` / `edge.sh` 与网关同读 `dist/linkagent` |
-| `.linkagent-server`（仓库根，gitignore） | 本地标记，不入库 | 表示「git 克隆 + dist 运行」；开发机勿创建；强制源码 dev 时 `LINKAGENT_DEV=1` |
+| 路径 | 说明 |
+|---|---|
+| `backend/config/*.template` | 入库模板；`pnpm config:init` 生成到 `server/config/` |
+| **`server/config/*.yaml`** | **dev 与网关机统一改这里**（gitignore） |
+| `dist/linkagent/server/config/` | build 产物；运行中 dist 网关读此目录 |
+| `dist/linkagent/.runtime-state/` | 用户、节点、edge、pm 日志；升级时脚本备份恢复 |
+| `.linkagent-server` | 网关机标记：`pnpm pm` / `edge.sh` 与 dist 同安装根；开发机勿创建 |
 
 #### 其他
 
-- 仅开发联调：`git pull && pnpm install` 后 `pnpm server:restart` / `pnpm pm restart gateway`（tsx 源码；本机已 build dist 且误建 `.linkagent-server` 时用 `LINKAGENT_DEV=1`）；
+- 仅开发联调：`pnpm config:init` 后 `pnpm pm restart gateway`（tsx）；若本机误有 `.linkagent-server` 用 `LINKAGENT_DEV=1`；
 - Release 独立包：解压替换 `dist/linkagent/` 或整目录，**同样保留** `server/config` 与 `.runtime-state` 再重启；
 - 执行机：`build:dist:node` → `dist/linkagent-node/`，保留该目录下 `node.env` 与 `.runtime-state/node/`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。

@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# 网关机：git 拉源码 → 打 dist → 安装依赖，保留已有 server/config 与 .runtime-state。
+# 网关机：git 拉源码 → build:dist → 保留 dist/.runtime-state（配置由 server/config 打进 dist）。
 #   scripts/server-update.sh              构建并 npm install
 #   scripts/server-update.sh --restart    同上，完成后在 dist 里 restart gateway
-#   scripts/server-update.sh --skip-install  只 build:dist，不跑 npm install（增量依赖时自行 install）
+#   scripts/server-update.sh --skip-install  只 build:dist，不跑 npm install
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist/linkagent"
-CFG="$DIST/server/config"
 STATE="$DIST/.runtime-state"
 RESTART=0
 SKIP_INSTALL=0
@@ -36,7 +35,25 @@ git pull --ff-only
 
 if [ -f "$DIST/.linkagent-root" ]; then
   touch "$ROOT/.linkagent-server"
-  echo "→ 已标记网关机模式（.linkagent-server）：pnpm pm / edge 将使用 dist/linkagent 为安装根"
+fi
+
+# 统一配置目录：仓库根 server/config（与 dist 内路径一致）
+REPO_CFG="$ROOT/server/config"
+LEGACY_CFG="$ROOT/backend/config"
+mkdir -p "$REPO_CFG"
+for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
+  if [ ! -f "$REPO_CFG/$f" ] && [ -f "$LEGACY_CFG/$f" ]; then
+    cp -a "$LEGACY_CFG/$f" "$REPO_CFG/$f"
+    echo "→ 已迁移 legacy 配置：backend/config/$f → server/config/$f"
+  fi
+done
+if [ ! -d "$REPO_CFG/pi-agent" ] && [ -d "$LEGACY_CFG/pi-agent" ]; then
+  cp -a "$LEGACY_CFG/pi-agent" "$REPO_CFG/pi-agent"
+  echo "→ 已迁移 pi-agent 模板目录到 server/config/pi-agent"
+fi
+if [ ! -f "$REPO_CFG/gateway.yaml" ]; then
+  echo "→ 未找到 server/config/gateway.yaml，从模板初始化"
+  node "$ROOT/scripts/config-init.mjs" || true
 fi
 
 PNPM="${PNPM:-pnpm}"
@@ -52,47 +69,19 @@ fi
 echo "→ pnpm install（构建用）"
 "$PNPM" install
 
-# 旧布局：配置在仓库 backend/config、edge 在仓库根 .runtime-state/edge。
-# dist 网关只读 dist/linkagent 下路径，构建前先并入 dist，避免仍改 agent-linker 根目录却不生效。
-REPO_CFG="$ROOT/backend/config"
+# legacy：仓库根 .runtime-state/edge 合并进 dist（仅当 dist 已有或即将生成）
 REPO_EDGE="$ROOT/.runtime-state/edge"
-if [ -d "$REPO_CFG" ]; then
-  mkdir -p "$CFG"
-  for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
-    if [ -f "$REPO_CFG/$f" ]; then
-      cp -a "$REPO_CFG/$f" "$CFG/$f"
-    fi
-  done
-  if [ -d "$REPO_CFG/pi-agent" ]; then
-    rm -rf "$CFG/pi-agent"
-    cp -a "$REPO_CFG/pi-agent" "$CFG/pi-agent"
-  fi
-  echo "→ 已把 backend/config 同步到 dist/server/config（线上请只改 dist 内 yaml）"
-fi
 if [ -d "$REPO_EDGE" ]; then
   mkdir -p "$STATE/edge"
   cp -a "$REPO_EDGE/." "$STATE/edge/"
-  echo "→ 已把仓库根 .runtime-state/edge 合并到 dist/.runtime-state/edge"
+  echo "→ 已合并仓库根 .runtime-state/edge → dist/.runtime-state/edge（建议以后只维护 dist 内 edge）"
 fi
 
 BACKUP=""
-if [ -d "$CFG" ] || [ -d "$STATE" ]; then
+if [ -d "$STATE" ]; then
   BACKUP="$(mktemp -d)"
-  if [ -d "$CFG" ]; then
-    mkdir -p "$BACKUP/config"
-    for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
-      if [ -f "$CFG/$f" ]; then
-        cp -a "$CFG/$f" "$BACKUP/config/$f"
-      fi
-    done
-    if [ -d "$CFG/pi-agent" ]; then
-      cp -a "$CFG/pi-agent" "$BACKUP/config/pi-agent"
-    fi
-  fi
-  if [ -d "$STATE" ]; then
-    cp -a "$STATE" "$BACKUP/runtime-state"
-  fi
-  echo "→ 已备份 dist 内 server/config 与 .runtime-state（$BACKUP）"
+  cp -a "$STATE" "$BACKUP/runtime-state"
+  echo "→ 已备份 dist/.runtime-state（$BACKUP）"
 fi
 
 if [ "$SKIP_INSTALL" = 1 ]; then
@@ -103,31 +92,18 @@ else
   "$PNPM" build:dist
 fi
 
-if [ -n "$BACKUP" ]; then
-  if [ -d "$BACKUP/config" ]; then
-    mkdir -p "$CFG"
-    for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
-      if [ -f "$BACKUP/config/$f" ]; then
-        cp -a "$BACKUP/config/$f" "$CFG/$f"
-      fi
-    done
-    if [ -d "$BACKUP/config/pi-agent" ]; then
-      rm -rf "$CFG/pi-agent"
-      cp -a "$BACKUP/config/pi-agent" "$CFG/pi-agent"
-    fi
-    echo "→ 已恢复 dist/server/config"
-  fi
-  if [ -d "$BACKUP/runtime-state" ]; then
-    rm -rf "$STATE"
-    cp -a "$BACKUP/runtime-state" "$STATE"
-    echo "→ 已恢复 dist/.runtime-state"
-  fi
+if [ -n "$BACKUP" ] && [ -d "$BACKUP/runtime-state" ]; then
+  rm -rf "$STATE"
+  cp -a "$BACKUP/runtime-state" "$STATE"
+  echo "→ 已恢复 dist/.runtime-state"
   rm -rf "$BACKUP"
 fi
 
+touch "$ROOT/.linkagent-server"
 echo "✅ 部署包已更新：$DIST"
+echo "   配置：编辑 $ROOT/server/config/*.yaml 后重新执行本脚本（build 会写入 dist/server/config）"
 echo "   运行：cd $DIST && ./start.sh restart gateway"
-echo "   或仓库根：pnpm pm restart gateway（需 pm 指向 dist 布局）"
+echo "   或：pnpm pm restart gateway（.linkagent-server 下与 dist 同安装根）"
 
 if [ "$RESTART" = 1 ]; then
   if [ -f "$DIST/start.sh" ]; then
