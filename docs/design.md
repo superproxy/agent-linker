@@ -362,10 +362,10 @@ ACP 仍由 node 初始化和管理。入口脚本和网关都不进入 ACP。
 
 ### 6.2.3 浏览器入口
 
-浏览器只走 `gateway.yaml` 里 `edge.publicHost` 这一个正式域名，缺省 `ide.localhost`，端口是 `edge.publicPort`（缺省 `8088`）。任务用路径区分。
+浏览器只走 `gateway.yaml` 里 `edge.publicHost` 这一个正式域名，缺省 `ide.localhost`，端口是 `edge.publicPort`（缺省 `9080`，与 APISIX 数据面相同）。任务用路径区分。
 
 ```text
-http://ide.localhost:8088/<taskId>-<type>
+http://ide.localhost:9080/<taskId>-<type>
 ```
 
 `<taskId>` 是任务号。`<type>` 只有三种：
@@ -379,9 +379,9 @@ http://ide.localhost:8088/<taskId>-<type>
 例如任务 `t_41db7238`：
 
 ```text
-http://ide.localhost:8088/t_41db7238-web
-http://ide.localhost:8088/t_41db7238-code
-http://ide.localhost:8088/t_41db7238-vnc
+http://ide.localhost:9080/t_41db7238-web
+http://ide.localhost:9080/t_41db7238-code
+http://ide.localhost:9080/t_41db7238-vnc
 ```
 
 APISIX 的路由按这个主机和路径登记：`host = ide.localhost`，`uri` 分别匹配 `/<taskId>-web`、`/<taskId>-code`、`/<taskId>-vnc`。

@@ -1,10 +1,6 @@
 import { domainToASCII } from 'node:url';
 import { TASK_PUBLIC_HOST, taskPublicHost, taskPublicPath, type TaskRouteType } from '@linkagent/shared';
-import { NGINX_LISTEN_HOST, NGINX_LISTEN_PORT } from './assets.js';
-
 /** 带管理 API 的 APISIX。任务域名用 Admin API 创建和开关，不重载配置。 */
-export const APISIX_IMAGE = 'apache/apisix:3.11.0-debian';
-export const ETCD_IMAGE = 'quay.io/coreos/etcd:v3.5.16';
 export const APISIX_ADMIN_PORT = 9180;
 export const APISIX_PROJECT = 'linkagent-edge';
 
@@ -122,30 +118,6 @@ deployment:
     host:
       - http://etcd:2379
     prefix: /apisix
-`;
-}
-
-export function renderApisixCompose(): string {
-  return `services:
-  etcd:
-    image: ${ETCD_IMAGE}
-    command:
-      - etcd
-      - --name=etcd
-      - --data-dir=/etcd-data
-      - --listen-client-urls=http://0.0.0.0:2379
-      - --advertise-client-urls=http://etcd:2379
-  apisix:
-    image: ${APISIX_IMAGE}
-    depends_on:
-      - etcd
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    ports:
-      - ${NGINX_LISTEN_HOST}:${NGINX_LISTEN_PORT}:9080
-      - ${NGINX_LISTEN_HOST}:${APISIX_ADMIN_PORT}:${APISIX_ADMIN_PORT}
-    volumes:
-      - ./apisix-config.yaml:/usr/local/apisix/conf/config.yaml:ro
 `;
 }
 

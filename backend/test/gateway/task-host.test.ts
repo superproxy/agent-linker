@@ -28,21 +28,21 @@ test('matchTaskHost 同时接受下划线和连字符', () => {
 });
 
 test('taskIdeOrigin 使用正式域名和 taskId-type 路径', () => {
-  assert.equal(taskIdeOrigin('默认', 'default'), 'http://ide.localhost:8088/default-web');
-  assert.equal(taskIdeOrigin('test', 't_41db7238'), 'http://ide.localhost:8088/t_41db7238-web');
-  assert.equal(taskCodeServerOrigin('test', 't_41db7238'), 'http://ide.localhost:8088/t_41db7238-code');
+  assert.equal(taskIdeOrigin('默认', 'default'), 'http://ide.localhost:9080/default-web');
+  assert.equal(taskIdeOrigin('test', 't_41db7238'), 'http://ide.localhost:9080/t_41db7238-web');
+  assert.equal(taskCodeServerOrigin('test', 't_41db7238'), 'http://ide.localhost:9080/t_41db7238-code');
 });
 
 test('taskViewOrigins 的 Web 和 VNC 走正式域名路径', () => {
   assert.deepEqual(taskViewOrigins({ id: 'default', name: '默认' }), {
-    ide: 'http://ide.localhost:8088/default-code',
+    ide: 'http://ide.localhost:9080/default-code',
     web: taskDevOrigin('默认', 'default'),
     vnc: taskVncOrigin('默认', 'default'),
   });
-  assert.equal(taskDevOrigin('test', 't_41db7238'), 'http://ide.localhost:8088/t_41db7238-web');
+  assert.equal(taskDevOrigin('test', 't_41db7238'), 'http://ide.localhost:9080/t_41db7238-web');
   assert.equal(
     taskVncOrigin('test', 't_41db7238'),
-    'http://ide.localhost:8088/t_41db7238-vnc/vnc.html?autoconnect=1&resize=scale&path=t_41db7238-vnc%2Fwebsockify',
+    'http://ide.localhost:9080/t_41db7238-vnc/vnc.html?autoconnect=1&resize=scale&path=t_41db7238-vnc%2Fwebsockify',
   );
-  assert.deepEqual(taskViewOrigins({ id: '  ', name: '空' }), { ide: 'http://ide.localhost:8088/', web: '', vnc: '' });
+  assert.deepEqual(taskViewOrigins({ id: '  ', name: '空' }), { ide: 'http://ide.localhost:9080/', web: '', vnc: '' });
 });

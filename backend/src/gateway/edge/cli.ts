@@ -29,7 +29,6 @@ async function main(): Promise<void> {
   const lines = [
     `frpsBin=${prepared.frpsBin ?? ''}`,
     `frpsConf=${prepared.frpsConf}`,
-    `composeFile=${prepared.composeFile}`,
     `composeProject=${prepared.composeProject}`,
     `composeBin=${compose?.command ?? ''}`,
     `composeStyle=${compose?.style ?? 'none'}`,

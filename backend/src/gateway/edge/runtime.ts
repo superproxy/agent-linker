@@ -10,7 +10,6 @@ import {
   APISIX_PROJECT,
   ApisixAdmin,
   type ComposeStyle,
-  renderApisixCompose,
   renderApisixConfig,
   TASK_PUBLIC_HOST,
   taskCodeRouteId,
@@ -47,7 +46,6 @@ export interface GatewayEdgeOptions {
 export interface PreparedEdge {
   frpsBin: string | null;
   frpsConf: string;
-  composeFile: string;
   adminKey: string;
   adminUrl: string;
   composeProject: string;
@@ -233,9 +231,7 @@ export async function prepareGatewayEdge(opts: GatewayEdgeOptions): Promise<Prep
     ...(opts.frpPluginAddr ? { pluginAddr: opts.frpPluginAddr } : {}),
   }), 'utf8');
   const adminKey = readOrCreateSecret(join(opts.runtimeDir, 'apisix.admin-key'));
-  const composeFile = join(opts.runtimeDir, 'apisix-compose.yml');
   writeFileSync(join(opts.runtimeDir, 'apisix-config.yaml'), renderApisixConfig(adminKey), 'utf8');
-  writeFileSync(composeFile, renderApisixCompose(), 'utf8');
   const frp = frpAsset(platform, arch);
   let frpsBin: string | null = null;
   if (frp) {
@@ -247,7 +243,6 @@ export async function prepareGatewayEdge(opts: GatewayEdgeOptions): Promise<Prep
   return {
     frpsBin,
     frpsConf,
-    composeFile,
     adminKey,
     adminUrl: `http://${NGINX_LISTEN_HOST}:${APISIX_ADMIN_PORT}`,
     composeProject: APISIX_PROJECT,
@@ -337,7 +332,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
   return { ...edgeApi, stop() {} };
 }
 
-/** 旧的静态 nginx 还占着 8088 时先退出，把端口留给 APISIX。 */
+/** 旧的静态 nginx 若还占着自己的 8088，先退出。APISIX 数据面使用 9080。 */
 function quitStockNginx(runtimeDir: string, toolsDir: string, platform: NodeJS.Platform): void {
   const asset = nginxAsset(platform);
   if (!asset) return;

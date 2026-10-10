@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -154,8 +154,8 @@ test('startGatewayEdge：二进制已在则只写配置，不拉起 frps 与 API
   });
   assert.match(readFileSync(join(runtime, 'frps.toml'), 'utf8'), /bindPort = 7000/);
   assert.match(readFileSync(join(runtime, 'frps.path'), 'utf8'), /frps\.exe/);
-  assert.match(readFileSync(join(runtime, 'apisix-compose.yml'), 'utf8'), /apache\/apisix/);
-  assert.match(readFileSync(join(runtime, 'apisix-compose.yml'), 'utf8'), /127\.0\.0\.1:8088:9080/);
+  assert.match(readFileSync(join(runtime, 'apisix-config.yaml'), 'utf8'), /admin_key/);
+  assert.equal(existsSync(join(runtime, 'apisix-compose.yml')), false);
   assert.match(readFileSync(join(runtime, 'frpc.path'), 'utf8'), /frpc\.exe/);
   edge.stop();
 });

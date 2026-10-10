@@ -131,6 +131,8 @@ function copyPiSetup(destRoot) {
   cpSync(join(REPO, 'scripts', 'setup-pi.mjs'), join(destRoot, 'scripts', 'setup-pi.mjs'));
   cpSync(join(REPO, 'scripts', 'setup-channels.mjs'), join(destRoot, 'scripts', 'setup-channels.mjs'));
   cpSync(join(REPO, 'scripts', 'edge.sh'), join(destRoot, 'scripts', 'edge.sh'));
+  mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
+  cpSync(join(REPO, 'scripts', 'edge', 'docker-compose.yaml'), join(destRoot, 'scripts', 'edge', 'docker-compose.yaml'));
 }
 
 /** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */

@@ -48,4 +48,4 @@ tasks:
 # 浏览器入口。转发路径是 /<taskId>-web 、/<taskId>-code 、/<taskId>-vnc。
 edge:
   publicHost: ide.localhost
-  publicPort: 8088
+  publicPort: 9080

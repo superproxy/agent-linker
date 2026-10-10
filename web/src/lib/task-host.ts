@@ -1,8 +1,8 @@
 import { TASK_PUBLIC_HOST, taskIdFromHostname, taskIdFromPublicPath, taskPublicPath } from '../../../shared/src/task-host';
 
 /** 边缘代理上任务 Web 的端口。 */
-export const TASK_HOST_PORT = 8088;
-/** frps HTTP 反向代理端口。任务域名走边缘代理 8088。 */
+export const TASK_HOST_PORT = 9080;
+/** frps HTTP 反向代理端口。任务域名走边缘代理 9080。 */
 export const FRPS_VHOST_PORT = 7080;
 
 export interface TaskHostItem {
@@ -60,12 +60,12 @@ function publicUrl(taskId: string, type: 'web' | 'code' | 'vnc', port?: number, 
   return path ? `${originOf(endpointOf(port, host))}${path}` : '';
 }
 
-/** 浏览器打开该任务 Web，例如 http://ide.localhost:8088/t_41db7238-web */
+/** 浏览器打开该任务 Web，例如 http://ide.localhost:9080/t_41db7238-web */
 export function taskIdeOrigin(_name: string, taskId: string, port?: number, host?: string): string {
   return publicUrl(taskId, 'web', port, host);
 }
 
-/** 浏览器打开该任务 code-server，例如 http://ide.localhost:8088/t_41db7238-code */
+/** 浏览器打开该任务 code-server，例如 http://ide.localhost:9080/t_41db7238-code */
 export function taskCodeServerOrigin(_name: string, taskId: string, port?: number, host?: string): string {
   return publicUrl(taskId, 'code', port, host);
 }

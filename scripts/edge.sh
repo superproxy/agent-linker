@@ -5,6 +5,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RUNTIME="$ROOT/.runtime-state/edge"
+COMPOSE_FILE="$ROOT/scripts/edge/docker-compose.yaml"
+export LINKAGENT_EDGE_DIR="$RUNTIME"
 FRPS_PID="$RUNTIME/frps.pid"
 FRPS_LOG="$RUNTIME/frps.log"
 APISIX_LOG="$RUNTIME/apisix.log"
@@ -19,7 +21,6 @@ prepare() {
   fi
   FRPS_BIN=""
   FRPS_CONF=""
-  COMPOSE_FILE=""
   COMPOSE_PROJECT="linkagent-edge"
   COMPOSE_BIN=""
   COMPOSE_STYLE="none"
@@ -30,7 +31,6 @@ prepare() {
     case "$key" in
       frpsBin) FRPS_BIN="$val" ;;
       frpsConf) FRPS_CONF="$val" ;;
-      composeFile) COMPOSE_FILE="$val" ;;
       composeProject) COMPOSE_PROJECT="$val" ;;
       composeBin) COMPOSE_BIN="$val" ;;
       composeStyle) COMPOSE_STYLE="$val" ;;

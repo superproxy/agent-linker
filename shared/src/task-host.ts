@@ -1,6 +1,6 @@
 /** 浏览器入口缺省主机。实际值由 gateway.yaml 的 edge.publicHost 加载。 */
 export const TASK_PUBLIC_HOST = 'ide.localhost';
-export const TASK_PUBLIC_PORT = 8088;
+export const TASK_PUBLIC_PORT = 9080;
 
 export interface EdgePublicConfig {
   publicHost: string;

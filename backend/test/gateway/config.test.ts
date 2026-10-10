@@ -157,7 +157,7 @@ test('loadSharedConfig：gateway.yaml 扁平段加载', () => {
   assert.equal(loaded.config.gateway.server.port, 8642);
   assert.equal(loaded.config.gateway.auth.mode, 'open');
   assert.equal(loaded.config.gateway.edge.publicHost, 'ide.localhost');
-  assert.equal(loaded.config.gateway.edge.publicPort, 8088);
+  assert.equal(loaded.config.gateway.edge.publicPort, 9080);
 });
 
 test('loadSharedConfig：edge.publicHost 带端口时拆成正式域名', () => {

@@ -31,7 +31,7 @@ test('renderIdeCompose：只发布 code-server 到回环地址', () => {
   assert.equal(doc.services['code-serve-web']?.image, LINKAGENT_CODE_SERVER_IMAGE);
   assert.ok(doc.services['code-serve-web']?.command?.includes('--abs-proxy-base-path'));
   assert.ok(doc.services['code-serve-web']?.command?.includes('--trusted-origins'));
-  assert.ok(doc.services['code-serve-web']?.command?.includes('*.localhost:8088'));
+  assert.ok(doc.services['code-serve-web']?.command?.includes('*.localhost:9080'));
   assert.ok(doc.services['code-serve-web']?.command?.includes('/root/workspace'));
   assert.deepEqual(doc.services['code-serve-web']?.ports, [
     '127.0.0.1:8000:8080',

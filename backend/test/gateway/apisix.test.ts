@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { domainToASCII } from 'node:url';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -5,7 +8,6 @@ import {
   ApisixAdmin,
   apisixComposeArgs,
   apisixUpstreamNode,
-  renderApisixCompose,
   renderApisixRoute,
   taskCodeRouteId,
   taskCodeServerHost,
@@ -36,11 +38,13 @@ test('任务路由按任务号生成主机名，回环改写到宿主机', () =>
   assert.equal(upstream.nodes['host.docker.internal:8787'], 1);
 });
 
-test('compose 把数据面放在 8088，管理面只监听回环', () => {
-  const compose = renderApisixCompose();
-  assert.match(compose, /127\.0\.0\.1:8088:9080/);
+test('compose 把数据面放在 9080，管理面只监听回环', () => {
+  const composePath = join(dirname(fileURLToPath(import.meta.url)), '../../../scripts/edge/docker-compose.yaml');
+  const compose = readFileSync(composePath, 'utf8');
+  assert.match(compose, /(?<!127\.0\.0\.1:)9080:9080/);
   assert.match(compose, /127\.0\.0\.1:9180:9180/);
   assert.match(compose, /host.docker.internal:host-gateway/);
+  assert.match(compose, /LINKAGENT_EDGE_DIR/);
   assert.deepEqual(apisixComposeArgs('/r/apisix-compose.yml', 'up'), [
     'compose',
     '-p',

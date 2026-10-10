@@ -33,10 +33,10 @@ const CODE_CONTAINER = 'linkagent-code-serve-web';
 /** code-server 默认工作目录。宿主机目录挂到这里。 */
 export const IDE_CONTAINER_WORKSPACE = '/root/workspace';
 /**
- * 浏览器经 8088 访问时带端口。APISIX 的 X-Forwarded-Host 不含端口，
+ * 浏览器经 9080 访问时带端口。APISIX 的 X-Forwarded-Host 不含端口，
  * code-server 会判定来源不一致并拒绝工作台 WebSocket。
  */
-const IDE_TRUSTED_ORIGIN = '*.localhost:8088';
+const IDE_TRUSTED_ORIGIN = '*.localhost:9080';
 /** 与 frps vhostHTTPPort 一致。容器内 frpc 把下面两个端口登记成 HTTP 域名。 */
 export const FRPS_VHOST_HTTP_PORT = 7080;
 export const WORKSPACE_DEV_PORT = 5173;
