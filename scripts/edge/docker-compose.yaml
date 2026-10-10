@@ -1,6 +1,6 @@
 # APISIX 数据面与 etcd。由 scripts/edge.sh 启动，不由网关进程生成。
 # 管理密钥在 ${LINKAGENT_EDGE_DIR}/apisix-config.yaml，脚本启动前写入。
-name: linkagent-edge
+# 项目名由 scripts/edge.sh 的 -p linkagent-edge 传入。docker-compose 1.29 不接受顶层 name。
 services:
   etcd:
     image: quay.io/coreos/etcd:v3.5.16
@@ -11,7 +11,10 @@ services:
       - --listen-client-urls=http://0.0.0.0:2379
       - --advertise-client-urls=http://etcd:2379
   apisix:
-    image: apache/apisix:3.11.0-debian
+    image: linkagent-apisix:local
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       - etcd
     extra_hosts:

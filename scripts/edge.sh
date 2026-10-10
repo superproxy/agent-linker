@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # frps 与 APISIX 启停。网关进程不拉起这两个进程。
-#   scripts/edge.sh start|stop|restart|status|log
+#   scripts/edge.sh start|stop|restart|status|log|build
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -69,8 +69,20 @@ start_frps() {
 }
 
 start_apisix() {
-  compose_cmd up -d >>"$APISIX_LOG" 2>&1
+  if ! compose_cmd up -d 2>&1 | tee -a "$APISIX_LOG"; then
+    echo "APISIX 启动失败，日志 $APISIX_LOG" >&2
+    return 1
+  fi
   echo "APISIX 已提交启动，日志 $APISIX_LOG"
+}
+
+build_apisix() {
+  if [ ! -f "$ROOT/scripts/edge/Dockerfile" ]; then
+    echo "缺少 $ROOT/scripts/edge/Dockerfile" >&2
+    return 1
+  fi
+  echo "→ 构建镜像 linkagent-apisix:local"
+  compose_cmd build apisix
 }
 
 stop_frps() {
@@ -93,6 +105,11 @@ do_start() {
   prepare
   start_frps
   start_apisix
+}
+
+do_build() {
+  prepare
+  build_apisix
 }
 
 do_stop() {
@@ -118,12 +135,13 @@ do_log() {
 
 case "${1:-start}" in
   start) do_start ;;
+  build) do_build ;;
   stop) do_stop ;;
   restart) do_stop && do_start ;;
   status) do_status ;;
   log) do_log ;;
   *)
-    echo "用法: $0 {start|stop|restart|status|log}"
+    echo "用法: $0 {start|stop|restart|status|log|build}"
     exit 1
     ;;
 esac

@@ -35,6 +35,7 @@
     "edge:restart": "bash scripts/edge.sh restart",
     "edge:status": "bash scripts/edge.sh status",
     "edge:log": "bash scripts/edge.sh log",
+    "edge:build": "bash scripts/edge.sh build",
     "server:dev": "bash scripts/server.sh foreground",
     "node": "node scripts/node-ctl.mjs start",
     "node:help": "node scripts/node-ctl.mjs --help",

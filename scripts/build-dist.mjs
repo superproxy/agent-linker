@@ -133,6 +133,7 @@ function copyPiSetup(destRoot) {
   cpSync(join(REPO, 'scripts', 'edge.sh'), join(destRoot, 'scripts', 'edge.sh'));
   mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
   cpSync(join(REPO, 'scripts', 'edge', 'docker-compose.yaml'), join(destRoot, 'scripts', 'edge', 'docker-compose.yaml'));
+  cpSync(join(REPO, 'scripts', 'edge', 'Dockerfile'), join(destRoot, 'scripts', 'edge', 'Dockerfile'));
 }
 
 /** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */
@@ -407,6 +408,7 @@ async function buildFull(dist, skipInstall) {
             'edge:stop': 'bash scripts/edge.sh stop',
             'edge:restart': 'bash scripts/edge.sh restart',
             'edge:status': 'bash scripts/edge.sh status',
+            'edge:build': 'bash scripts/edge.sh build',
           },
           dependencies: runtimeDependenciesFull(),
         },

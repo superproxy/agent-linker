@@ -45,6 +45,8 @@ test('compose 把数据面放在 9080，管理面只监听回环', () => {
   assert.match(compose, /127\.0\.0\.1:9180:9180/);
   assert.match(compose, /host.docker.internal:host-gateway/);
   assert.match(compose, /LINKAGENT_EDGE_DIR/);
+  assert.match(compose, /linkagent-apisix:local/);
+  assert.match(compose, /dockerfile: Dockerfile/);
   assert.deepEqual(apisixComposeArgs('/r/apisix-compose.yml', 'up'), [
     'compose',
     '-p',
