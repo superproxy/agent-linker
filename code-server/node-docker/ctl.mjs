@@ -94,7 +94,6 @@ export function dockerRunArgs(opts) {
     '-v', `${dockerPath(opts.agentHome)}:${CONTAINER_AGENT_HOME}`,
     '-v', `${dockerPath(opts.stateDir)}:/var/lib/linkagent/node`,
   );
-  if (opts.frpcFile) args.push('-v', `${dockerPath(opts.frpcFile)}:/etc/linkagent/frpc.toml:ro`);
   args.push(opts.image);
   return args;
 }
@@ -153,7 +152,6 @@ function prepare(dir) {
   env.LINKAGENT_NODE_WORKSPACE = CONTAINER_USER_WORKSPACE;
   const envFile = join(stateDir, 'container.env');
   writeFileSync(envFile, containerEnvText(env), { encoding: 'utf8', mode: 0o600 });
-  const frpcFile = join(dir, 'frpc.toml');
   return {
     name: CONTAINER_NAME,
     image: env.LINKAGENT_NODE_IMAGE || DEFAULT_IMAGE,
@@ -161,7 +159,6 @@ function prepare(dir) {
     workspace,
     agentHome,
     stateDir,
-    ...(existsSync(frpcFile) ? { frpcFile } : {}),
   };
 }
 
@@ -175,12 +172,17 @@ function repoRoot() {
 }
 
 function buildImage() {
-  const script = join(repoRoot(), 'scripts', 'image-node.mjs');
-  const res = spawnSync(process.execPath, [script], {
-    cwd: repoRoot(),
-    stdio: 'inherit',
-    windowsHide: true,
-  });
+  const root = repoRoot();
+  const res = process.platform === 'win32'
+    ? spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'scripts', 'build-node.ps1')],
+        { cwd: root, stdio: 'inherit', windowsHide: true },
+      )
+    : spawnSync('bash', [join(root, 'scripts', 'build-node.sh')], {
+        cwd: root,
+        stdio: 'inherit',
+      });
   if (res.error) {
     console.error(res.error.message);
     return 1;

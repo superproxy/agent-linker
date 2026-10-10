@@ -37,7 +37,7 @@ test('nginx 安装包只覆盖 Windows 二进制', () => {
   assert.equal(nginxAsset('linux'), null);
 });
 
-test('nginx 只监听回环，frps 控制口对外开放、面板在回环', () => {
+test('nginx 只监听回环，frps 控制口和面板对外开放', () => {
   const nginx = renderNginxConf({
     idePrefix: '/',
     ideUpstream: 'http://127.0.0.1:8010',
@@ -56,7 +56,7 @@ test('nginx 只监听回环，frps 控制口对外开放、面板在回环', () 
   assert.match(frps, /bindAddr = "0\.0\.0\.0"/);
   assert.match(frps, /bindPort = 7000/);
   assert.match(frps, /vhostHTTPPort = 7080/);
-  assert.match(frps, /webServer\.addr = "127\.0\.0\.1"/);
+  assert.match(frps, /webServer\.addr = "0\.0\.0\.0"/);
   assert.match(frps, /webServer\.port = 7500/);
   const withPlugin = renderFrpsConf({ token: 't', dashboardPassword: 'p', pluginAddr: '127.0.0.1:8787' });
   assert.match(withPlugin, /\[\[httpPlugins\]\]/);

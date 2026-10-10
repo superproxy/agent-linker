@@ -65,7 +65,7 @@ test('dockerRunArgs：后台挂工作目录和节点状态', () => {
   assert.equal(args.at(-1), 'linkagent-node:local');
 });
 
-test('dockerRunArgs：有 frpc.toml 时只读挂入', () => {
+test('dockerRunArgs：不挂载 frpc.toml，由容器内 node 写入', () => {
   const args = dockerRunArgs({
     foreground: true,
     name: 'linkagent-node',
@@ -73,10 +73,9 @@ test('dockerRunArgs：有 frpc.toml 时只读挂入', () => {
     workspace: '/work',
     agentHome: '/home/me/.pi',
     stateDir: '/state',
-    frpcFile: '/cfg/frpc.toml',
     image: 'linkagent-node:local',
   });
   assert.ok(args.includes('--rm'));
   assert.equal(args.includes('-d'), false);
-  assert.ok(args.some((arg) => arg.endsWith(':/etc/linkagent/frpc.toml:ro')));
+  assert.equal(args.some((arg) => arg.includes('frpc.toml')), false);
 });

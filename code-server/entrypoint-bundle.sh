@@ -7,20 +7,8 @@ export LINKAGENT_NODE_SERVE_WEB=0
 export LINKAGENT_NODE_STATE_DIR="${LINKAGENT_NODE_STATE_DIR:-/var/lib/linkagent/node}"
 export LINKAGENT_NODE_AGENTS="${LINKAGENT_NODE_AGENTS:-pi}"
 mkdir -p "$LINKAGENT_NODE_STATE_DIR" /etc/linkagent
-
-if [ -z "${FRPS_TOKEN:-}" ] && [ -n "${LINKAGENT_GATEWAY_TOKEN:-}" ]; then
-  printf '%s\n' "[frpc] 使用节点 token 作为 FRPS_TOKEN"
-  FRPS_TOKEN=$LINKAGENT_GATEWAY_TOKEN
-  export FRPS_TOKEN
-fi
-
-if [ -f /etc/linkagent/frpc.toml ]; then
-  printf '%s\n' "[frpc] 使用已挂载的 /etc/linkagent/frpc.toml"
-elif [ -n "${FRPS_TOKEN:-}" ]; then
-  node /usr/local/bin/linkagent-render-frpc.mjs || printf '%s\n' "[frpc] 生成配置失败"
-else
-  printf '%s\n' "[frpc] 未生成配置：没有 FRPS_TOKEN，也没有节点 token"
-fi
+# 与主机模式相同：node 写入 frpc.toml，本入口只负责执行 frpc。文件在容器内，不再挂载。
+export LINKAGENT_FRPC_BY_NODE=1
 
 if [ ! -f /root/.pi/agent/models.json ]; then
   node "$LINKAGENT_HOME/scripts/setup-pi.mjs" --skip-install || true

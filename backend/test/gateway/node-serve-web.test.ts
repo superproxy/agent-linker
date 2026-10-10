@@ -93,6 +93,52 @@ test('startNodeServeWeb：有 frps 令牌时挂上 frpc 配置', () => {
   assert.match(frpc, /name = "workspace-vnc"/);
 });
 
+test('startNodeServeWeb：容器内只写 frpc.toml，不再 compose', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ide-proxy-'));
+  writeFileSync(join(dir, 'frps.token'), 'abc\n');
+  const prev = process.env.LINKAGENT_NODE_SERVE_WEB;
+  const prevAddr = process.env.FRPS_SERVER_ADDR;
+  const prevPort = process.env.FRPS_SERVER_PORT;
+  const prevDev = process.env.LINKAGENT_DEV_DOMAIN;
+  const prevVnc = process.env.LINKAGENT_VNC_DOMAIN;
+  process.env.LINKAGENT_NODE_SERVE_WEB = '0';
+  delete process.env.FRPS_SERVER_ADDR;
+  delete process.env.FRPS_SERVER_PORT;
+  delete process.env.LINKAGENT_DEV_DOMAIN;
+  delete process.env.LINKAGENT_VNC_DOMAIN;
+  const calls: string[][] = [];
+  try {
+    startNodeServeWeb(
+      {
+        serveWeb: { ...enabled, enabled: false },
+        workspaceDir: 'D:/work/repo',
+        runtimeDir: dir,
+        frpsTokenFile: join(dir, 'frps.token'),
+        frpcPath: join(dir, 'frpc.toml'),
+      },
+      (_command, args) => {
+        calls.push(args);
+        return { killed: false, exitCode: null, kill: () => true, on() {} };
+      },
+    );
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_NODE_SERVE_WEB;
+    else process.env.LINKAGENT_NODE_SERVE_WEB = prev;
+    if (prevAddr === undefined) delete process.env.FRPS_SERVER_ADDR;
+    else process.env.FRPS_SERVER_ADDR = prevAddr;
+    if (prevPort === undefined) delete process.env.FRPS_SERVER_PORT;
+    else process.env.FRPS_SERVER_PORT = prevPort;
+    if (prevDev === undefined) delete process.env.LINKAGENT_DEV_DOMAIN;
+    else process.env.LINKAGENT_DEV_DOMAIN = prevDev;
+    if (prevVnc === undefined) delete process.env.LINKAGENT_VNC_DOMAIN;
+    else process.env.LINKAGENT_VNC_DOMAIN = prevVnc;
+  }
+  assert.equal(calls.length, 0);
+  const frpc = readFileSync(join(dir, 'frpc.toml'), 'utf8');
+  assert.match(frpc, /name = "workspace-vnc"/);
+  assert.match(frpc, /serverAddr = "host\.docker\.internal"/);
+});
+
 test('nodeServeWebSuppressed：仅 0 / false / off 关闭', () => {
   assert.equal(nodeServeWebSuppressed(undefined), false);
   assert.equal(nodeServeWebSuppressed(''), false);

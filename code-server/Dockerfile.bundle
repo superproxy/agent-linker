@@ -1,5 +1,5 @@
 # 聚合镜像：在 code-server 镜像上加入 node 与 pi-acp。
-# 构建上下文由 scripts/image-node.mjs 准备，只含 linkagent-node/。
+# 构建上下文由 scripts/build-node.sh 准备，只含 linkagent-node/。
 # 原始路线仍用 code-server/Dockerfile，由宿主机 node 按 serveWeb 拉起。
 ARG BASE_IMAGE=linkagent-code-server:local
 FROM ${BASE_IMAGE}

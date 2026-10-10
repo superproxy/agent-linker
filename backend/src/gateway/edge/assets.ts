@@ -6,7 +6,8 @@ export const NGINX_LISTEN_HOST = '127.0.0.1';
 export const NGINX_LISTEN_PORT = 8088;
 export const FRPS_BIND_ADDR = '0.0.0.0';
 export const FRPS_BIND_PORT = 7000;
-export const FRPS_DASHBOARD_HOST = '127.0.0.1';
+/** 面板需从外网查看 frpc 登记出的动态端口。 */
+export const FRPS_DASHBOARD_HOST = '0.0.0.0';
 export const FRPS_DASHBOARD_PORT = 7500;
 /** 工作区 dev 与 VNC 的 HTTP 反向代理入口。frpc 用域名登记到这个端口。 */
 export const FRPS_VHOST_HTTP_PORT = 7080;

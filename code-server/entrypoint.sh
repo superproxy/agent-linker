@@ -41,6 +41,14 @@ openbox 2>&1 | prefix "[vnc]" &
 x11vnc -display :1 -nopw -forever -shared -noxdamage -noshm -rfbport 5900 -localhost 2>&1 | prefix "[vnc]" &
 websockify --web=/usr/share/novnc 0.0.0.0:6080 127.0.0.1:5900 2>&1 | prefix "[vnc]" &
 
+if [ "${LINKAGENT_FRPC_BY_NODE:-}" = 1 ]; then
+  log "[frpc] 等待 node 写入 /etc/linkagent/frpc.toml"
+  i=0
+  while [ ! -f /etc/linkagent/frpc.toml ] && [ "$i" -lt 20 ]; do
+    i=$((i + 1))
+    sleep 1
+  done
+fi
 if [ -f /etc/linkagent/frpc.toml ]; then
   log "[frpc] 开启，配置 /etc/linkagent/frpc.toml"
   while true; do

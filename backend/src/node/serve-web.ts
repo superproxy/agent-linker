@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { stringify } from 'yaml';
 import type { NodeSection } from '@linkagent/shared';
 
@@ -14,6 +14,8 @@ export interface ServeWebLaunch {
   runtimeDir: string;
   /** 网关 frps 令牌文件。存在时把 dev 与 VNC 反向代理登记到 frps。 */
   frpsTokenFile?: string;
+  /** 聚合容器内直接写这个路径，不再挂载。缺省 /etc/linkagent/frpc.toml。 */
+  frpcPath?: string;
 }
 
 export interface ServeWebChild {
@@ -39,17 +41,34 @@ export const IDE_CONTAINER_WORKSPACE = '/root/workspace';
 const IDE_TRUSTED_ORIGIN = '*.localhost:9080';
 /** 与 frps vhostHTTPPort 一致。容器内 frpc 把下面两个端口登记成 HTTP 域名。 */
 export const FRPS_VHOST_HTTP_PORT = 7080;
+/** 聚合容器里 node 写入的位置。入口脚本看到文件后启动 frpc。 */
+export const EMBEDDED_FRPC_PATH = '/etc/linkagent/frpc.toml';
 export const WORKSPACE_DEV_PORT = 5173;
 export const WORKSPACE_VNC_PORT = 6080;
 export const WORKSPACE_DEV_HOST = 'dev.localhost';
 export const WORKSPACE_VNC_HOST = 'vnc.localhost';
 const NODE_MODULES_VOLUME = 'linkagent-code-node-modules';
 
-export function renderWorkspaceFrpc(token: string): string {
+function frpcDomain(value: string | undefined, fallback: string): string {
+  const text = (value ?? '').trim() || fallback;
+  const colon = text.lastIndexOf(':');
+  if (colon > 0 && /^\d+$/.test(text.slice(colon + 1))) return text.slice(0, colon);
+  return text;
+}
+
+/** 主机模式缺省连旁边的 frps。容器里有 FRPS_SERVER_* / LINKAGENT_*_DOMAIN 时用那组地址。 */
+export function renderWorkspaceFrpc(
+  token: string,
+  endpoint?: { serverAddr?: string; serverPort?: number; devDomain?: string; vncDomain?: string },
+): string {
   const secret = token.trim();
   if (!secret || /["\r\n]/.test(secret)) throw new Error('frps token 无效');
-  return `serverAddr = "host.docker.internal"
-serverPort = 7000
+  const serverAddr = (endpoint?.serverAddr ?? '').trim() || 'host.docker.internal';
+  const serverPort = endpoint?.serverPort && endpoint.serverPort > 0 ? endpoint.serverPort : 7000;
+  const devDomain = frpcDomain(endpoint?.devDomain, WORKSPACE_DEV_HOST);
+  const vncDomain = frpcDomain(endpoint?.vncDomain, WORKSPACE_VNC_HOST);
+  return `serverAddr = "${serverAddr}"
+serverPort = ${serverPort}
 auth.method = "token"
 auth.token = "${secret}"
 
@@ -58,15 +77,30 @@ name = "workspace-dev"
 type = "http"
 localIP = "127.0.0.1"
 localPort = ${WORKSPACE_DEV_PORT}
-customDomains = ["${WORKSPACE_DEV_HOST}"]
+customDomains = ["${devDomain}"]
 
 [[proxies]]
 name = "workspace-vnc"
 type = "http"
 localIP = "127.0.0.1"
 localPort = ${WORKSPACE_VNC_PORT}
-customDomains = ["${WORKSPACE_VNC_HOST}"]
+customDomains = ["${vncDomain}"]
 `;
+}
+
+function frpcToken(file: string | undefined): string {
+  if (file && existsSync(file)) return readFileSync(file, 'utf8').trim();
+  return (process.env.FRPS_TOKEN ?? '').trim() || (process.env.LINKAGENT_GATEWAY_TOKEN ?? '').trim();
+}
+
+function frpcEndpointFromEnv(): { serverAddr?: string; serverPort?: number; devDomain?: string; vncDomain?: string } {
+  const port = Number(process.env.FRPS_SERVER_PORT ?? '');
+  return {
+    serverAddr: process.env.FRPS_SERVER_ADDR,
+    serverPort: Number.isInteger(port) && port > 0 ? port : undefined,
+    devDomain: process.env.LINKAGENT_DEV_DOMAIN,
+    vncDomain: process.env.LINKAGENT_VNC_DOMAIN,
+  };
 }
 
 function dockerVolumeHost(workspaceDir: string): string {
@@ -135,10 +169,17 @@ export function nodeServeWebSuppressed(flag: string | undefined): boolean {
 export function startNodeServeWeb(launch: ServeWebLaunch, spawnFn: ServeWebSpawn = spawn as ServeWebSpawn): { stop: () => void } {
   const { serveWeb } = launch;
   const suppressed = nodeServeWebSuppressed(process.env.LINKAGENT_NODE_SERVE_WEB);
-  if (serveWeb.enabled && suppressed) {
+  if (suppressed) {
     console.log('[node] LINKAGENT_NODE_SERVE_WEB 已关闭 compose，IDE 由容器入口拉起');
+    const token = frpcToken(launch.frpsTokenFile);
+    const out = launch.frpcPath ?? EMBEDDED_FRPC_PATH;
+    if (token && existsSync(dirname(out))) {
+      writeFileSync(out, renderWorkspaceFrpc(token, frpcEndpointFromEnv()), { encoding: 'utf8', mode: 0o600 });
+      console.log(`[node] 已写入 ${out}，由容器入口启动 frpc`);
+    }
+    return { stop() {} };
   }
-  if (!serveWeb.enabled || suppressed) return { stop() {} };
+  if (!serveWeb.enabled) return { stop() {} };
   mkdirSync(launch.runtimeDir, { recursive: true });
   const composeFile = join(launch.runtimeDir, 'compose.yml');
   const frpcFile = join(launch.runtimeDir, 'frpc.toml');

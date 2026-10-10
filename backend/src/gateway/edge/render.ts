@@ -73,7 +73,7 @@ export interface FrpsRenderOptions {
   pluginAddr?: string;
 }
 
-/** frps 控制口对 NAT 客户端开放，面板只监听回环。 */
+/** frps 控制口与面板都对外监听。面板用来查看动态注册端口。 */
 export function renderFrpsConf(opts: FrpsRenderOptions): string {
   const pluginAddr = opts.pluginAddr?.trim() ?? '';
   if (pluginAddr && /["\r\n]/.test(pluginAddr)) throw new Error('frps 插件地址无效');
