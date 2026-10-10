@@ -69,6 +69,35 @@ test('dockerExecutable：PATH 没有 docker 时用 /usr/bin/docker', () => {
   assert.equal(seen.includes('/usr/bin/docker'), true);
 });
 
+test('等待 APISIX 时使用已写入的 admin key', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'edge-'));
+  const runtime = join(root, 'runtime');
+  let seenKey = '';
+  const edge = await startGatewayEdge({
+    toolsDir: join(root, 'tools'),
+    runtimeDir: runtime,
+    idePrefix: '/',
+    ideUpstream: 'http://127.0.0.1:8000',
+    gatewayUpstream: 'http://127.0.0.1:8787',
+    platform: 'freebsd',
+    arch: 'x64',
+    adminFetch: async (_input, init) => {
+      seenKey = new Headers(init?.headers).get('X-API-KEY') ?? '';
+      return new Response('{}', { status: 200 });
+    },
+    spawnFn: () => ({
+      kill() {
+        return true;
+      },
+      on() {},
+    }),
+  });
+  const expected = readFileSync(join(runtime, 'apisix.admin-key'), 'utf8').trim();
+  assert.ok(expected);
+  assert.equal(seenKey, expected);
+  edge.stop();
+});
+
 test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX', async () => {
   const root = mkdtempSync(join(tmpdir(), 'edge-'));
   const tools = join(root, 'tools');

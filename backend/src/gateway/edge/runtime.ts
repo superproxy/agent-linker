@@ -159,20 +159,59 @@ export function dockerExecutable(
   return null;
 }
 
-function watchChild(name: string, child: EdgeChild): void {
+function edgeProcName(command: string): string {
+  const base = command.split(/[/\\]/).pop()?.toLowerCase() ?? command;
+  if (base.startsWith('frps')) return 'frps';
+  if (base === 'docker' || base === 'docker.exe' || base === 'docker.cmd') return 'apisix';
+  if (base.startsWith('nginx')) return 'nginx';
+  return base;
+}
+
+/** docker / frps 的失败原因在子进程输出里。stdio 丢掉的话只剩一个退出码。 */
+function attachOutput(name: string, child: ChildProcess): void {
+  const follow = (stream: NodeJS.ReadableStream | null) => {
+    if (!stream) return;
+    let pending = '';
+    stream.on('data', (chunk: Buffer | string) => {
+      pending += chunk.toString();
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) console.error(`[edge] ${name} ${trimmed}`);
+      }
+    });
+  };
+  follow(child.stdout);
+  follow(child.stderr);
+}
+
+function watchChild(name: string, child: EdgeChild, onExit?: (code: number) => void): void {
   child.on('error', (err) => {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[edge] ${name} 启动失败：${message}`);
   });
   child.on('exit', (code) => {
-    if (code && code !== 0) console.error(`[edge] ${name} 退出 code=${String(code)}`);
+    if (typeof code !== 'number' || code === 0) return;
+    onExit?.(code);
+    const hint = name === 'apisix' && code === 125
+      ? '（docker 未能创建容器。看上面的 docker 输出；常见是未安装 compose 插件，或 127.0.0.1:8088、9180 已被占用）'
+      : '';
+    console.error(`[edge] ${name} 退出 code=${String(code)}${hint}`);
   });
 }
 
-async function waitForApisix(adminUrl: string, apiKey: string, fetchImpl: typeof fetch): Promise<void> {
+async function waitForApisix(
+  adminUrl: string,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+  exited: () => number,
+): Promise<void> {
   const deadline = Date.now() + 90_000;
   let last = '';
   while (Date.now() < deadline) {
+    const code = exited();
+    if (code !== 0) throw new Error(`docker compose 已退出 code=${String(code)}`);
     try {
       const res = await fetchImpl(`${adminUrl}/apisix/admin/routes`, { headers: { 'X-API-KEY': apiKey } });
       if (res.ok) return;
@@ -197,7 +236,9 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
   const spawnFn: EdgeSpawn = opts.spawnFn ?? ((command, args, options) => {
     const bin = command === 'docker' ? (dockerBin ?? command) : command;
     const shell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
-    return spawn(bin, args, shell ? { ...options, shell: true } : options);
+    const child = spawn(bin, args, { ...options, shell, stdio: ['ignore', 'pipe', 'pipe'] });
+    attachOutput(edgeProcName(bin), child);
+    return child;
   });
   const extractFn = opts.extractFn ?? extractArchive;
   const children: EdgeChild[] = [];
@@ -206,7 +247,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     async applyTaskHost() {},
     async syncTaskHosts() {},
   };
-  let edgeApi = noopEdge;
+  let edgeApi: Omit<GatewayEdge, 'stop'> = noopEdge;
   let composeFile = '';
 
   const stop = () => {
@@ -316,14 +357,20 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
       console.log(`[edge] APISIX 使用 ${dockerBin}`);
     }
     if (opts.spawnFn || dockerBin) {
-    const apisixChild = spawnFn('docker', apisixComposeArgs(composeFile, 'up'), { windowsHide: true, stdio: 'ignore' });
-    watchChild('apisix', apisixChild);
-    children.push(apisixChild);
-    if (!opts.spawnFn) await waitForApisix(adminUrl, apiKey, adminFetch);
-    console.log(`[edge] APISIX 已在 ${NGINX_LISTEN_HOST}:${NGINX_LISTEN_PORT} 监听，管理接口 ${adminUrl}`);
+      const apisixChild = spawnFn('docker', apisixComposeArgs(composeFile, 'up'), { windowsHide: true, stdio: 'ignore' });
+      let composeExit = 0;
+      watchChild('apisix', apisixChild, (code) => {
+        composeExit = code;
+      });
+      children.push(apisixChild);
+      if (!opts.spawnFn || opts.adminFetch) {
+        await waitForApisix(adminUrl, adminKey, adminFetch, () => composeExit);
+      }
+      console.log(`[edge] APISIX 已在 ${NGINX_LISTEN_HOST}:${NGINX_LISTEN_PORT} 监听，管理接口 ${adminUrl}`);
     }
   } catch (err) {
     console.error(`[edge] 安装或启动失败：${err instanceof Error ? err.message : String(err)}`);
+    edgeApi = noopEdge;
   }
 
   return { ...edgeApi, stop };
