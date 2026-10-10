@@ -4,7 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync }
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { NGINX_LISTEN_HOST, frpAsset, nginxAsset, type FrpAsset } from './assets.js';
+import { FRPS_VHOST_HTTP_PORT, NGINX_LISTEN_HOST, frpAsset, nginxAsset, type FrpAsset } from './assets.js';
 import {
   APISIX_ADMIN_PORT,
   APISIX_PROJECT,
@@ -29,7 +29,7 @@ export interface GatewayEdgeOptions {
   gatewayUpstream: string;
   /** 任务 -dev.localhost 转到容器内 npm run dev，默认 5173 */
   devUpstream?: string;
-  /** 任务 -vnc.localhost 转到容器内 noVNC，默认 6080 */
+  /** VNC 转到 frps 的 HTTP 口。frpc 把容器 6080 登记成 vnc.localhost。默认 7080。 */
   vncUpstream?: string;
   /** frps Login 插件地址，例如 127.0.0.1:8787 */
   frpPluginAddr?: string;
@@ -268,7 +268,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     const admin = new ApisixAdmin(prepared.adminUrl, prepared.adminKey, adminFetch);
     edgeApi = {
       async applyTaskHost(change) {
-        const vncUpstream = opts.vncUpstream ?? 'http://127.0.0.1:6080';
+        const vncUpstream = opts.vncUpstream ?? `http://127.0.0.1:${FRPS_VHOST_HTTP_PORT}`;
         const host = opts.publicHost ?? TASK_PUBLIC_HOST;
         const taskId = change.taskId;
         if (change.removed) {
@@ -300,6 +300,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
           host,
           uri: taskRouteUri(taskId, 'vnc'),
           upstream: vncUpstream,
+          upstreamHost: 'vnc.localhost',
           enabled: change.enabled,
           rewrite: [`^/${codePrefix}-vnc/?(.*)`, '/$1'],
         });

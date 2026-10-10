@@ -199,7 +199,9 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
   assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/task-dev-default')), false);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-dev-default')), true);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"uri":"\/t_41db7238-vnc\*"/);
-  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /host\.docker\.internal:6080/);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /host\.docker\.internal:7080/);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"pass_host":"rewrite"/);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"upstream_host":"vnc\.localhost"/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"status":0/);
   await edge.applyTaskHost({ taskId: 'default', enabled: false, removed: true });
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-default')), true);

@@ -14,6 +14,8 @@ export interface ApisixRouteSpec {
   enabled: boolean;
   /** [正则, 替换]。code / vnc 去掉任务前缀后再交给上游。 */
   rewrite?: [string, string];
+  /** 转给上游时改写 Host。frps 按 frpc 登记的域名匹配，例如 vnc.localhost。 */
+  upstreamHost?: string;
 }
 
 export { TASK_PUBLIC_HOST };
@@ -80,6 +82,7 @@ export function apisixUpstreamNode(upstream: string): string {
 }
 
 export function renderApisixRoute(spec: ApisixRouteSpec): Record<string, unknown> {
+  const upstreamHost = spec.upstreamHost?.trim();
   return {
     name: spec.id,
     uri: spec.uri ?? '/*',
@@ -90,7 +93,8 @@ export function renderApisixRoute(spec: ApisixRouteSpec): Record<string, unknown
     upstream: {
       type: 'roundrobin',
       scheme: 'http',
-      pass_host: 'pass',
+      pass_host: upstreamHost ? 'rewrite' : 'pass',
+      ...(upstreamHost ? { upstream_host: upstreamHost } : {}),
       timeout: { connect: 6, send: 86400, read: 86400 },
       nodes: { [apisixUpstreamNode(spec.upstream)]: 1 },
     },
