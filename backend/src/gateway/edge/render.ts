@@ -77,6 +77,8 @@ export interface FrpsRenderOptions {
 export function renderFrpsConf(opts: FrpsRenderOptions): string {
   const pluginAddr = opts.pluginAddr?.trim() ?? '';
   if (pluginAddr && /["\r\n]/.test(pluginAddr)) throw new Error('frps 插件地址无效');
+  // allowPorts 等顶层键必须写在任何 [[table]] 之前，否则 TOML 会把它挂进上一张表，
+  // frps 报 json: unknown field "allowPorts"。
   const plugin = pluginAddr
     ? `
 [[httpPlugins]]
@@ -91,14 +93,12 @@ bindPort = ${FRPS_BIND_PORT}
 vhostHTTPPort = ${FRPS_VHOST_HTTP_PORT}
 auth.method = "token"
 auth.token = "${opts.token}"
-${plugin}
 webServer.addr = "${FRPS_DASHBOARD_HOST}"
 webServer.port = ${FRPS_DASHBOARD_PORT}
 webServer.user = "admin"
 webServer.password = "${opts.dashboardPassword}"
-
 allowPorts = [
   { start = ${FRPS_ALLOW_PORT_START}, end = ${FRPS_ALLOW_PORT_END} }
 ]
-`;
+${plugin}`;
 }

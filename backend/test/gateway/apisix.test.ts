@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ApisixAdmin,
+  apisixComposeArgs,
   apisixUpstreamNode,
   renderApisixCompose,
   renderApisixRoute,
@@ -40,6 +41,15 @@ test('compose 把数据面放在 8088，管理面只监听回环', () => {
   assert.match(compose, /127\.0\.0\.1:8088:9080/);
   assert.match(compose, /127\.0\.0\.1:9180:9180/);
   assert.match(compose, /host.docker.internal:host-gateway/);
+  assert.deepEqual(apisixComposeArgs('/r/apisix-compose.yml', 'up'), [
+    'compose',
+    '-p',
+    'linkagent-edge',
+    '-f',
+    '/r/apisix-compose.yml',
+    'up',
+    '-d',
+  ]);
 });
 
 test('Admin API 创建开启的路由，删除不存在的路由视为成功', async () => {

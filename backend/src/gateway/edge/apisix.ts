@@ -149,9 +149,17 @@ export function renderApisixCompose(): string {
 `;
 }
 
-export function apisixComposeArgs(composeFile: string, action: 'up' | 'down'): string[] {
-  const base = ['compose', '-p', APISIX_PROJECT, '-f', composeFile];
-  return action === 'up' ? [...base, 'up', '-d'] : [...base, 'down'];
+/** `plugin` = `docker compose …`；`standalone` = 独立的 `docker-compose …`。 */
+export type ComposeStyle = 'plugin' | 'standalone';
+
+export function apisixComposeArgs(
+  composeFile: string,
+  action: 'up' | 'down',
+  style: ComposeStyle = 'plugin',
+): string[] {
+  const project = ['-p', APISIX_PROJECT, '-f', composeFile];
+  const tail = action === 'up' ? ['up', '-d'] : ['down'];
+  return style === 'plugin' ? ['compose', ...project, ...tail] : [...project, ...tail];
 }
 
 export class ApisixAdmin {

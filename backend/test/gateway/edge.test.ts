@@ -6,7 +6,13 @@ import test from 'node:test';
 import { FRP_VERSION, NGINX_VERSION, frpAsset, nginxAsset } from '../../src/gateway/edge/assets.js';
 import { renderFrpsConf, renderNginxConf } from '../../src/gateway/edge/render.js';
 import { TASK_PUBLIC_HOST } from '../../src/gateway/edge/apisix.ts';
-import { dockerExecutable, startGatewayEdge, type EdgeChild } from '../../src/gateway/edge/runtime.js';
+import {
+  dockerComposeExecutable,
+  dockerExecutable,
+  resolveComposeLauncher,
+  startGatewayEdge,
+} from '../../src/gateway/edge/runtime.js';
+import { apisixComposeArgs } from '../../src/gateway/edge/apisix.js';
 import { renderFrpcConfig } from '../../../nat-tunnel/src/tunnel.js';
 
 test('frp 安装包按平台选择官方发行文件', () => {
@@ -57,6 +63,9 @@ test('nginx 只监听回环，frps 控制口对外开放、面板在回环', () 
   assert.match(withPlugin, /addr = "127\.0\.0\.1:8787"/);
   assert.match(withPlugin, /path = "\/internal\/frp\/handler"/);
   assert.match(withPlugin, /ops = \["Login"\]/);
+  const allowAt = withPlugin.indexOf('allowPorts');
+  const pluginAt = withPlugin.indexOf('[[httpPlugins]]');
+  assert.ok(allowAt >= 0 && pluginAt >= 0 && allowAt < pluginAt);
 });
 
 test('dockerExecutable：PATH 没有 docker 时用 /usr/bin/docker', () => {
@@ -69,7 +78,31 @@ test('dockerExecutable：PATH 没有 docker 时用 /usr/bin/docker', () => {
   assert.equal(seen.includes('/usr/bin/docker'), true);
 });
 
-test('等待 APISIX 时使用已写入的 admin key', async () => {
+test('没有 compose 插件时退回 docker-compose', () => {
+  const launcher = resolveComposeLauncher(
+    '/usr/bin/docker',
+    'linux',
+    { PATH: '/usr/bin' },
+    (path) => path === '/usr/bin/docker-compose',
+    () => false,
+  );
+  assert.deepEqual(launcher, { command: '/usr/bin/docker-compose', style: 'standalone' });
+  assert.equal(
+    dockerComposeExecutable('linux', { PATH: '/opt' }, (path) => path === '/usr/local/bin/docker-compose'),
+    '/usr/local/bin/docker-compose',
+  );
+  assert.deepEqual(apisixComposeArgs('/tmp/c.yml', 'up', 'standalone'), [
+    '-p',
+    'linkagent-edge',
+    '-f',
+    '/tmp/c.yml',
+    'up',
+    '-d',
+  ]);
+  assert.equal(apisixComposeArgs('/tmp/c.yml', 'up', 'plugin')[0], 'compose');
+});
+
+test('同步路由时使用已写入的 admin key，且不拉起进程', async () => {
   const root = mkdtempSync(join(tmpdir(), 'edge-'));
   const runtime = join(root, 'runtime');
   let seenKey = '';
@@ -81,24 +114,22 @@ test('等待 APISIX 时使用已写入的 admin key', async () => {
     gatewayUpstream: 'http://127.0.0.1:8787',
     platform: 'freebsd',
     arch: 'x64',
+    fetchImpl: () => {
+      throw new Error('不应下载');
+    },
     adminFetch: async (_input, init) => {
       seenKey = new Headers(init?.headers).get('X-API-KEY') ?? '';
       return new Response('{}', { status: 200 });
     },
-    spawnFn: () => ({
-      kill() {
-        return true;
-      },
-      on() {},
-    }),
   });
+  await edge.syncTaskHosts([]);
   const expected = readFileSync(join(runtime, 'apisix.admin-key'), 'utf8').trim();
   assert.ok(expected);
   assert.equal(seenKey, expected);
   edge.stop();
 });
 
-test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX', async () => {
+test('startGatewayEdge：二进制已在则只写配置，不拉起 frps 与 APISIX', async () => {
   const root = mkdtempSync(join(tmpdir(), 'edge-'));
   const tools = join(root, 'tools');
   const runtime = join(root, 'runtime');
@@ -109,13 +140,6 @@ test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX
   writeFileSync(join(frpDir, 'frps.exe'), '');
   writeFileSync(join(frpDir, 'frpc.exe'), '');
   writeFileSync(join(nginxDir, 'nginx.exe'), '');
-  const calls: { command: string; args: string[] }[] = [];
-  const child = (): EdgeChild => ({
-    kill() {
-      return true;
-    },
-    on() {},
-  });
   const edge = await startGatewayEdge({
     toolsDir: tools,
     runtimeDir: runtime,
@@ -127,16 +151,9 @@ test('startGatewayEdge：二进制已在则不下载，并拉起 frps 与 APISIX
     fetchImpl: () => {
       throw new Error('不应下载');
     },
-    spawnFn: (command, args) => {
-      calls.push({ command, args });
-      return child();
-    },
   });
-  assert.equal(calls.length, 2);
-  assert.match(calls[0]?.command ?? '', /frps\.exe$/);
-  assert.deepEqual(calls[0]?.args, ['-c', join(runtime, 'frps.toml')]);
-  assert.equal(calls[1]?.command, 'docker');
-  assert.ok(calls[1]?.args.includes('up'));
+  assert.match(readFileSync(join(runtime, 'frps.toml'), 'utf8'), /bindPort = 7000/);
+  assert.match(readFileSync(join(runtime, 'frps.path'), 'utf8'), /frps\.exe/);
   assert.match(readFileSync(join(runtime, 'apisix-compose.yml'), 'utf8'), /apache\/apisix/);
   assert.match(readFileSync(join(runtime, 'apisix-compose.yml'), 'utf8'), /127\.0\.0\.1:8088:9080/);
   assert.match(readFileSync(join(runtime, 'frpc.path'), 'utf8'), /frpc\.exe/);
@@ -162,12 +179,6 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
       });
       return new Response('{}', { status: 200 });
     },
-    spawnFn: () => ({
-      kill() {
-        return true;
-      },
-      on() {},
-    }),
   });
   await edge.syncTaskHosts([
     { id: 'default', name: '默认', enabled: true },

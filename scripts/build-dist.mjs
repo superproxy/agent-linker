@@ -6,7 +6,7 @@
  *   node scripts/build-dist.mjs --target=node --skip-install --out=<dir>
  *
  * 整包：
- *   server/gateway.mjs / weixin.mjs / node.mjs / pm.mjs
+ *   server/gateway.mjs / weixin.mjs / node.mjs / pm.mjs / edge.mjs
  *   web/ 后台、dev/ 聊天页、vendor/openclaw
  * 节点包：
  *   server/node.mjs + server/ctl.mjs（启停）+ 精简运行时依赖（acpx / ws）
@@ -130,6 +130,7 @@ function copyPiSetup(destRoot) {
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
   cpSync(join(REPO, 'scripts', 'setup-pi.mjs'), join(destRoot, 'scripts', 'setup-pi.mjs'));
   cpSync(join(REPO, 'scripts', 'setup-channels.mjs'), join(destRoot, 'scripts', 'setup-channels.mjs'));
+  cpSync(join(REPO, 'scripts', 'edge.sh'), join(destRoot, 'scripts', 'edge.sh'));
 }
 
 /** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */
@@ -351,7 +352,7 @@ async function buildFull(dist, skipInstall) {
     runBin(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@linkagent/web', 'build'], REPO);
   });
 
-  step('3/6 esbuild 打包（gateway / channels / weixin / node / pm 五入口）', async () => {
+  step('3/6 esbuild 打包（gateway / channels / weixin / node / pm / edge）', async () => {
     const src = join(REPO, 'backend', 'src');
     await esbuildServerBundle(
       {
@@ -360,6 +361,7 @@ async function buildFull(dist, skipInstall) {
         weixin: join(src, 'channels', 'weixin-bot.ts'),
         node: join(src, 'node', 'connector.ts'),
         pm: join(src, 'supervisor', 'cli.ts'),
+        edge: join(src, 'gateway', 'edge', 'cli.ts'),
       },
       join(dist, 'server'),
       FULL_EXTERNAL,
@@ -399,6 +401,10 @@ async function buildFull(dist, skipInstall) {
             gateway: 'node server/gateway.mjs',
             'setup:pi': 'node scripts/setup-pi.mjs',
             'setup:channels': 'node scripts/setup-channels.mjs',
+            'edge:start': 'bash scripts/edge.sh start',
+            'edge:stop': 'bash scripts/edge.sh stop',
+            'edge:restart': 'bash scripts/edge.sh restart',
+            'edge:status': 'bash scripts/edge.sh status',
           },
           dependencies: runtimeDependenciesFull(),
         },
