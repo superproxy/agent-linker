@@ -63,7 +63,7 @@
 
 **执行机独立包** `dist/linkagent-node/` 是**另一个安装根**，形态相同（`bin/node.mjs` + `config/gateway.yaml` stub + `config/node.yaml`），不含 gateway/channels 全套 bin。
 
-**网关机升级**：`git clone` → `bash scripts/server-update.sh --restart`（`git pull` + `build:dist` + install 到 `dist/linkagent`；**备份并恢复** target 内 `config/` 与 `.runtime-state/`，不覆盖线上 yaml）。
+**网关机**：`dist/linkagent` 仅构建产物；**运行安装目录**默认与仓库并列的 `../linkagent`（见 `.linkagent-install`）。`server-update.sh` 同步发布物到安装目录，**config / .runtime-state 留在安装目录**（含登录账号）。
 
 ## 分层与依赖方向
 

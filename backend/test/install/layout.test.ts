@@ -4,7 +4,11 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInstallLayout, resolveRepoInstallRoot } from '../../src/install/layout.js';
+import {
+  createInstallLayout,
+  defaultInstallRoot,
+  resolveRepoInstallRoot,
+} from '../../src/install/layout.js';
 
 /** 随代码走的内置页面目录：src/install/../dev */
 const srcDevDir = join(fileURLToPath(new URL('../../src/install/layout.js', import.meta.url)), '..', '..', 'dev');
@@ -114,12 +118,23 @@ test('webRoot：dist 探测 <root>/web（index.html + assets 齐全才命中）'
   assert.equal(createInstallLayout(root).webRoot, join(root, 'web'));
 });
 
-test('resolveRepoInstallRoot：.linkagent-server 存在时归 dist/linkagent', () => {
+test('resolveRepoInstallRoot：.linkagent-server 存在时归独立安装目录', () => {
   const repo = tmpRoot();
-  mkdirSync(join(repo, 'dist', 'linkagent'), { recursive: true });
-  writeFileSync(join(repo, 'dist', 'linkagent', '.linkagent-root'), 'dist\n');
+  const install = defaultInstallRoot(repo);
+  mkdirSync(install, { recursive: true });
+  writeFileSync(join(install, '.linkagent-root'), 'install\n');
   writeFileSync(join(repo, '.linkagent-server'), 'server\n');
-  assert.equal(resolveRepoInstallRoot(repo), join(repo, 'dist', 'linkagent'));
+  assert.equal(resolveRepoInstallRoot(repo), install);
+});
+
+test('resolveRepoInstallRoot：.linkagent-install 指定路径', () => {
+  const repo = tmpRoot();
+  const install = join(repo, 'opt', 'run');
+  mkdirSync(install, { recursive: true });
+  writeFileSync(join(install, '.linkagent-root'), 'install\n');
+  writeFileSync(join(repo, '.linkagent-install'), `${install}\n`);
+  writeFileSync(join(repo, '.linkagent-server'), 'server\n');
+  assert.equal(resolveRepoInstallRoot(repo), install);
 });
 
 test('resolveRepoInstallRoot：LINKAGENT_DEV=1 时仍用仓库根', () => {

@@ -369,25 +369,29 @@ WantedBy=multi-user.target
 | 角色 | 安装根 | 进程 |
 |---|---|---|
 | 本地 dev | 仓库根 | `pnpm pm` → tsx `backend/src/...` |
-| 网关机 | `dist/linkagent/` | `./start.sh` → `bin/*.mjs` |
+| 网关机 | **`../linkagent`**（默认） | `cd ../linkagent && ./start.sh` → `bin/*.mjs` |
+| 构建 | `dist/linkagent/` | 仅 `build:dist` 产出，**不**作为运行目录 |
 
 **不要**长期 tsx 跑线上；**不要**改 `backend/config/*.yaml`（仅模板）。
 
-#### 标准流程：git clone → build → install target（不覆盖配置）
+#### 标准流程：git clone → build → 安装到独立目录（不覆盖配置）
+
+| 路径 | 含义 |
+|---|---|
+| `/root/agent-linker/dist/linkagent` | **构建/发布目录**（每次 build 可重建） |
+| `/root/linkagent`（默认） | **运行安装目录**（`config/`、`.runtime-state/`、运行中 `bin/`） |
 
 ```bash
-# 首次
 git clone https://github.com/superproxy/agent-linker.git /root/agent-linker
 cd /root/agent-linker
 bash scripts/server-update.sh --restart
-
-# 后续升级（git pull → build:dist → npm install 到 dist/linkagent）
-bash scripts/server-update.sh --restart
 ```
 
-`server-update.sh` 在 build 前备份 **`dist/linkagent/config/`** 与 **`.runtime-state/`**，构建完成后**原样恢复**（线上 yaml 不被 build 模板覆盖）；仅刷新 **`config/*.template`**。自定义安装目录：`LINKAGENT_TARGET=/opt/linkagent bash scripts/server-update.sh`。
+`server-update.sh` 会把 **`backend/config`**、原 **`dist/linkagent/config`** 等 **迁入** 安装目录（缺文件才复制）；**`.runtime-state`（含登录账号）** 从旧 dist / 仓库根合并进安装目录。升级只同步 bin/web/scripts 等，**不覆盖** 安装目录已有 yaml 与运行态。
 
-**改配置**：直接编辑 **`dist/linkagent/config/*.yaml`** 后 `./start.sh restart`（升级脚本不会盖掉）。重置为模板：`cd dist/linkagent && bash scripts/config-init.sh --force`。
+自定义安装路径：`LINKAGENT_INSTALL=/opt/linkagent bash scripts/server-update.sh`。
+
+**改配置 / 运维**：编辑 **`/root/linkagent/config/*.yaml`**，`cd /root/linkagent && ./start.sh restart`。
 
 重启边缘：
 
@@ -398,10 +402,9 @@ bash scripts/edge.sh restart   # 安装根由 .linkagent-server 解析到 dist
 | 路径 | 说明 |
 |---|---|
 | `backend/config/*.template` | 入库模板 |
-| **`config/*.yaml`**（仓库根） | dev 可选；网关机以 **dist/config** 为准（升级不覆盖） |
-| `dist/linkagent/config/` | **运行中生效**；gateway/channels/node 均读此目录 |
-| `dist/linkagent/bin/` | esbuild 二进制 |
-| `dist/linkagent/.runtime-state/` | 用户、节点、edge、pm 日志；升级时脚本备份恢复 |
+| **`/root/linkagent/config/`** | 网关机**运行配置**（由原 backend/config 等迁入） |
+| **`/root/linkagent/.runtime-state/`** | **登录账号、节点、edge**（升级不覆盖） |
+| `dist/linkagent/` | 构建产物；升级时复制 bin/web 到安装目录 |
 | `.linkagent-server` | 网关机标记：`pnpm pm` / `edge.sh` 与 dist 同安装根；开发机勿创建 |
 
 #### 其他

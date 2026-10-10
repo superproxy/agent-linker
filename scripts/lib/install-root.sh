@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# 解析 linkagent 安装根（与 backend/src/install/layout.ts 一致）：
-#   LINKAGENT_HOME  >  仓库根 .linkagent-server + dist/linkagent  >  monorepo 根
-# 开发机勿创建 .linkagent-server；需强制 dev 时可 export LINKAGENT_DEV=1
+# 解析 linkagent 运行安装根（与 backend/src/install/layout.ts 一致）：
+#   LINKAGENT_HOME / LINKAGENT_INSTALL  >  .linkagent-install  >  <repo>/../linkagent  >  legacy dist
 linkagent_repo_root() {
   local here="$1"
   cd "$here" || exit 1
@@ -15,6 +14,28 @@ linkagent_repo_root() {
     cd "$parent" || exit 1
   done
   pwd
+}
+
+linkagent_default_install() {
+  local repo="$1"
+  echo "$(dirname "$repo")/linkagent"
+}
+
+linkagent_read_install_path() {
+  local repo="$1"
+  if [ -n "${LINKAGENT_INSTALL:-}" ]; then
+    echo "$(cd "$LINKAGENT_INSTALL" && pwd)"
+    return
+  fi
+  if [ -f "$repo/.linkagent-install" ]; then
+    local line
+    line="$(head -n1 "$repo/.linkagent-install" | tr -d '\r')"
+    if [ -n "$line" ]; then
+      echo "$(cd "$line" && pwd)"
+      return
+    fi
+  fi
+  linkagent_default_install "$repo"
 }
 
 linkagent_install_root() {
@@ -32,9 +53,8 @@ linkagent_install_root() {
     echo "$repo"
     return
   fi
-  local dist="$repo/dist/linkagent"
-  if [ -f "$repo/.linkagent-server" ] && [ -f "$dist/.linkagent-root" ]; then
-    cd "$dist" && pwd
+  if [ -f "$repo/.linkagent-server" ]; then
+    linkagent_read_install_path "$repo"
     return
   fi
   echo "$repo"

@@ -11,7 +11,7 @@
  * supervisor/manager、weixin-bot、weixin-login、node connector 等多处。本模块统一收敛，
  * 其余代码只描述「要什么」（state('nodes') / entry('gateway') / page('chat')），不关心形态。
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CONFIG_BASENAMES } from '@linkagent/shared';
@@ -22,9 +22,13 @@ export type InstallKind = 'dev' | 'dist';
 export type ProcessTargetId = 'gateway' | 'weixin' | 'channels' | 'node';
 
 const DEPLOY_MARKER = '.linkagent-root';
-/** 网关机 git 克隆 + dist 并存：仓库根此文件表示运行态归 dist/linkagent */
+/** 网关机 git 克隆：仓库根此文件表示运行态归独立安装目录（非 dist 构建产物） */
 export const SERVER_DEPLOY_MARKER = '.linkagent-server';
+/** 仓库内一行绝对路径，指向 {@link defaultInstallRoot} 或 LINKAGENT_INSTALL */
+export const INSTALL_PATH_FILE = '.linkagent-install';
 const BUNDLED_DIST_DIR = join('dist', 'linkagent');
+/** 与源码仓库并列的默认安装目录名（如 /root/agent-linker → /root/linkagent） */
+const DEFAULT_INSTALL_DIRNAME = 'linkagent';
 const STATE_DIR = '.runtime-state';
 
 /** dist 独立包 / 仓库 dev 统一的运行时目录名（相对安装根） */
@@ -65,20 +69,40 @@ export function findInstallRoot(): string {
   return resolveRepoInstallRoot(findRepoRoot());
 }
 
+/** 默认安装目录：与 git 仓库同级 `<parent>/linkagent` */
+export function defaultInstallRoot(repoRoot: string): string {
+  return join(dirname(repoRoot), DEFAULT_INSTALL_DIRNAME);
+}
+
+/** 读取 LINKAGENT_INSTALL 或仓库 `.linkagent-install` 中的一行路径 */
+export function readConfiguredInstallRoot(repoRoot: string): string | undefined {
+  const env = process.env.LINKAGENT_INSTALL?.trim();
+  if (env) return resolve(env);
+  const file = join(repoRoot, INSTALL_PATH_FILE);
+  if (!existsSync(file)) return undefined;
+  const line = readFileSync(file, 'utf8').trim().split(/\r?\n/)[0]?.trim();
+  return line ? resolve(line) : undefined;
+}
+
 /**
- * monorepo 根上的安装根：默认 dev（`<repo>/config`）；
- * 若已构建 dist 且存在 {@link SERVER_DEPLOY_MARKER}，则归 dist/linkagent（除非 LINKAGENT_DEV=1）。
+ * monorepo 根上的运行安装根：默认 dev（`<repo>/config`）；
+ * 网关机（{@link SERVER_DEPLOY_MARKER}）→ 独立安装目录，**不是** dist/linkagent 构建产物目录。
  */
 export function resolveRepoInstallRoot(repoRoot: string): string {
   if (process.env.LINKAGENT_DEV === '1') return repoRoot;
+  if (!existsSync(join(repoRoot, SERVER_DEPLOY_MARKER))) return repoRoot;
+
+  const configured = readConfiguredInstallRoot(repoRoot);
+  if (configured) return configured;
+
+  const preferred = defaultInstallRoot(repoRoot);
+  if (existsSync(join(preferred, DEPLOY_MARKER))) return preferred;
+
+  // legacy：曾把 dist 当安装根，便于迁移前仍能启动
   const distRoot = join(repoRoot, BUNDLED_DIST_DIR);
-  if (
-    existsSync(join(distRoot, DEPLOY_MARKER)) &&
-    existsSync(join(repoRoot, SERVER_DEPLOY_MARKER))
-  ) {
-    return distRoot;
-  }
-  return repoRoot;
+  if (existsSync(join(distRoot, DEPLOY_MARKER))) return distRoot;
+
+  return preferred;
 }
 
 /** 仓库内嵌 dist 包路径（存在 .linkagent-root 时有效） */

@@ -21,6 +21,7 @@ server/config/channels.yaml
 server/config/config.yaml
 .runtime-state/
 .linkagent-server
+.linkagent-install
 code-server/node-docker/node.env
 code-server/node-docker/.runtime-state/
 code-server/node-docker/workspace/
