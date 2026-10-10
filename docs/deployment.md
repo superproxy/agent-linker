@@ -353,8 +353,41 @@ WantedBy=multi-user.target
 
 ### 9.4 升级
 
-- 源码：`git pull && pnpm install`，然后 `pnpm server:restart`、各节点 `pnpm node:restart <name>`；
-- 独立包：网关机替换 `dist/linkagent/` 后重启；执行机替换 `dist/linkagent-node/` 后 `./start.sh restart`；
+#### 网关机（推荐：源码仓库 + dist 运行）
+
+在 `/root/agent-linker` 等**固定克隆目录**维护 git 源码，**运行态与业务配置落在 `dist/linkagent/`**，不要长期用 `tsx` 直跑 `backend/src`：
+
+1. `git pull --ff-only` 更新源码；
+2. `pnpm build:dist` 生成/刷新 `dist/linkagent/`（esbuild 产物 + web + `server/pm.mjs` 等）；
+3. 在 `dist/linkagent/` 内 `npm install`（`build:dist` 默认会执行；增量时可只跑 install）；
+4. **复用已有配置**：保留 `dist/linkagent/server/config/*.yaml` 与 `dist/linkagent/.runtime-state/`。`build:dist` 会从仓库 `backend/config/` 再写一份模板进 dist，**会覆盖** dist 里已改过的 yaml，升级前需备份并恢复，或使用脚本。
+
+一键脚本（备份并恢复 `server/config`，不删 `.runtime-state`）：
+
+```bash
+bash scripts/server-update.sh           # pull + install + build:dist
+bash scripts/server-update.sh --restart # 同上，并在 dist 内 restart gateway
+```
+
+重启边缘与路由：
+
+```bash
+cd dist/linkagent && ./start.sh restart gateway
+bash scripts/edge.sh restart            # frps / APISIX（仍在仓库 scripts/，或 dist 内 edge 脚本）
+```
+
+| 路径 | 是否随 git/build 覆盖 | 说明 |
+|---|---|---|
+| `backend/config/`（仓库内） | 随 git 变 | 开发模板；**不是**线上生效配置 |
+| `dist/linkagent/server/config/` | build 会重写 | **线上改这里**；升级时用 `server-update.sh` 保留 |
+| `dist/linkagent/.runtime-state/` | build 会删掉 dist 内除 node_modules 外全部目录 | 用户、节点、edge 令牌等；**须**用 `server-update.sh` 备份恢复 |
+| `.runtime-state/`（仓库根） | 与 dev/tsx 模式共用 | 若仍用 `pnpm pm` 跑源码，状态在这里；切 dist 后建议统一到 dist 下 |
+
+#### 其他
+
+- 仅开发联调：`git pull && pnpm install` 后 `pnpm server:restart` / `pnpm pm restart gateway`（tsx 源码）；
+- Release 独立包：解压替换 `dist/linkagent/` 或整目录，**同样保留** `server/config` 与 `.runtime-state` 再重启；
+- 执行机：`build:dist:node` → `dist/linkagent-node/`，保留该目录下 `node.env` 与 `.runtime-state/node/`；
 - 节点先于/后于网关升级均可：断线期间任务返回 `node_offline`，重连后自动恢复。
 
 ---

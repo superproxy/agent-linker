@@ -29,6 +29,7 @@
     "server:restart": "bash scripts/server.sh restart",
     "server:status": "bash scripts/server.sh status",
     "server:log": "bash scripts/server.sh log",
+    "server:update": "bash scripts/server-update.sh",
     "edge": "bash scripts/edge.sh start",
     "edge:start": "bash scripts/edge.sh start",
     "edge:stop": "bash scripts/edge.sh stop",
