@@ -10,7 +10,7 @@
   ▼
 SLB
   ▼
-APISIX :9080          都转到同一个 frps:7080。本机用 Host 区分，SaaS 用路径区分
+APISIX :9080          都转到同一个 frps:7080。默认 Host+路径（locations）与 SaaS 一致；legacy 三 Host 见 `LINKAGENT_FRPC_LEGACY_HOSTS=1`
   ├─ web  ──▶ frps:7080 ──▶ frpc ──▶ 本机 5173
   ├─ code ──▶ frps:7080 ──▶ frpc ──▶ 本机 code-server 8000
   └─ vnc  ──▶ frps:7080 ──▶ frpc ──▶ 本机 VNC
@@ -42,17 +42,16 @@ frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 
 3. frpc 连控制口 `7000`。Login 的 `privilege_key` 可以由网关 `POST /internal/frp/handler` 把 `nt_` 改写成服务端令牌。登录之后，0.60 用两边配置里的 `auth.token` 加密控制连接，插件改不了这把密钥。两边不一致时，日志是 `login to server success` 接着马上 `try to connect`，frps 侧没有 `new proxy`。
 4. HTTP 代理登记在 `7080`。frps 的匹配键是 Host（`customDomains`）加最长路径前缀（`locations`）。命中之后，原始 Host 和路径原样送到 `localIP:localPort`，frps 自己不剥路径。同一 Host 且没有互斥路径时，后登记的代理会失败，控制连接被关掉。
 
-本机模式靠三个不同的 Host，不写 `locations`：
+**默认（本机 `ide.localhost` 与 SaaS 公网域）**：frps **0.60+** 支持 HTTP 代理的 `locations` 路径前缀（日志里可见 `location ["…"]`）。浏览器入口 **一个 Host**，三条 frpc 代理用路径分开；APISIX **不改 Host、不剥路径**。node 上 **15173 / 18080 / 16080** 适配器剥 `/<taskId>-*` 并重写 code-server 相对跳转。
 
-   | 代理 | 本机端口 | frps 用来匹配的 Host |
-   |---|---|---|
-   | web | `5173` | `dev.localhost` |
-   | code | `8000` | `ide.localhost` |
-   | vnc | `6080` | `vnc.localhost` |
+frps 取最长前缀，所以 `/<taskId>` 不会吃掉 `/<taskId>-code`：
 
-   `customDomains` 只写主机名，配置里的 `:端口` 会被去掉。APISIX 把公网 Host 改成这三个名字，并去掉 `/<taskId>` 前缀，本机进程才能看到自己的路径。
+| 模式 | 浏览器 Host | frpc `customDomains` | APISIX |
+|---|---|---|---|
+| 默认 | `edge.publicHost`（如 `ide.localhost` / `hubide.example.com`） | 同上 + `locations` | `pass_host=pass`，路径原样 |
+| legacy | `ide.localhost:9080` 路径仍 `/<taskId>-*` | `dev/ide/vnc.localhost` 三 Host、无 locations | 改 Host + 剥前缀（`LINKAGENT_FRPC_LEGACY_HOSTS=1`） |
 
-SaaS 模式只有一个公网 Host（如 `hubide.ljyd.cn`），三条代理用路径分开。frps 取最长前缀，所以 `/<taskId>` 不会吃掉 `/<taskId>-code`：
+SaaS / 默认本机登记示例（`hubide.ljyd.cn` 或 `ide.localhost`）：
 
 | 代理 | frpc 本机口 | 应用端口 | location |
 |---|---|---|---|
@@ -72,18 +71,19 @@ SaaS 模式只有一个公网 Host（如 `hubide.ljyd.cn`），三条代理用�
 
 公网 Host 是 `edge.publicHost`（例如 `hubide.ljyd.cn`）。路径是 `/<taskId>-web|code|vnc`。
 
-本机模式的三条路由上游都是 frps `7080`。frpc 登记的是 localhost Host，所以 APISIX 要改写 Host。SaaS 模式同一条上游，但 `pass_host=pass`，路径保持浏览器原来的样子。
+默认模式下 APISIX 上游均为 frps `7080`，`pass_host=pass`，路径保持浏览器原样。legacy 三 Host 才在 APISIX 剥前缀并改 Host。
 
-下面这张表是本机模式。SaaS 的 Host 列改为原样传递公网域名，路径列不改写。
+下面表为 **legacy**（`LINKAGENT_FRPC_LEGACY_HOSTS=1`）。默认路径模式见上节。
 
 | 路由 id | 匹配 | 上游 | 本机模式的 Host | 再由 frpc 转到 |
 |---|---|---|---|---|
 | `task-<taskId>` | `/<taskId>-web*` | frps `7080` | `dev.localhost` | `5173` |
 | `task-code-<taskId>` | `/<taskId>-code*` | frps `7080` | `ide.localhost` | code-server `8000` |
 | `task-vnc-<taskId>` | `/<taskId>-vnc*` | frps `7080` | `vnc.localhost` | VNC `6080` |
-| `code-localhost` | `/vibe-ide*` | frps `7080` | `ide.localhost` | code-server `8000` |
 
-本机模式里，code 去掉任务前缀后把路径改成 `/vibe-ide/...`，vnc 去掉 `/<taskId>-vnc`。这是 APISIX 在 frps 匹配之前做的，只适用于 localhost Host。SaaS 不能在 APISIX 做这一步。
+**不在 APISIX 登记** `/vibe-ide`（`code-localhost` 已删除）；code-server 浏览器入口仅为 `/<taskId>-code`。网关进程上的 `/vibe-ide` 只服务管理后台 iframe，直连本机 code-server，不经过 9080。
+
+本机模式里，`-code` / `-vnc` 在 APISIX 剥任务前缀后改 Host；`-web` 同理。SaaS 不能在 APISIX 做 Host/路径改写（`pass_host=pass`）。
 
 本机模式以 `https://ide.localhost:9080/t_2fc1aed6-vnc/vnc.html` 为例：APISIX 把路径改成 `/vnc.html`、Host 改成 `vnc.localhost`，frps 只凭 Host 找到 vnc 代理。
 

@@ -128,21 +128,46 @@ function forward(kind: SaasPathKind, taskId: () => string, targetPort: number, l
     conn.on('error', () => socket.destroy());
     socket.on('error', () => conn.destroy());
   });
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') return;
+    console.error(`[node] 路径适配器 127.0.0.1:${listenPort} 监听失败：${err.message}`);
+  });
   server.listen(listenPort, '127.0.0.1');
   return server;
 }
 
+export interface SaasAdapterPorts {
+  dev: number;
+  code: number;
+  vnc: number;
+}
+
+const DEFAULT_ADAPTER_PORTS: SaasAdapterPorts = {
+  dev: 5173,
+  code: 8080,
+  vnc: 6080,
+};
+
 let currentTaskId = '';
 let servers: http.Server[] | null = null;
 
-/** 同一进程里换任务只改前缀，不重新占端口。 */
-export function ensureSaasLocalAdapter(taskId: string): void {
+/** 同一进程里换任务只改前缀，不重新占端口。单机 enhance 时 code 口常为宿主机 8010。 */
+export function ensureSaasLocalAdapter(taskId: string, ports: SaasAdapterPorts = DEFAULT_ADAPTER_PORTS): void {
   currentTaskId = taskId;
   if (servers) return;
   const task = () => currentTaskId;
   servers = [
-    forward('dev', task, 5173, SAAS_DEV_LISTEN),
-    forward('code', task, 8080, SAAS_IDE_LISTEN),
-    forward('vnc', task, 6080, SAAS_VNC_LISTEN),
+    forward('dev', task, ports.dev, SAAS_DEV_LISTEN),
+    forward('code', task, ports.code, SAAS_IDE_LISTEN),
+    forward('vnc', task, ports.vnc, SAAS_VNC_LISTEN),
   ];
+}
+
+/** 测试或进程退出前释放 15173/18080/16080 监听。 */
+export function closeSaasLocalAdapters(): void {
+  for (const server of servers ?? []) {
+    server.close();
+  }
+  servers = null;
+  currentTaskId = '';
 }

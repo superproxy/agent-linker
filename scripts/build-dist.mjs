@@ -5,8 +5,8 @@
  *   pnpm build:dist:node                    执行机包 dist/linkagent-node（仅节点连接器）
  *   node scripts/build-dist.mjs --target=node --skip-install --out=<dir>
  *
- * 整包：bin/*.mjs、config/、scripts/、web/、dev/
- * 节点包：bin/node.mjs + bin/ctl.mjs（启停）+ config/
+ * 整包：bin/*.mjs、config/、scripts/（运维）、lib/+install.sh（仅安装期）、web/、dev/
+ * 节点包：bin/node.mjs + bin/ctl.mjs（启停）+ config/ + scripts/ 子集
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -142,7 +142,58 @@ function copyConfigTemplatesToDist(destConfigDir) {
   }
 }
 
-/** destRoot = 独立包根（bin/、config/、scripts/） */
+/**
+ * 仓库 scripts/ops-* → 独立包 scripts/（去 ops- 前缀，与 package.json 一致）
+ * edge-ctl.mjs 仓库与 dist 同名
+ */
+const DIST_RUNTIME_SCRIPT_COPY = [
+  ['ops-config-init.mjs', 'config-init.mjs'],
+  ['ops-config-init.sh', 'config-init.sh'],
+  ['ops-setup-pi.mjs', 'setup-pi.mjs'],
+  ['ops-setup-channels.mjs', 'setup-channels.mjs'],
+  ['ops-edge.sh', 'edge.sh'],
+  ['ops-edge.ps1', 'edge.ps1'],
+  ['ops-edge.bat', 'edge.bat'],
+  ['edge-ctl.mjs', 'edge-ctl.mjs'],
+  ['ops-edge-prepare.mjs', 'edge-prepare.mjs'],
+];
+
+/** 独立包 <根>/lib/：仅 ./install.sh 使用，同步到运行目录时会跳过 */
+const DIST_INSTALL_LIB_RELS = ['sync-install.sh', 'migrate-install.sh'];
+
+function copyDistRuntimeScripts(destRoot) {
+  mkdirSync(join(destRoot, 'scripts'), { recursive: true });
+  for (const [srcRel, destRel] of DIST_RUNTIME_SCRIPT_COPY) {
+    const src = join(REPO, 'scripts', srcRel);
+    if (!existsSync(src)) continue;
+    const dest = join(destRoot, 'scripts', destRel);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(src, dest);
+  }
+  const edgeDir = join(REPO, 'scripts', 'ops-edge');
+  if (existsSync(edgeDir)) {
+    mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
+    for (const rel of ['docker-compose.yaml', 'Dockerfile']) {
+      const src = join(edgeDir, rel);
+      if (existsSync(src)) cpSync(src, join(destRoot, 'scripts', 'edge', rel));
+    }
+  }
+}
+
+function copyDistInstallBundle(destRoot) {
+  mkdirSync(join(destRoot, 'lib'), { recursive: true });
+  for (const rel of DIST_INSTALL_LIB_RELS) {
+    const src = join(REPO, 'scripts', 'lib', rel);
+    if (!existsSync(src)) continue;
+    cpSync(src, join(destRoot, 'lib', rel));
+  }
+  const pkgInstall = join(REPO, 'scripts', 'deploy-install.sh');
+  if (existsSync(pkgInstall)) {
+    cpSync(pkgInstall, join(destRoot, 'install.sh'));
+  }
+}
+
+/** destRoot = 独立包根（bin/、config/、scripts/、lib/ 仅安装期） */
 function copyPiSetup(destRoot) {
   const piAgentCandidates = [
     join(REPO, 'config', 'pi-agent'),
@@ -153,40 +204,8 @@ function copyPiSetup(destRoot) {
   if (piAgentSrc) {
     cpSync(piAgentSrc, join(destRoot, 'config', 'pi-agent'), { recursive: true });
   }
-  mkdirSync(join(destRoot, 'scripts'), { recursive: true });
-  mkdirSync(join(destRoot, 'scripts', 'lib'), { recursive: true });
-  for (const rel of [
-    'setup-pi.mjs',
-    'setup-channels.mjs',
-    'edge.sh',
-    'edge.ps1',
-    'edge.bat',
-    'edge-ctl.mjs',
-    'edge-prepare.mjs',
-    'config-init.mjs',
-    'config-init.sh',
-    'install.sh',
-    'lib/sync-install.sh',
-    'lib/install-root.sh',
-  ]) {
-    const src = join(REPO, 'scripts', rel);
-    if (!existsSync(src)) continue;
-    const dest = join(destRoot, 'scripts', rel);
-    mkdirSync(dirname(dest), { recursive: true });
-    cpSync(src, dest);
-  }
-  const pkgInstall = join(REPO, 'scripts', 'install.sh');
-  if (existsSync(pkgInstall)) {
-    cpSync(pkgInstall, join(destRoot, 'install.sh'));
-  }
-  const edgeDir = join(REPO, 'scripts', 'edge');
-  if (existsSync(edgeDir)) {
-    mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
-    for (const rel of ['docker-compose.yaml', 'Dockerfile']) {
-      const src = join(edgeDir, rel);
-      if (existsSync(src)) cpSync(src, join(destRoot, 'scripts', 'edge', rel));
-    }
-  }
+  copyDistRuntimeScripts(destRoot);
+  copyDistInstallBundle(destRoot);
 }
 
 /** Node 22 起直接 spawn *.cmd 会 EINVAL，Windows 必须走 shell。 */
@@ -547,13 +566,16 @@ OpenAI 兼容网关：Chatbox / Open WebUI → \`/v1\` → ACP(acpx) → 本地 
 ## 目录结构
 \`\`\`
 linkagent/
-├── bin/                  gateway / pm / node / edge 等 .mjs
+├── bin/                  进程入口（gateway / pm / node / edge 等 .mjs）
 ├── config/               gateway.yaml / weixin.yaml / node.yaml
-├── scripts/              edge.sh、setup-pi 等
+├── scripts/              装好后运维：edge.sh、setup-pi、config-init 等
+├── lib/                  仅 ./install.sh 使用（不同步到运行安装目录）
+├── install.sh            发布包 → 运行目录（如 /opt/agent-linker）
+├── start.sh              启停（内部 node bin/pm.mjs）
 ├── dev/                  内置聊天页
 ├── web/                  后台管理端
 ├── node_modules/
-└── .runtime-state/
+└── .runtime-state/       首次安装后出现在运行目录
 \`\`\`
 
 ## 启动（单机三进程：gateway + 微信 + node）

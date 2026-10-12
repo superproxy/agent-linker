@@ -29,7 +29,7 @@ if (Test-Path -LiteralPath (Join-Path $Install "pnpm-workspace.yaml")) {
 $StateDir = Join-Path $Install ".runtime-state"
 $GatewayPidPath = Join-Path $StateDir "server.pid"
 $GatewayLogPath = Join-Path $StateDir "server.log"
-$ResolvePortScript = Join-Path $PSScriptRoot "resolve-gateway-port.mjs"
+$ResolvePortScript = Join-Path $PSScriptRoot "dev-resolve-gateway-port.mjs"
 
 function Get-GatewayPort {
   Push-Location -LiteralPath $Install

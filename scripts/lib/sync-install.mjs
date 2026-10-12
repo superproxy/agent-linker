@@ -3,7 +3,8 @@ import { basename, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { materializeConfigFromTemplates } from './migrate-install.mjs';
 
-const SKIP_TOP = new Set(['config', '.runtime-state']);
+/** `lib/` 仅发布包内 install.sh 使用，不同步到运行安装目录 */
+const SKIP_TOP = new Set(['config', '.runtime-state', 'lib']);
 
 /** 发布包 → 安装目录（保留已有 config / .runtime-state） */
 export function syncPublishToInstall(packageRoot, installRoot, { skipNpm = false } = {}) {

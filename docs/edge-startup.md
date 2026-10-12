@@ -1,13 +1,13 @@
 # 网关 nginx / frps 与 NAT 隧道启动手册
 
-网关进程负责在本机安装并拉起 nginx 和 frps。node 只拉起 code-server。`nat-tunnel` 是独立工程，用 frpc 把一台机器上的本机端口主动连到网关 frps。
+> **边缘入口（浏览器 9080）以 [`edge-apisix-node.md`](edge-apisix-node.md) 为准。** 当前仓库 **仅** 通过 `pnpm edge:*` / `scripts/edge.sh|edge.ps1` 启动 edge：**APISIX + etcd 在 Docker**，**frps 在宿主机**；网关进程 **不** 内嵌拉起 edge，只同步 APISIX 路由。下文 nginx 8088 为旧方案，仅作遗留参考。
 
 ```
-浏览器 ──▶ 网关 nginx 127.0.0.1:8088/vibe-ide ──▶ 本机 code-server 127.0.0.1:8000
+浏览器 ──▶ APISIX :9080 ──▶ frps :7080 ──▶ 节点 frpc ──▶ code / dev / VNC
 远程机器上的端口 ──▶ nat-tunnel（frpc，出站）──▶ 网关 frps 0.0.0.0:7000 ──▶ 远端端口 10000–50000
 ```
 
-同一台机器上的 IDE 走 nginx 即可。端口在另一台机器、或在 NAT 后面时，再用 `nat-tunnel`。
+`nat-tunnel` 是独立工程，用 frpc 把一台机器上的本机端口主动连到网关 frps（与 node 注入的 frpc 不同用途时可并存）。
 
 ## 1. 准备
 

@@ -2,15 +2,29 @@ import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { CodeServerUpstream } from './code-server-upstream.js';
+import { toCodeServerProxyPath } from './code-server-upstream.js';
 
-/** 本机 code serve-web。须用相同 --server-base-path 启动，资源路径才落在这个前缀下。 */
-const TARGET_HOST = '127.0.0.1';
-const TARGET_PORT = 8000;
 export const VIBE_IDE_PREFIX = '/vibe-ide';
 
-export function isVibeIdePath(url: string | undefined): boolean {
+let codeServerTarget: CodeServerUpstream = {
+  host: '127.0.0.1',
+  port: 8010,
+  publicPath: VIBE_IDE_PREFIX,
+};
+
+export function setVibeIdeCodeServerTarget(target: CodeServerUpstream): void {
+  codeServerTarget = target;
+}
+
+export function vibeIdePublicPath(): string {
+  return codeServerTarget.publicPath;
+}
+
+export function isVibeIdePath(url: string | undefined, publicPath = codeServerTarget.publicPath): boolean {
   const path = (url ?? '').split('?')[0] ?? '';
-  return path === VIBE_IDE_PREFIX || path.startsWith(`${VIBE_IDE_PREFIX}/`);
+  const prefix = publicPath.replace(/\/+$/, '') || VIBE_IDE_PREFIX;
+  return path === prefix || path.startsWith(`${prefix}/`);
 }
 
 function writeHead(socket: Duplex, statusCode: number, statusMessage: string, headers: IncomingMessage['headers']): void {
@@ -30,10 +44,10 @@ function writeHead(socket: Duplex, statusCode: number, statusMessage: string, he
 export function proxyVibeIdeUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   const headers = { ...req.headers };
   const proxyReq = http.request({
-    host: TARGET_HOST,
-    port: TARGET_PORT,
+    host: codeServerTarget.host,
+    port: codeServerTarget.port,
     method: req.method ?? 'GET',
-    path: req.url,
+    path: toCodeServerProxyPath(req.url, codeServerTarget.publicPath),
     headers,
   });
   proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
@@ -58,10 +72,10 @@ function proxyVibeIdeHttp(request: FastifyRequest, reply: FastifyReply): Promise
     const headers = { ...request.headers };
     const proxyReq = http.request(
       {
-        host: TARGET_HOST,
-        port: TARGET_PORT,
+        host: codeServerTarget.host,
+        port: codeServerTarget.port,
         method: request.method,
-        path: request.raw.url,
+        path: toCodeServerProxyPath(request.raw.url, codeServerTarget.publicPath),
         headers,
       },
       (res) => {
@@ -77,7 +91,9 @@ function proxyVibeIdeHttp(request: FastifyRequest, reply: FastifyReply): Promise
     );
     proxyReq.on('error', () => {
       if (!reply.sent) {
-        void reply.code(502).send({ error: '本机 IDE 未启动，请先在 127.0.0.1:8000 运行 code serve-web' });
+        void reply.code(502).send({
+          error: `本机 IDE 未启动，请确认 node serve-web 已监听 ${codeServerTarget.host}:${codeServerTarget.port}`,
+        });
       }
       resolve();
     });

@@ -23,10 +23,12 @@ import { normalizeWeixinMode, resolveEdgePublic, taskIdFromPublicPath } from '@l
 import { createInstallLayout, getLayout } from '../install/layout.js';
 import {
   clearGatewayListenPort,
+  gatewayClientHost,
   persistGatewayListenPort,
   resolveGatewayListenPort,
 } from './listen-port.js';
-import { isVibeIdePath, proxyVibeIdeUpgrade, registerVibeIdeProxy } from './vibe-ide-proxy.js';
+import { codeServerHttpOrigin, readCodeServerUpstream } from './code-server-upstream.js';
+import { isVibeIdePath, proxyVibeIdeUpgrade, registerVibeIdeProxy, setVibeIdeCodeServerTarget } from './vibe-ide-proxy.js';
 import { startGatewayEdge, type GatewayEdge } from './edge/runtime.js';
 import { registerFrpPluginRoute } from './edge/frp-auth.js';
 import { registerRemoteModule } from '../remote/index.js';
@@ -276,12 +278,25 @@ export async function buildServer(options?: {
         }
       : {}),
   });
-  taskService.setTaskSwitchHandler((task) => {
-    const nodeId = task.nodeId?.trim();
+  taskService.setTaskSwitchHandler((task, ctx) => {
     const cwd = task.cwd?.trim();
-    if (!nodeId || !cwd) return;
-    const sent = nodeManager.switchTask(nodeId, { taskId: task.id, cwd });
-    if (!sent) console.warn(`[tasks] 节点 ${nodeId} 不在线，任务 ${task.id} 的切换未下发`);
+    if (!cwd) return;
+    const sent = new Set<string>();
+    const bind = task.nodeId?.trim();
+    if (bind && bind !== LOCAL_NODE_ID) {
+      if (nodeManager.switchTask(bind, { taskId: task.id, cwd })) sent.add(bind);
+      else console.warn(`[tasks] 节点 ${bind} 不在线，任务 ${task.id} 的 agent 切换未下发`);
+    }
+    for (const nodeId of nodeManager.listOnlineNodeIdsForOwner(ctx.ownerUsername)) {
+      if (sent.has(nodeId)) continue;
+      nodeManager.switchTask(nodeId, { taskId: task.id, cwd });
+      sent.add(nodeId);
+    }
+  });
+  nodeManager.onChange((nodeId, online) => {
+    if (!online) return;
+    const rec = nodeManager.list().find((n) => n.nodeId === nodeId);
+    taskService.syncIdeForNode(nodeId, rec?.ownerUsername);
   });
   const taskTranscripts = createTaskTranscripts(layout.state('task-transcripts'), layout.nodeState);
 
@@ -1145,6 +1160,8 @@ export async function buildServer(options?: {
     },
   });
 
+  const codeServer = readCodeServerUpstream(join(layout.configDir, 'node.yaml'));
+  setVibeIdeCodeServerTarget(codeServer);
   registerVibeIdeProxy(app);
 
   // 管理后台静态资源最后挂载（prefix /），避免抢在 /v1、/api 等路由之前。
@@ -1188,23 +1205,8 @@ export async function buildServer(options?: {
     runtimeGatewayDir,
     authEnabled,
     edgePublic,
+    codeServer,
   };
-}
-
-/** node.yaml 里 code-server 的发布地址。没有该文件时用 127.0.0.1:8000。 */
-function readCodeServerUpstream(nodeYamlPath: string): string {
-  const fallback = 'http://127.0.0.1:8000';
-  if (!existsSync(nodeYamlPath)) return fallback;
-  try {
-    const doc = parseYaml(readFileSync(nodeYamlPath, 'utf8')) as { serveWeb?: { host?: string; port?: number } };
-    const hostRaw = doc.serveWeb?.host?.trim() || '127.0.0.1';
-    const host = hostRaw === '0.0.0.0' || hostRaw === '::' ? '127.0.0.1' : hostRaw;
-    const port = doc.serveWeb?.port ?? 8000;
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return fallback;
-    return `http://${host}:${port}`;
-  } catch {
-    return fallback;
-  }
 }
 
 async function main(): Promise<void> {
@@ -1220,6 +1222,7 @@ async function main(): Promise<void> {
     runtimeGatewayDir,
     authEnabled,
     edgePublic,
+    codeServer,
   } = await buildServer();
   const layout = getLayout();
   let edge: GatewayEdge | null = null;
@@ -1251,12 +1254,22 @@ async function main(): Promise<void> {
     pid: process.pid,
     at: Date.now(),
   });
+  const clientHost = gatewayClientHost(host);
+  const uiUrl = `http://${clientHost}:${port}/`;
+  const v1Url = `${uiUrl}v1`;
+  if (port === configuredPort) {
+    console.log(`[gateway] 监听 ${uiUrl}（配置端口 ${configuredPort}）`);
+  } else {
+    console.log(`[gateway] 监听 ${uiUrl}（配置 ${configuredPort} 不可用，实际端口 ${port}）`);
+  }
+  console.log(`[gateway] OpenAI API ${v1Url}`);
   edge = await startGatewayEdge({
     installRoot: layout.root,
     toolsDir: layout.state('tools'),
     runtimeDir: layout.state('edge'),
     idePrefix: '/',
-    ideUpstream: readCodeServerUpstream(join(layout.configDir, 'node.yaml')),
+    ideUpstream: codeServerHttpOrigin(codeServer),
+    idePublicPath: codeServer.publicPath,
     gatewayUpstream: `http://127.0.0.1:${port}`,
     frpPluginAddr: `${host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host}:${port}`,
     publicHost: edgePublic.publicHost,
@@ -1273,8 +1286,8 @@ async function main(): Promise<void> {
     console.error(`[edge] 任务域名初始化失败：${err instanceof Error ? err.message : String(err)}`);
   });
   app.log.info(
-    { baseUrl: `http://${host}:${port}/v1`, authEnabled },
-    'OpenAI 兼容网关就绪：Chatbox/Open WebUI 配置 base_url=http://${host}:${port}/v1',
+    { baseUrl: v1Url, port, configuredPort, authEnabled },
+    `OpenAI 兼容网关就绪：管理 ${uiUrl}，Chatbox base_url=${v1Url}`,
   );
 }
 

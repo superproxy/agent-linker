@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import {
   effectiveGatewayPort,
+  gatewayClientHost,
   persistGatewayListenPort,
   readGatewayListenPort,
   resolveGatewayListenPort,
@@ -50,6 +51,11 @@ test('resolveGatewayListenPort：占用时换随机端口', async () => {
   } finally {
     await holder.close();
   }
+});
+
+test('gatewayClientHost：0.0.0.0 映射为 127.0.0.1', () => {
+  assert.equal(gatewayClientHost('0.0.0.0'), '127.0.0.1');
+  assert.equal(gatewayClientHost('127.0.0.1'), '127.0.0.1');
 });
 
 test('persist / read / effectiveGatewayPort', () => {

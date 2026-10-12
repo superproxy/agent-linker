@@ -22,12 +22,19 @@ $Install = (Resolve-Path -LiteralPath $Install).Path
 $env:LINKAGENT_HOME = $Install
 
 $Runtime = Join-Path $Install ".runtime-state\edge"
-$ComposeFile = Join-Path $PSScriptRoot "edge\docker-compose.yaml"
+$EdgeAssets = Join-Path $PSScriptRoot "ops-edge"
+if (-not (Test-Path -LiteralPath $EdgeAssets)) {
+  $EdgeAssets = Join-Path $PSScriptRoot "edge"
+}
+$ComposeFile = Join-Path $EdgeAssets "docker-compose.yaml"
 $FrpsPidPath = Join-Path $Runtime "frps.pid"
 $FrpsLogPath = Join-Path $Runtime "frps.log"
 $FrpsErrLogPath = Join-Path $Runtime "frps.stderr.log"
 $ApisixLogPath = Join-Path $Runtime "apisix.log"
-$PrepareScript = Join-Path $PSScriptRoot "edge-prepare.mjs"
+$PrepareScript = Join-Path $PSScriptRoot "ops-edge-prepare.mjs"
+if (-not (Test-Path -LiteralPath $PrepareScript)) {
+  $PrepareScript = Join-Path $PSScriptRoot "edge-prepare.mjs"
+}
 
 $script:FrpsBin = ""
 $script:FrpsConf = ""
@@ -197,8 +204,8 @@ function Stop-Apisix {
 }
 
 function Build-Apisix {
-  if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'edge\Dockerfile'))) {
-    Write-Host '缺少 scripts/edge/Dockerfile'
+  if (-not (Test-Path -LiteralPath (Join-Path $EdgeAssets 'Dockerfile'))) {
+    Write-Host '缺少 scripts/edge/Dockerfile 或 scripts/ops-edge/Dockerfile'
     return 1
   }
   Write-Host '→ 构建镜像 linkagent-apisix:local'

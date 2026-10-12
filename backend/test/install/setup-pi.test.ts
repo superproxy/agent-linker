@@ -11,7 +11,7 @@ import {
   mergePiSettings,
   parseSetupPiArgs,
   PI_ACP_PACKAGE,
-} from '../../../scripts/setup-pi.mjs';
+} from '../../../scripts/ops-setup-pi.mjs';
 
 test('执行机安装钉死 pi-acp@0.0.33，不是未钉版本的 latest', () => {
   assert.equal(PI_ACP_PACKAGE, 'pi-acp@0.0.33');
@@ -97,7 +97,7 @@ test('applyPiSandboxConfig：默认可 ls skills，并放行 curl 127.0.0.1', ()
 test('setup-pi.mjs --skip-install --home 生成 agent 目录', () => {
   const repo = findRepoRoot();
   const home = mkdtempSync(join(tmpdir(), 'pi-home-'));
-  const r = spawnSync(process.execPath, [join(repo, 'scripts', 'setup-pi.mjs'), '--skip-install', `--home=${home}`], {
+  const r = spawnSync(process.execPath, [join(repo, 'scripts', 'ops-setup-pi.mjs'), '--skip-install', `--home=${home}`], {
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr || r.stdout);

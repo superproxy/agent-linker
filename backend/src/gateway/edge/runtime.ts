@@ -19,7 +19,7 @@ import {
   taskRouteUri,
   taskVncRouteId,
 } from './apisix.js';
-import { isSaasPublicHost } from '@linkagent/shared';
+import { useFrpTaskPathRouting } from '@linkagent/shared';
 import { renderFrpsConf } from './render.js';
 
 /** Docker Compose 项目名：同机多安装时避免容器栈互相覆盖（可用 LINKAGENT_EDGE_PROJECT 覆盖） */
@@ -43,6 +43,8 @@ export interface GatewayEdgeOptions {
   installRoot?: string;
   idePrefix: string;
   ideUpstream: string;
+  /** 浏览器入口路径前缀，与 node.yaml serveWeb.basePath 一致，默认 /vibe-ide */
+  idePublicPath?: string;
   /** {taskId}-web.localhost 转到网关 */
   gatewayUpstream: string;
   /** 任务 -dev.localhost 转到容器内 npm run dev，默认 5173 */
@@ -300,7 +302,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         await admin.remove(taskDevRouteId(taskId));
         const codePrefix = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const frps = vncUpstream;
-        const saas = isSaasPublicHost(host);
+        const saas = useFrpTaskPathRouting(host);
         await admin.upsert({
           id: taskOpenRouteId(taskId),
           host,
@@ -328,7 +330,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
           priority: 10,
           ...(saas
             ? {}
-            : { upstreamHost: 'ide.localhost', rewrite: [`^/${codePrefix}-code/?(.*)`, '/vibe-ide/$1'] as [string, string] }),
+            : { upstreamHost: 'ide.localhost', rewrite: [`^/${codePrefix}-code/?(.*)`, '/$1'] as [string, string] }),
         });
         await admin.upsert({
           id: taskVncRouteId(taskId),
@@ -341,18 +343,8 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         });
       },
       async syncTaskHosts(tasks) {
-        const host = opts.publicHost ?? TASK_PUBLIC_HOST;
-        if (isSaasPublicHost(host)) {
-          await admin.remove('code-localhost');
-        } else {
-          await admin.upsert({
-            id: 'code-localhost',
-            host,
-            uri: '/vibe-ide*',
-            upstream: opts.ideUpstream,
-            enabled: true,
-          });
-        }
+        // 9080 只走任务路径 /<taskId>-code；/vibe-ide 仅网关 /ui 同源代理，不写 APISIX。
+        await admin.remove('code-localhost');
         await admin.remove('code-ide');
         for (const task of tasks) {
           await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });

@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * 解析某安装根下的网关 HTTP 端口（供 server.sh 健康检查用）。
+ * 解析某安装根下的网关 HTTP 端口（供 server.sh / verify-stack 用）。
  * 优先级：listen-port.json（pid 仍存活）> overlay gateway.server.port > gateway.yaml > 8787
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
 
 function looksLikeInstallRoot(dir) {
   const r = resolve(dir);
@@ -32,14 +31,23 @@ function readJson(path) {
   }
 }
 
+/** 不依赖 yaml 包，避免安装根直跑 node scripts 时模块找不到 */
 function yamlPort(root) {
   for (const rel of ["config/gateway.yaml", "config/config.yaml"]) {
     const p = join(root, rel);
     if (!existsSync(p)) continue;
     try {
-      const doc = parseYaml(readFileSync(p, "utf8"));
-      const port = doc?.server?.port ?? doc?.gateway?.server?.port;
-      if (Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+      const text = readFileSync(p, "utf8");
+      const underServer = text.match(/server:\s*\n(?:[ \t].*\n)*?[ \t]+port:\s*(\d+)/);
+      if (underServer) {
+        const n = Number(underServer[1]);
+        if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
+      }
+      const anyPort = text.match(/^\s*port:\s*(\d+)\s*$/m);
+      if (anyPort) {
+        const n = Number(anyPort[1]);
+        if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
+      }
     } catch {
       /* ignore */
     }

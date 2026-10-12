@@ -1,10 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { stringify } from 'yaml';
-import { isSaasPublicHost, type NodeSection } from '@linkagent/shared';
+import { TASK_PUBLIC_HOST, useFrpTaskPathRouting, type NodeSection } from '@linkagent/shared';
 import { dockerExecutable } from '../gateway/edge/runtime.js';
-import { ensureSaasLocalAdapter, SAAS_DEV_LISTEN, SAAS_IDE_LISTEN, SAAS_VNC_LISTEN } from './saas-path.js';
+import {
+  closeSaasLocalAdapters,
+  ensureSaasLocalAdapter,
+  SAAS_DEV_LISTEN,
+  SAAS_IDE_LISTEN,
+  SAAS_VNC_LISTEN,
+} from './saas-path.js';
 
 export type ServeWebConfig = NodeSection['serveWeb'];
 
@@ -89,19 +95,22 @@ export function renderWorkspaceFrpc(
     vncDomain?: string;
     publicHost?: string;
     taskId?: string;
+    /** 宿主机原生 frpc 时 code-server 监听口（如 8010）；容器内仍为 8080。 */
+    ideLocalPort?: number;
   },
 ): string {
   const secret = token.trim();
   if (!secret || /["\r\n]/.test(secret)) throw new Error('frps token 无效');
-  const serverAddr = (endpoint?.serverAddr ?? '').trim() || 'host.docker.internal';
+  const serverAddr = (endpoint?.serverAddr ?? '').trim() || '127.0.0.1';
   const serverPort = endpoint?.serverPort && endpoint.serverPort > 0 ? endpoint.serverPort : 7000;
   const head = `serverAddr = "${serverAddr}"
 serverPort = ${serverPort}
 auth.method = "token"
 auth.token = "${secret}"`;
-  const publicHost = frpcDomain(endpoint?.publicHost, '');
-  const taskId = (endpoint?.taskId ?? '').trim();
-  if (isSaasPublicHost(publicHost) && taskId) {
+  const publicHost = frpcDomain(endpoint?.publicHost, TASK_PUBLIC_HOST);
+  const taskId = (endpoint?.taskId ?? '').trim() || 'default';
+  const legacyHosts = process.env.LINKAGENT_FRPC_LEGACY_HOSTS === '1';
+  if (!legacyHosts && useFrpTaskPathRouting(publicHost)) {
     return renderSaasWorkspaceFrpc(secret, {
       publicHost,
       taskId,
@@ -112,9 +121,13 @@ auth.token = "${secret}"`;
   const ideDomain = frpcDomain(endpoint?.ideDomain, WORKSPACE_IDE_HOST);
   const devDomain = frpcDomain(endpoint?.devDomain, WORKSPACE_DEV_HOST);
   const vncDomain = frpcDomain(endpoint?.vncDomain, WORKSPACE_VNC_HOST);
+  const idePort =
+    endpoint?.ideLocalPort != null && endpoint.ideLocalPort > 0 && endpoint.ideLocalPort <= 65535
+      ? endpoint.ideLocalPort
+      : WORKSPACE_IDE_PORT;
   return `${head}
 
-${frpcProxy('workspace-ide', WORKSPACE_IDE_PORT, ideDomain)}
+${frpcProxy('workspace-ide', idePort, ideDomain)}
 
 ${frpcProxy('workspace-dev', WORKSPACE_DEV_PORT, devDomain)}
 
@@ -135,8 +148,11 @@ export function renderSaasWorkspaceFrpc(
   const secret = token.trim();
   if (!secret || /["\r\n]/.test(secret)) throw new Error('frps token 无效');
   const publicHost = frpcDomain(endpoint.publicHost, '');
-  if (!publicHost || publicHost === WORKSPACE_DEV_HOST || publicHost.endsWith('.localhost')) {
-    throw new Error('SaaS 公网域名无效');
+  if (!publicHost || publicHost === WORKSPACE_DEV_HOST || publicHost === WORKSPACE_VNC_HOST) {
+    throw new Error('浏览器入口域名无效');
+  }
+  if (!useFrpTaskPathRouting(publicHost)) {
+    throw new Error('浏览器入口域名无效');
   }
   const taskId = endpoint.taskId.trim();
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(taskId)) throw new Error('taskId 无效');
@@ -174,27 +190,77 @@ locations = ["/${taskId}-vnc"]
 `;
 }
 
-/** 任务切换后改写 SaaS frpc 路径。本机模式（没有公网域名）不改文件。 */
-export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRPC_PATH?.trim() || EMBEDDED_FRPC_PATH): void {
-  const publicHost = process.env.LINKAGENT_PUBLIC_HOST?.trim() ?? '';
-  if (!isSaasPublicHost(publicHost) || !existsSync(file)) return;
+function browserEntryPublicHost(): string {
+  return frpcDomain(process.env.LINKAGENT_PUBLIC_HOST?.trim() || TASK_PUBLIC_HOST, TASK_PUBLIC_HOST);
+}
+
+function saasAdapterPortsFromEnv(): { dev: number; code: number; vnc: number } {
+  const code = Number(process.env.LINKAGENT_IDE_LOCAL_PORT ?? '');
+  return {
+    dev: WORKSPACE_DEV_PORT,
+    code: Number.isInteger(code) && code > 0 && code <= 65535 ? code : WORKSPACE_IDE_PORT,
+    vnc: WORKSPACE_VNC_PORT,
+  };
+}
+
+let hostFrpcReload: ((file: string) => void) | null = null;
+
+/** 宿主机 frpc 子进程注册 reload，任务切换后重读 toml。 */
+export function registerHostFrpcReload(reload: (file: string) => void): void {
+  hostFrpcReload = reload;
+}
+
+function frpcTokenFromFileOrEnv(file: string): string {
+  if (existsSync(file)) {
+    const raw = readFileSync(file, 'utf8');
+    const fromFile = raw.match(/auth\.token\s*=\s*"([^"]*)"/)?.[1]?.trim() ?? '';
+    if (fromFile && !fromFile.startsWith('nt_')) return fromFile;
+  }
+  return frpcToken(undefined);
+}
+
+function frpcServerFromToml(file: string): { serverAddr?: string; serverPort?: number } {
+  if (!existsSync(file)) return {};
   const raw = readFileSync(file, 'utf8');
-  const token = raw.match(/auth\.token\s*=\s*"([^"]*)"/)?.[1]?.trim() ?? '';
-  if (!token || token.startsWith('nt_')) return;
-  const endpoint = frpcEndpointFromEnv();
-  writeFileSync(
-    file,
-    renderSaasWorkspaceFrpc(token, {
-      publicHost,
-      taskId,
-      ...(endpoint.serverAddr ? { serverAddr: endpoint.serverAddr } : {}),
-      ...(endpoint.serverPort ? { serverPort: endpoint.serverPort } : {}),
-    }),
-    { encoding: 'utf8', mode: 0o600 },
-  );
-  writeFileSync(join(dirname(file), 'current-task'), `${taskId.trim()}\n`, 'utf8');
+  const serverAddr = raw.match(/serverAddr\s*=\s*"([^"]*)"/)?.[1]?.trim();
+  const portRaw = raw.match(/serverPort\s*=\s*(\d+)/)?.[1];
+  const serverPort = portRaw ? Number(portRaw) : undefined;
+  return {
+    ...(serverAddr ? { serverAddr } : {}),
+    ...(Number.isInteger(serverPort) && serverPort > 0 ? { serverPort } : {}),
+  };
+}
+
+function frpcPublishInContainer(file: string): boolean {
+  const normalized = file.replace(/\\/g, '/');
+  return normalized.endsWith('/etc/linkagent/frpc.toml') || normalized === EMBEDDED_FRPC_PATH.replace(/\\/g, '/');
+}
+
+/** 任务切换后改写 frpc locations（本机 ide.localhost 与 SaaS 公网域均走路径）。 */
+export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRPC_PATH?.trim() || EMBEDDED_FRPC_PATH): void {
+  const publicHost = browserEntryPublicHost();
+  if (!useFrpTaskPathRouting(publicHost)) return;
+  const id = taskId.trim();
+  if (!id) return;
+  const token = frpcTokenFromFileOrEnv(file);
+  if (!token) return;
+  const endpoint = { ...frpcEndpointForWrite(frpcPublishInContainer(file)), ...frpcServerFromToml(file) };
+  const body = renderSaasWorkspaceFrpc(token, {
+    publicHost,
+    taskId: id,
+    ...(endpoint.serverAddr ? { serverAddr: endpoint.serverAddr } : {}),
+    ...(endpoint.serverPort ? { serverPort: endpoint.serverPort } : {}),
+  });
+  if (existsSync(dirname(file))) {
+    writeFileSync(file, body, { encoding: 'utf8', mode: 0o600 });
+  }
+  writeFileSync(join(dirname(file), 'current-task'), `${id}\n`, 'utf8');
+  ensureSaasLocalAdapter(id, saasAdapterPortsFromEnv());
+  if (hostFrpcReload && existsSync(file)) {
+    hostFrpcReload(file);
+    return;
+  }
   if (file !== EMBEDDED_FRPC_PATH) return;
-  ensureSaasLocalAdapter(taskId);
   const child = spawn('pkill', ['-x', 'frpc'], { stdio: 'ignore', windowsHide: true });
   child.on('error', () => {});
 }
@@ -210,6 +276,14 @@ export function frpcToken(file: string | undefined): string {
     if (token && !token.startsWith('nt_')) return token;
   }
   return '';
+}
+
+export function resolveFrpcBin(frpsTokenFile: string | undefined): string | null {
+  if (!frpsTokenFile) return null;
+  const pathFile = join(dirname(frpsTokenFile), 'frpc.path');
+  if (!existsSync(pathFile)) return null;
+  const bin = readFileSync(pathFile, 'utf8').trim();
+  return bin && existsSync(bin) ? bin : null;
 }
 
 function frpcEndpointFromEnv(): {
@@ -229,6 +303,13 @@ function frpcEndpointFromEnv(): {
   };
 }
 
+/** 容器内 frpc 连宿主机 frps；宿主机原生 frpc 用 127.0.0.1。 */
+function frpcEndpointForWrite(inContainer: boolean): ReturnType<typeof frpcEndpointFromEnv> {
+  const ep = frpcEndpointFromEnv();
+  if (ep.serverAddr?.trim()) return ep;
+  return { ...ep, serverAddr: inContainer ? 'host.docker.internal' : '127.0.0.1' };
+}
+
 function dockerVolumeHost(workspaceDir: string): string {
   return workspaceDir.replace(/\\/g, '/');
 }
@@ -238,15 +319,38 @@ export function serveWebBasePath(basePath: string): string {
   return withSlash.replace(/\/+$/, '') || '/vibe-ide';
 }
 
-/** node 只发布 code-server。nginx 由网关安装，反代这个回环端口。 */
-export function renderIdeCompose(opts: ServeWebConfig, workspaceDir: string, frpcFile?: string): string {
+/**
+ * node 只发布 code-server（镜像便于安装）。frpc 在宿主机共享，不挂载进本容器（形态 B / enhance）。
+ * 形态 C 聚合镜像在容器内写 frpc，不走本 compose。
+ */
+export function currentTaskMarkerPath(runtimeDir: string): string {
+  return join(runtimeDir, 'current-task');
+}
+
+export function writeCurrentTaskMarker(runtimeDir: string, taskId: string): string {
+  mkdirSync(runtimeDir, { recursive: true });
+  const file = currentTaskMarkerPath(runtimeDir);
+  writeFileSync(file, `${taskId.trim()}\n`, 'utf8');
+  return file;
+}
+
+export function renderIdeCompose(
+  opts: ServeWebConfig,
+  workspaceDir: string,
+  frpcFile?: string,
+  currentTaskFile?: string,
+): string {
   const prefix = serveWebBasePath(opts.basePath);
-  const volumes = [
-    `${dockerVolumeHost(workspaceDir)}:${IDE_CONTAINER_WORKSPACE}`,
-    `${NODE_MODULES_VOLUME}:${IDE_CONTAINER_WORKSPACE}/node_modules`,
-  ];
+  const isolatedNodeModules = !opts.useHostNodeModules;
+  const volumes = [`${dockerVolumeHost(workspaceDir)}:${IDE_CONTAINER_WORKSPACE}`];
+  if (isolatedNodeModules) {
+    volumes.push(`${NODE_MODULES_VOLUME}:${IDE_CONTAINER_WORKSPACE}/node_modules`);
+  }
   if (frpcFile) volumes.push(`${dockerVolumeHost(frpcFile)}:/etc/linkagent/frpc.toml:ro`);
-  const doc = {
+  if (currentTaskFile) {
+    volumes.push(`${dockerVolumeHost(currentTaskFile)}:/etc/linkagent/current-task:ro`);
+  }
+  const doc: Record<string, unknown> = {
     services: {
       'code-serve-web': {
         image: opts.image,
@@ -271,15 +375,26 @@ export function renderIdeCompose(opts: ServeWebConfig, workspaceDir: string, frp
         volumes,
       },
     },
-    volumes: {
-      [NODE_MODULES_VOLUME]: {},
-    },
   };
+  if (isolatedNodeModules) {
+    doc.volumes = { [NODE_MODULES_VOLUME]: {} };
+  }
   return stringify(doc);
 }
 
-export function serveWebDockerArgs(composeFile: string, action: 'up' | 'down'): string[] {
-  return action === 'up' ? ['compose', '-f', composeFile, 'up', '-d'] : ['compose', '-f', composeFile, 'down'];
+export function serveWebDockerArgs(composeFile: string, action: 'up' | 'down', forceRecreate = false): string[] {
+  if (action === 'up') {
+    const args = ['compose', '-f', composeFile, 'up', '-d'];
+    if (forceRecreate) args.push('--force-recreate');
+    return args;
+  }
+  return ['compose', '-f', composeFile, 'down'];
+}
+
+export interface ServeWebHandle {
+  stop: () => void;
+  /** 切换激活任务：重挂工作区并重建 IDE 容器（dev / code-server / VNC 由入口脚本重启）。 */
+  switchTask: (taskId: string, cwd: string) => void;
 }
 
 /**
@@ -291,38 +406,65 @@ export function nodeServeWebSuppressed(flag: string | undefined): boolean {
   return raw === '0' || raw === 'false' || raw === 'off';
 }
 
+/** `pnpm local:stack:start:enhance`：临时拉起 Docker code-server（8010），不要求 node.yaml serveWeb.enabled。 */
+export function stackEnhanceIdeEnabled(): boolean {
+  const raw = (process.env.LINKAGENT_LOCAL_STACK_ENHANCE ?? process.env.LINKAGENT_SERVE_WEB_ENHANCE ?? '')
+    .trim()
+    .toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 /** node 启动时只拉起 code-server。未启用或 docker 不存在时不打断节点回连。 */
-export function startNodeServeWeb(launch: ServeWebLaunch, spawnFn: ServeWebSpawn = spawn as ServeWebSpawn): { stop: () => void } {
+export function startNodeServeWeb(
+  launch: ServeWebLaunch,
+  spawnFn: ServeWebSpawn = spawn as ServeWebSpawn,
+): ServeWebHandle {
   const { serveWeb } = launch;
+  const enhanceIde = stackEnhanceIdeEnabled();
+  const useDockerIde = serveWeb.enabled || enhanceIde;
   const suppressed = nodeServeWebSuppressed(process.env.LINKAGENT_NODE_SERVE_WEB);
-  if (suppressed) {
+  if (suppressed && !enhanceIde) {
     console.log('[node] LINKAGENT_NODE_SERVE_WEB 已关闭 compose，IDE 由容器入口拉起');
     const token = frpcToken(launch.frpsTokenFile);
     const out = launch.frpcPath ?? EMBEDDED_FRPC_PATH;
     if (!token) {
       console.error('[node] 未写 frpc：需要与 frps 相同的 FRPS_TOKEN。nt_ 不能当作这条加密连接的令牌');
     } else if (existsSync(dirname(out))) {
-      writeFileSync(out, renderWorkspaceFrpc(token, frpcEndpointFromEnv()), { encoding: 'utf8', mode: 0o600 });
+      writeFileSync(out, renderWorkspaceFrpc(token, frpcEndpointForWrite(true)), { encoding: 'utf8', mode: 0o600 });
       console.log(`[node] 已写入 ${out}，由容器入口启动 frpc`);
     }
-    return { stop() {} };
+    return { stop() {}, switchTask() {} };
   }
-  if (!serveWeb.enabled) return { stop() {} };
+  if (!useDockerIde) {
+    const frpcOnly = startNativeHostFrpc(launch, serveWeb);
+    return { ...frpcOnly, switchTask() {} };
+  }
+  if (enhanceIde && !serveWeb.enabled) {
+    console.log('[node] LINKAGENT_LOCAL_STACK_ENHANCE：Docker code-server（宿主机共享 frpc）');
+  }
   mkdirSync(launch.runtimeDir, { recursive: true });
   const composeFile = join(launch.runtimeDir, 'compose.yml');
-  const frpcFile = join(launch.runtimeDir, 'frpc.toml');
-  const token = frpcToken(launch.frpsTokenFile);
-  const frpcMounted = token.length > 0;
-  if (frpcMounted) {
-    writeFileSync(frpcFile, renderWorkspaceFrpc(token, frpcEndpointFromEnv()), { encoding: 'utf8', mode: 0o600 });
-  }
-  writeFileSync(composeFile, renderIdeCompose(serveWeb, launch.workspaceDir, frpcMounted ? frpcFile : undefined), 'utf8');
+  let mountedWorkspace = launch.workspaceDir;
+  let activeTaskId = '';
 
   const dockerBin = dockerExecutable() ?? 'docker';
+  let hostFrpc: { stop: () => void } = { stop() {} };
 
-  const run = (action: 'up' | 'down') => {
+  const writeCompose = (workspaceDir: string, taskId: string, recreate: boolean) => {
+    mountedWorkspace = workspaceDir;
+    activeTaskId = taskId.trim();
+    const marker = activeTaskId ? writeCurrentTaskMarker(launch.runtimeDir, activeTaskId) : undefined;
+    writeFileSync(
+      composeFile,
+      renderIdeCompose(serveWeb, workspaceDir, undefined, marker),
+      'utf8',
+    );
+    run('up', recreate);
+  };
+
+  const run = (action: 'up' | 'down', forceRecreate = false) => {
     try {
-      const child = spawnFn(dockerBin, serveWebDockerArgs(composeFile, action), {
+      const child = spawnFn(dockerBin, serveWebDockerArgs(composeFile, action, forceRecreate), {
         stdio: 'inherit',
         windowsHide: true,
         shell: process.platform === 'win32',
@@ -341,7 +483,94 @@ export function startNodeServeWeb(launch: ServeWebLaunch, spawnFn: ServeWebSpawn
     }
   };
 
-  console.log(`[node] 启动 IDE 容器 ${CODE_CONTAINER}，发布 ${serveWeb.host}:${serveWeb.port}`);
-  run('up');
-  return { stop() { run('down'); } };
+  hostFrpc = startNativeHostFrpc(launch, serveWeb);
+
+  const switchTask = (taskId: string, cwd: string) => {
+    const id = taskId.trim();
+    const dir = cwd.trim();
+    if (!id || !dir) return;
+    if (id === activeTaskId && dir === mountedWorkspace) return;
+    console.log(
+      `[node] IDE 跟随激活任务 ${id}，重建 ${CODE_CONTAINER}（dev/code-server/vnc）→ ${dir}`,
+    );
+    writeCompose(dir, id, true);
+  };
+
+  if (mountedWorkspace.trim()) {
+    console.log(
+      `[node] 启动 IDE 容器 ${CODE_CONTAINER}（仅 code-server/dev/vnc），发布 ${serveWeb.host}:${serveWeb.port}；frpc 在宿主机`,
+    );
+    writeCompose(mountedWorkspace, '', false);
+  } else {
+    console.log('[node] IDE 容器等待网关下发激活任务（switchTask）后再启动');
+  }
+
+  return {
+    stop() {
+      hostFrpc.stop();
+      closeSaasLocalAdapters();
+      run('down');
+    },
+    switchTask,
+  };
+}
+
+/** 形态 A：不启 IDE 容器，在宿主机拉起 frpc，登记 dev/ide/vnc.localhost → 本机端口。 */
+function startNativeHostFrpc(launch: ServeWebLaunch, serveWeb: ServeWebConfig): { stop: () => void } {
+  const token = frpcToken(launch.frpsTokenFile);
+  if (!token) {
+    console.warn('[node] serveWeb 未启用且未写 frpc：缺少 .runtime-state/edge/frps.token（或 FRPS_TOKEN）');
+    return { stop() {} };
+  }
+  mkdirSync(launch.runtimeDir, { recursive: true });
+  const frpcFile = join(launch.runtimeDir, 'frpc.toml');
+  const idePort = serveWeb.port > 0 ? serveWeb.port : WORKSPACE_IDE_PORT;
+  const bootTask = process.env.LINKAGENT_TASK_ID?.trim() || 'default';
+  process.env.LINKAGENT_IDE_LOCAL_PORT = String(idePort);
+  writeFileSync(
+    frpcFile,
+    renderWorkspaceFrpc(token, {
+      ...frpcEndpointForWrite(false),
+      publicHost: browserEntryPublicHost(),
+      taskId: bootTask,
+      ideLocalPort: idePort,
+    }),
+    { encoding: 'utf8', mode: 0o600 },
+  );
+  ensureSaasLocalAdapter(bootTask, { dev: WORKSPACE_DEV_PORT, code: idePort, vnc: WORKSPACE_VNC_PORT });
+  const bin = resolveFrpcBin(launch.frpsTokenFile);
+  if (!bin) {
+    console.warn(`[node] 未找到 frpc 二进制（${join(dirname(launch.frpsTokenFile ?? ''), 'frpc.path')}），跳过宿主机 frpc`);
+    return { stop() {} };
+  }
+  let child: ChildProcess | null = null;
+  const startFrpc = () => {
+    if (child && !child.killed) child.kill('SIGTERM');
+    try {
+      child = spawn(bin, ['-c', frpcFile], { stdio: 'inherit', windowsHide: true, shell: false });
+      child.on('error', (err) => {
+        console.error(`[node] frpc 启动失败：${err instanceof Error ? err.message : String(err)}`);
+      });
+      child.on('exit', (code) => {
+        if (code && code !== 0) console.error(`[node] frpc 退出 code=${String(code)}`);
+      });
+    } catch (err) {
+      console.error(`[node] frpc 启动失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  registerHostFrpcReload(() => startFrpc());
+  startFrpc();
+  const pathMode = useFrpTaskPathRouting(browserEntryPublicHost());
+  console.log(
+    `[node] 宿主机 frpc 已启动（${frpcFile}，${pathMode ? `路径 ${browserEntryPublicHost()}/<taskId>-*` : `三 Host → ${idePort}/5173/6080`}）`,
+  );
+  return {
+    stop() {
+      hostFrpcReload = null;
+      closeSaasLocalAdapters();
+      if (child && !child.killed) {
+        child.kill('SIGTERM');
+      }
+    },
+  };
 }

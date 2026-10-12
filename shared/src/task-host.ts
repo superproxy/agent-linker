@@ -5,6 +5,18 @@ export function isSaasPublicHost(host: string | undefined): boolean {
   return true;
 }
 
+/**
+ * frps HTTP 代理是否用「浏览器入口 Host + locations 路径前缀」选路由（与 SaaS 相同）。
+ * 为 true 时 APISIX 不改 Host/路径；node frpc 登记 `/<taskId>-web|code|vnc`，由本地适配器剥前缀。
+ * 为 false 时走 legacy 三 Host（dev/ide/vnc.localhost），仅当 `LINKAGENT_FRPC_LEGACY_HOSTS=1`。
+ */
+export function useFrpTaskPathRouting(host: string | undefined): boolean {
+  const text = (host ?? '').trim().toLowerCase().replace(/\.$/, '');
+  if (!text || text === 'localhost') return false;
+  if (text === 'dev.localhost' || text === 'vnc.localhost') return false;
+  return true;
+}
+
 /** 浏览器入口缺省主机。实际值由 gateway.yaml 的 edge.publicHost 加载。 */
 export const TASK_PUBLIC_HOST = 'ide.localhost';
 export const TASK_PUBLIC_PORT = 9080;

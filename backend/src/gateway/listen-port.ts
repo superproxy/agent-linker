@@ -103,3 +103,10 @@ export function effectiveGatewayPort(
   }
   return configuredPort;
 }
+
+/** 控制台 / 健康检查用的本机访问地址（0.0.0.0 绑定仍用 127.0.0.1 打开浏览器） */
+export function gatewayClientHost(bindHost: string): string {
+  const h = bindHost.trim();
+  if (h === '0.0.0.0' || h === '::') return '127.0.0.1';
+  return h || '127.0.0.1';
+}

@@ -3,7 +3,7 @@
  *
  * 两种运行形态：
  *   - dev（仓库源码）：monorepo 根；配置 `<root>/config/`；脚本 `scripts/`；tsx 跑 backend/src
- *   - dist（独立部署包）：`bin/*.mjs` + `config/` + `scripts/` + web
+ *   - dist（独立部署包）：`bin/*.mjs` + `config/` + `scripts/`（运维）+ 包根 `install.sh` / `lib/`（仅安装期）
  *   - 模板在 backend/config/*.template；legacy server/config、backend/config 仅迁移兜底
  *
  * 历史上形态判定（existsSync('.linkagent-root')）、配置双候选、.runtime-state 子目录、

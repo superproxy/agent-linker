@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     toolsDir: layout.state('tools'),
     runtimeDir: layout.state('edge'),
     idePrefix: '/',
-    ideUpstream: 'http://127.0.0.1:8000',
+    ideUpstream: 'http://127.0.0.1:8010',
     gatewayUpstream: `http://127.0.0.1:${port}`,
     frpPluginAddr: pluginAddr(host, port),
   });

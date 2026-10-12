@@ -14,7 +14,7 @@ fi
 STATE="$INSTALL/.runtime-state"
 PID_FILE="$STATE/server.pid"
 LOG_FILE="$STATE/server.log"
-PORT="$(node "$(dirname "$0")/resolve-gateway-port.mjs")"
+PORT="$(node "$(dirname "$0")/dev-resolve-gateway-port.mjs")"
 HOST_URL="http://127.0.0.1:${PORT}"
 
 is_running() {
@@ -42,7 +42,7 @@ do_start() {
     echo $! >"$PID_FILE"
   )
   for _ in $(seq 1 25); do
-    PORT="$(node "$(dirname "$0")/resolve-gateway-port.mjs")"
+    PORT="$(node "$(dirname "$0")/dev-resolve-gateway-port.mjs")"
     HOST_URL="http://127.0.0.1:${PORT}"
     if curl -sS -m 2 "$HOST_URL/healthz" >/dev/null 2>&1; then
       echo "✅ gateway 已就绪：${HOST_URL}/v1 （日志 ${LOG_FILE}）"
@@ -75,7 +75,7 @@ do_stop() {
 }
 
 do_status() {
-  PORT="$(node "$(dirname "$0")/resolve-gateway-port.mjs")"
+  PORT="$(node "$(dirname "$0")/dev-resolve-gateway-port.mjs")"
   HOST_URL="http://127.0.0.1:${PORT}"
   if is_running; then
     echo "运行中 pid=$(cat "$PID_FILE")  install=$INSTALL  url=${HOST_URL}/v1"

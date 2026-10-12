@@ -110,7 +110,7 @@ test('同步路由时使用已写入的 admin key，且不拉起进程', async (
     toolsDir: join(root, 'tools'),
     runtimeDir: runtime,
     idePrefix: '/',
-    ideUpstream: 'http://127.0.0.1:8000',
+    ideUpstream: 'http://127.0.0.1:8010',
     gatewayUpstream: 'http://127.0.0.1:8787',
     platform: 'freebsd',
     arch: 'x64',
@@ -144,7 +144,7 @@ test('startGatewayEdge：二进制已在则只写配置，不拉起 frps 与 API
     toolsDir: tools,
     runtimeDir: runtime,
     idePrefix: '/',
-    ideUpstream: 'http://127.0.0.1:8000',
+    ideUpstream: 'http://127.0.0.1:8010',
     gatewayUpstream: 'http://127.0.0.1:8787',
     platform: 'win32',
     arch: 'x64',
@@ -185,30 +185,31 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
     { id: 't_41db7238', name: 'test', enabled: false },
   ]);
   const put = (id: string) => calls.find((call) => call.method === 'PUT' && call.url.endsWith(`/routes/${id}`));
-  assert.match(put('code-localhost')?.body ?? '', new RegExp(`"host":"${TASK_PUBLIC_HOST}"`));
-  assert.match(put('code-localhost')?.body ?? '', /"uri":"\/vibe-ide\*"/);
+  assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/code-localhost')), false);
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/code-localhost')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/code-ide')), true);
   assert.match(put('task-open-default')?.body ?? '', /"uri":"\/default\*"/);
-  assert.match(put('task-open-default')?.body ?? '', /"upstream_host":"dev\.localhost"/);
+  assert.match(put('task-open-default')?.body ?? '', /"pass_host":"pass"/);
+  assert.doesNotMatch(put('task-open-default')?.body ?? '', /upstream_host/);
+  assert.doesNotMatch(put('task-open-default')?.body ?? '', /proxy-rewrite/);
   assert.match(put('task-open-default')?.body ?? '', /host\.docker\.internal:7080/);
   assert.match(put('task-open-default')?.body ?? '', /"priority":1/);
   assert.match(put('task-default')?.body ?? '', new RegExp(`"host":"${TASK_PUBLIC_HOST}"`));
   assert.match(put('task-default')?.body ?? '', /"uri":"\/default-web\*"/);
   assert.match(put('task-default')?.body ?? '', /host\.docker\.internal:7080/);
-  assert.match(put('task-default')?.body ?? '', /"upstream_host":"dev\.localhost"/);
+  assert.match(put('task-default')?.body ?? '', /"pass_host":"pass"/);
   assert.match(put('task-default')?.body ?? '', /"priority":10/);
   assert.match(put('task-code-default')?.body ?? '', /"uri":"\/default-code\*"/);
   assert.match(put('task-code-default')?.body ?? '', /host\.docker\.internal:7080/);
-  assert.match(put('task-code-default')?.body ?? '', /"upstream_host":"ide\.localhost"/);
-  assert.match(put('task-code-default')?.body ?? '', /\/vibe-ide\/\$1/);
+  assert.doesNotMatch(put('task-code-default')?.body ?? '', /upstream_host/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"uri":"\/t_41db7238-code\*"/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"status":0/);
   assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/task-dev-default')), false);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-dev-default')), true);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"uri":"\/t_41db7238-vnc\*"/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /host\.docker\.internal:7080/);
-  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"pass_host":"rewrite"/);
-  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"upstream_host":"vnc\.localhost"/);
+  assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"pass_host":"pass"/);
+  assert.doesNotMatch(put('task-vnc-t_41db7238')?.body ?? '', /upstream_host/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"status":0/);
   await edge.applyTaskHost({ taskId: 'default', enabled: false, removed: true });
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-open-default')), true);

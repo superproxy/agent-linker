@@ -5,14 +5,70 @@
 
 ---
 
-## 1. 先分清：谁一定用 Docker、谁不用
+## 1. Local 模式 vs SaaS 模式（进程落在哪）
+
+### Local（本机 / `ide.localhost`）
+
+**推荐心智：业务进程由安装根命令在外部拉起；node 侧若需要浏览器 IDE，通常只有 code-server 这一个 Docker 容器。**
+
+| 组件 | 谁管 / 怎么起 | Docker？ |
+|---|---|---|
+| gateway、channels、node 连接器 | `pnpm server:*`、`pm:restart channels/node`（或 `local:stack:start`） | **否**（宿主机 Node） |
+| frps | `pnpm edge:start` | **否**（宿主机） |
+| APISIX + etcd | `pnpm edge:start` | **是**（edge 数据面，与业务进程分开 compose） |
+| 浏览器 code-server | 仅 **`start:enhance`** 或 `serveWeb.enabled: true` | **是**（`linkagent-code-serve-web`，8010→8080；**镜像是为免本机安装 code-server**） |
+| **frpc** | PM node 写 `.runtime-state/ide-proxy/frpc.toml`，**宿主机单进程** | **否**（与 gateway/node 一样外部管理；**不进 code-server 容器**） |
+| dev / VNC | enhance 时由同一 IDE 容器映射 5173/6080 到回环；frpc 仍指宿主机这些口 | enhance 时进程在容器内，隧道在宿主机 frpc |
+
+**不要**在 Local 推荐栈里再开 **`linkagent-node` 形态 C**（与 PM node 二选一）。`local:stack:start` 会主动 `node:docker:stop`。
+
+### SaaS（公网 / `edge.publicHost` 非 `.localhost`）
+
+**与 Local 相同：执行能力仍落在「执行机这一台宿主机」上**——agent、dev、frpc 无论是 PM 直跑还是装进 Docker，都是该机器上的 workload，不是网关进程里虚拟出来的远程运行时。
+
+差别只在 **浏览器入口与 frpc 登记方式**（同域名 + `/<taskId>-web|code|vnc`，见 `renderSaasWorkspaceFrpc`），以及 node 环境变量 **`LINKAGENT_PUBLIC_HOST`** 必须与网关机 `gateway.yaml` 一致。网关机仍可能是：APISIX 在容器、frps 在宿主机。
+
+---
+
+## 2. 先分清：edge 与其它组件
+
+### edge 怎么起（当前只有这一种）
+
+**网关进程不会内嵌拉起 edge**，只写 `.runtime-state/edge/*` 并通过 Admin API 同步 APISIX 路由。对外 HTTP 入口 **必须**先单独起 edge：
+
+| 步骤 | 命令（安装根） | 作用 |
+|---|---|---|
+| 首次构建 APISIX 镜像 | `pnpm edge:build` | `scripts/edge/Dockerfile` |
+| 启停 | `pnpm edge:start` / `edge:stop` / `edge:restart` | Windows → `scripts/edge.ps1`，Unix → `scripts/edge.sh` |
+| 状态 / 日志 | `pnpm edge:status` / `edge:log` | frps 日志 + APISIX compose 日志 |
+
+edge 一次启动包含两部分：
 
 | 组件 | Docker？ | 说明 |
 |---|---|---|
-| **gateway / channels** | **否**（仓库现状） | Node 进程：`pnpm server:*`、`pnpm dev` 或 dist `start.bat` |
-| **APISIX + etcd** | **是** | 仅 `scripts/edge.sh` 用 Compose 拉起；**与 node 是否 Docker 无关** |
-| **frps** | **否** | 宿主机二进制，由 `edge.sh` 启动 |
-| **node 连接器** | 可选 | 始终是 Node 进程；差异在 **IDE/VNC/frpc 是否进容器** |
+| **APISIX + etcd** | **是** | Compose 项目（默认 `linkagent-edge-*`），数据面 **9080**，Admin **9180** |
+| **frps** | **否** | 安装包解到 `.runtime-state/tools/frp/`，**宿主机进程**（7000 / 7080 / 7500） |
+
+本机一键（**默认原生**）：`pnpm local:stack:start` = edge → gateway → channels → **PM node + 宿主机 frpc**（无 Docker IDE）。  
+**enhance**（`pnpm local:stack:start:enhance`）：在默认原生栈上同时增强 **edge** 与 **code-server**（服务/端口速查见 [`local-stack-enhance.md`](local-stack-enhance.md)）：
+
+| 能力 | 默认 `local:stack:start` | enhance |
+|---|---|---|
+| frps + APISIX | `edge:start` | `edge:build` → `edge:restart` → **`server:restart`**（重同步 APISIX 路由） |
+| node | PM 原生 + **宿主机 frpc** | 同上 + **`LINKAGENT_LOCAL_STACK_ENHANCE=1`** |
+| 浏览器 IDE | 无（仅 dev/vnc 隧道若本机有进程） | **仅** Docker **code-server:8010**；**frpc 宿主机共享**，**9080 仅** `/<taskId>-code`（`/vibe-ide` 只在网关 `/ui` 同源） |
+| 桌面 VS Code | 直接打开任务 `cwd` | 同左；enhance 不负责桌面版 |
+
+**桌面 VS Code / Cursor**：不经过本仓库隧道；浏览器入口才依赖 enhance 或 `serveWeb.enabled: true`。  
+验证：`pnpm local:stack:verify` / `local:stack:status`。
+
+### 其它进程
+
+| 组件 | Docker？ | 说明 |
+|---|---|---|
+| **gateway** | **否** | `pnpm server:*`、`pnpm dev` 或 dist `start.bat` |
+| **channels** | **否** | PM 托管 `channel-gateway`（企微/飞书/微信 ilink）；`pnpm --filter @linkagent/backend pm:restart channels`；**无 HTTP 健康检查**，验证看 pid/日志 |
+| **node 执行面** | **形态 C：一个聚合容器** | `pnpm node:docker`（node + code-server + dev + frpc）；与 edge 的 APISIX 栈 **不是**同一个 compose |
 
 **node 的三种形态**（与单机/SaaS 正交）：
 
@@ -22,18 +78,18 @@
 | **B. 原生 node + Docker IDE** | `pnpm node:start`，`serveWeb.enabled: true` | node 写 `frpc.toml`，**docker compose** 只起 `linkagent-code-serve-web` |
 | **C. Docker 聚合节点** | `pnpm node:docker` / `LINKAGENT_NODE_RUNTIME=docker` | 镜像 `linkagent-node:local` 内 IDE+VNC+frpc；`LINKAGENT_NODE_SERVE_WEB=0`，node 只写 `/etc/linkagent/frpc.toml` |
 
-**单机 vs SaaS**（由 **网关机** `config/gateway.yaml` → `edge.publicHost` 决定，全链路一致）：
+**单机 vs SaaS**（由 **网关机** `config/gateway.yaml` → `edge.publicHost` 决定；**执行机仍是宿主机**，见 §1）：
 
 | 模式 | `edge.publicHost` 示例 | APISIX | frpc 登记 |
 |---|---|---|---|
-| **单机（本机入口）** | `ide.localhost` | 改 Host → `dev/ide/vnc.localhost` | 三个 `*.localhost`，**不要**设 SaaS 的 `LINKAGENT_PUBLIC_HOST` |
-| **SaaS（公网入口）** | `hubide.example.com` | Host/路径原样进 frps | 同域名 + `/<taskId>-web|code|vnc`；node **必须** `LINKAGENT_PUBLIC_HOST` 与网关相同 |
+| **单机（本机入口）** | `ide.localhost` | Host/路径原样进 frps | 同 Host + `locations`（默认）；可选 legacy 三 Host（`LINKAGENT_FRPC_LEGACY_HOSTS=1`） |
+| **SaaS（公网入口）** | `hubide.example.com` | 同上 | node **`LINKAGENT_PUBLIC_HOST`** 与 `edge.publicHost` 一致（不设则本机默认 `ide.localhost`） |
 
 代码判定：`shared/src/task-host.ts` 的 `isSaasPublicHost()`（`.localhost` → 单机，否则 SaaS）。
 
 ---
 
-## 2. 四象限总览
+## 3. 四象限总览
 
 ```
                     │  node 非 Docker（A/B）     │  node Docker 聚合（C）
@@ -60,9 +116,26 @@ SaaS 网关机+远程node│  §4.1 远程裸机 / dist 包   │  §4.2 远程�
 
 ---
 
-## 3. 单机方案（gateway 与 node 同一安装根或同一台机）
+## 4. 单机方案（gateway 与 node 同一安装根或同一台机）
 
-### 3.1 单机 + node 非 Docker（形态 B，最常见开发）
+### 3.1 单机 + 形态 C 聚合节点（推荐：命令启停、任务 switchTask + dev）
+
+网关机与 §3.2 相同；**执行面**不拆 PM node 与 IDE compose，一条命令：
+
+```bash
+pnpm node:docker:build   # 首次
+pnpm node:docker         # 或 pnpm local:stack:start（edge → gateway → node:docker）
+```
+
+配置 `code-server/node-docker/node.env`（从 `node.env.example` 复制）：`LINKAGENT_GATEWAY_URL=ws://host.docker.internal:8787`、`FRPS_*` 指向本机 edge、`LINKAGENT_WORKSPACE` 指向安装根下 `.runtime-state/tasks-workspace`。**不要**设 SaaS 的 `LINKAGENT_PUBLIC_HOST`（保持 `ide.localhost` 三 Host）。
+
+`config/node.yaml` 中 **`serveWeb.enabled: false`**，避免 PM 再起第二个 IDE 容器。任务 dev / code / VNC 与 frpc 均在 **`linkagent-node`** 容器内，由 node 收 **`switchTask`**（`LINKAGENT_DEV_BY_NODE=1`，入口已设）。
+
+浏览器仍走 `http://ide.localhost:9080/<taskId>-web|code|vnc`；**不**依赖宿主机映射 8010/5173（隧道经 frps）。
+
+---
+
+### 3.1b 单机 + node 非 Docker（形态 B，IDE 单独 compose）
 
 **网关** `config/gateway.yaml`：
 
@@ -83,8 +156,11 @@ serveWeb:
   enabled: true
   image: linkagent-code-server:local
   host: 127.0.0.1
-  port: 8000
+  port: 8010
   basePath: /vibe-ide
+  # 形态 B 且 workspace 已在宿主机 npm install（含私服包）时：
+  # useHostNodeModules: true
+  # 形态 C（node 与其它进程全在容器）保持默认 false，在容器/镜像内 install。
 ```
 
 **命令**（安装根 = 仓库根）：
@@ -98,7 +174,7 @@ pnpm node:start    # 或 pnpm restart:all（含 PM 托管 node）
 
 **frpc 注入**：node 读 `.runtime-state/edge/frps.token`，写 `.runtime-state/ide-proxy/frpc.toml` 并挂进 IDE 容器；frpc 默认连 `127.0.0.1:7000`（未设 `FRPS_*` 时）。
 
-**浏览器**：`http://ide.localhost:9080/<taskId>-code`、`/vibe-ide/`（本机路由见 [`edge-frpc-apisix.md`](edge-frpc-apisix.md)）。
+**浏览器（9080）**：`http://ide.localhost:9080/<taskId>-code`（本机路由见 [`edge-frpc-apisix.md`](edge-frpc-apisix.md)）。
 
 **形态 A**（不要 IDE 隧道）：`serveWeb.enabled: false`，仅 `pnpm node:start` 回连网关；**不**写 frpc、**不**起 code-server 容器。
 
@@ -137,7 +213,7 @@ PM 里的 `pnpm restart:all` **不会**自动用 Docker node；Docker 节点与 
 
 ---
 
-## 4. SaaS 方案（公网域名 + 远程执行机）
+## 5. SaaS 方案（公网域名 + 远程执行机）
 
 网关机与执行机分离；浏览器走 **HTTPS 域名**，执行机 **出站** `7000`（frpc）+ WS 连 gateway。
 
@@ -177,7 +253,7 @@ LINKAGENT_PUBLIC_HOST=hubide.example.com
 serveWeb:
   enabled: true
   host: 127.0.0.1
-  port: 8000
+  port: 8010
 ```
 
 执行机本地**没有**网关的 `frps.token` 文件时，**必须** `FRPS_TOKEN` 环境变量；`frpcToken()` 不会用 `nt_` 作 frps 加密 token。
@@ -217,7 +293,7 @@ docker logs -f linkagent-node
 
 ---
 
-## 5. 角色与端口（通用）
+## 6. 角色与端口（通用）
 
 | 组件 | 谁启动 | 作用 |
 |---|---|---|
@@ -232,7 +308,7 @@ docker logs -f linkagent-node
 | `9080` | APISIX 数据面 |
 | `7000` | frpc → frps（执行机需能连网关机） |
 | `7080` | APISIX → frps 上游 |
-| `8000` | 宿主机 code-server 映射（形态 B） |
+| `8010` | 宿主机 code-server 映射（形态 B，容器内 8080） |
 
 **Windows（非开发 / 生产式）**：
 
@@ -249,7 +325,7 @@ docker logs -f linkagent-node
 
 ---
 
-## 6. 常见问题
+## 7. 常见问题
 
 | 现象 | 排查 |
 |---|---|
@@ -262,10 +338,11 @@ docker logs -f linkagent-node
 
 ---
 
-## 7. 相关文档
+## 8. 相关文档
 
 | 文档 | 内容 |
 |---|---|
+| [`local-stack-enhance.md`](local-stack-enhance.md) | Local `local:stack:start` / `start:enhance` 服务、端口、浏览器 URL |
 | [`edge-frpc-apisix.md`](edge-frpc-apisix.md) | Host/路径、frpc 登记表、APISIX 路由表 |
 | [`edge-startup.md`](edge-startup.md) | 工具下载、nat-tunnel（补充） |
 | [`deployment.md`](deployment.md) | 网关/node 部署总览 |

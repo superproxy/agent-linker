@@ -146,12 +146,12 @@ export class TaskService {
    * 当前任务变了：激活、新建并激活、或删掉激活项后落到另一项。
    * 只通知远程节点且已有 cwd 的任务。本机 local 与缺目录的不发。
    */
-  setTaskSwitchHandler(handler: (task: TaskItem) => void): void {
+  setTaskSwitchHandler(handler: (task: TaskItem, ctx: { ownerUsername?: string }) => void): void {
     this.taskSwitch = handler;
   }
 
   private hostChange?: (change: { taskId: string; name: string; enabled: boolean; removed?: boolean }) => void;
-  private taskSwitch?: (task: TaskItem) => void;
+  private taskSwitch?: (task: TaskItem, ctx: { ownerUsername?: string }) => void;
 
   private notifyHost(task: { id: string; name: string }, enabled: boolean, removed = false): void {
     try {
@@ -161,15 +161,42 @@ export class TaskService {
     }
   }
 
-  private notifyTaskSwitch(task: TaskItem): void {
-    const nodeId = task.nodeId?.trim();
-    if (!nodeId || nodeId === LOCAL_NODE_ID) return;
+  private notifyTaskSwitch(task: TaskItem, ownerUsername?: string): void {
     if (!task.cwd?.trim()) return;
     try {
-      this.taskSwitch?.(task);
+      this.taskSwitch?.(task, { ownerUsername });
     } catch (err) {
       console.error(`[tasks] 下发切换任务失败：${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** 节点上线时把该属主当前激活任务同步到 IDE（5173/dev、code-server、vnc）。 */
+  syncIdeForNode(nodeId: string, ownerUsername: string | undefined): void {
+    let owner = ownerUsername?.trim();
+    if (!owner) owner = this.firstWebActiveTaskOwner();
+    if (!owner) return;
+    const state = this.ensureLoginSpace(owner);
+    const active = state.tasks.find((t) => t.id === state.activeTaskId) ?? state.tasks[0];
+    if (!active?.cwd?.trim()) return;
+    try {
+      this.taskSwitch?.(active, { ownerUsername: owner });
+    } catch (err) {
+      console.error(`[tasks] 节点 ${nodeId} IDE 同步失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** 无属主 node 上线时，取任一 web 登录空间当前激活且带 cwd 的任务属主。 */
+  private firstWebActiveTaskOwner(): string | undefined {
+    for (const meta of this.store.list()) {
+      if (meta.channel !== LOGIN_TASK_CHANNEL) continue;
+      const owner = (meta.ownerUsername ?? meta.userId).trim();
+      if (!owner) continue;
+      const state = this.store.read(LOGIN_TASK_CHANNEL, meta.userId, meta.ownerUsername ?? meta.userId);
+      if (!state) continue;
+      const active = state.tasks.find((t) => t.id === state.activeTaskId) ?? state.tasks[0];
+      if (active?.cwd?.trim()) return owner;
+    }
+    return undefined;
   }
 
   /**
@@ -469,7 +496,7 @@ export class TaskService {
     this.store.write(state);
     this.syncSkillFiles(state);
     this.notifyHost(task, task.keyEnabled !== false);
-    this.notifyTaskSwitch(task);
+    this.notifyTaskSwitch(task, this.workspaceOwner(state));
     return task;
   }
 
@@ -505,7 +532,7 @@ export class TaskService {
     this.store.write(state);
     this.syncSkillFiles(state);
     this.notifyHost(task, task.keyEnabled !== false);
-    this.notifyTaskSwitch(task);
+    this.notifyTaskSwitch(task, this.workspaceOwner(state));
     return task;
   }
 
@@ -628,7 +655,7 @@ export class TaskService {
     if (!task) throw new Error(`任务不存在: ${id}`);
     state.activeTaskId = task.id;
     this.store.write(state);
-    this.notifyTaskSwitch(task);
+    this.notifyTaskSwitch(task, this.workspaceOwner(state));
     return task;
   }
 
@@ -645,7 +672,7 @@ export class TaskService {
     this.notifyHost(task, false, true);
     if (wasActive) {
       const next = state.tasks.find((t) => t.id === state.activeTaskId);
-      if (next) this.notifyTaskSwitch(next);
+      if (next) this.notifyTaskSwitch(next, this.workspaceOwner(state));
     }
     return state.tasks;
   }

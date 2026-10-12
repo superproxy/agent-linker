@@ -79,7 +79,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 - **单向分层**：`api → service → store`；共享契约放 `shared/src`，不重复定义；持久化复用 `gateway/store/` KV，不新造裸文件读写。
 - **鉴权**统一走 `users/auth.ts` 的 `AuthGuard`，不在 handler 内另判凭据；新增凭据类型需同步 auth/me、store/api、shared、测试（凭据分级见 `docs/architecture.md`）。
 - 错误用 `openaiError(...)`（/v1）或 `errBody(...)`（管理接口）；密码 scrypt 加盐，不提交明文密钥。
-- 安装根布局：**`config/`**（yaml，`build:dist` 会生成 dist 内目录及 `*.template`）、**`scripts/`**、dist **`bin/`**；可选 `bash scripts/config-init.sh`（不依赖 pnpm）；legacy 路径仅兜底；`.runtime-state/` 不入库；`.codebuddy/` **不要删除**。
+- 安装根布局：**`config/`**（yaml，`build:dist` 会生成 dist 内目录及 `*.template`）、dist **`bin/`**（进程）+ **`scripts/`**（运维）；仓库 `scripts/` 前缀见 [`scripts/README.md`](scripts/README.md)；可选 `bash scripts/ops-config-init.sh`；legacy 路径仅兜底；`.runtime-state/` 不入库；`.codebuddy/` **不要删除**。
 - **新增功能必须补测试**，重构后保持全量通过。
 
 ## 开发流程（强制）
@@ -115,6 +115,7 @@ pnpm --filter @linkagent/web build    # 前端构建
 | [`docs/faq.md`](docs/faq.md) | 常用命令、测试方法、TS/ESM 坑、错误与密钥处理、已知遗留 |
 | [`docs/design.md`](docs/design.md) / [`docs/deployment.md`](docs/deployment.md) | 设计记录 / 部署与升级（`scripts/server-install-update.sh`） |
 | [`docs/edge-startup.md`](docs/edge-startup.md) | 网关 nginx / frps 与 nat-tunnel 启动顺序、端口和令牌 |
+| [`docs/local-stack-enhance.md`](docs/local-stack-enhance.md) | 本机 `local:stack:start` / `start:enhance` 服务与地址速查 |
 | [`docs/edge-apisix-node.md`](docs/edge-apisix-node.md) | APISIX/frps 启动顺序、本机与远程 node frpc 注入配置 |
 | [`docs/edge-frpc-apisix.md`](docs/edge-frpc-apisix.md) | frpc 登记到 frps 的流程，以及 APISIX 的 web / code / vnc 路由 |
 | [`docs/pi.md`](docs/pi.md) | Pi 模型模板、云机自装、`pi-sandbox`（无 Docker）与缺 `rg`/`socat` 排障 |

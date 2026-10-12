@@ -26,7 +26,7 @@ linkagent_sync_publish_to_install() {
   for entry in "$package"/*; do
     base="$(basename "$entry")"
     case "$base" in
-      config|.runtime-state) continue ;;
+      config|.runtime-state|lib) continue ;;
       node_modules)
         if [ "$skip_npm" = 1 ] && [ -d "$install/node_modules" ]; then
           continue

@@ -212,6 +212,21 @@ export class NodeManager {
    * 通知已准入节点切换当前任务。节点不在线或未准入时返回 false，不抛错。
    * 不带 processes 时，节点用本机 node.taskProcesses 的命令，在这次的 cwd 里启动。
    */
+  /** 已准入在线、且属主为 ownerUsername 的节点 id（用于 IDE/dev 跟随激活任务）。 */
+  listOnlineNodeIdsForOwner(ownerUsername: string | undefined): string[] {
+    const owner = ownerUsername?.trim();
+    if (!owner) return [];
+    const out: string[] = [];
+    for (const [nodeId, conn] of this.connections) {
+      if (!conn.approved) continue;
+      const rec = this.registry.get(nodeId);
+      if (rec?.ownerUsername === owner) out.push(nodeId);
+      // 本机 PM node 常无 nu_ 属主；仍向该执行面下发 IDE switchTask（单租户 local enhance）。
+      else if (!rec?.ownerUsername?.trim()) out.push(nodeId);
+    }
+    return out;
+  }
+
   switchTask(
     nodeId: string,
     msg: { taskId: string; cwd: string; processes?: { id: string; command: string[] }[] },

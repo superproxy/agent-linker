@@ -206,19 +206,25 @@ export const nodeSectionSchema = z
         image: z.string().min(1).default(LINKAGENT_CODE_SERVER_IMAGE),
         /** 发布到宿主机的地址，供网关本机 nginx 反代 */
         host: z.string().default('127.0.0.1'),
-        port: z.number().int().positive().default(8000),
+        port: z.number().int().positive().default(8010),
         /** 必须与网关前缀一致 */
         basePath: z.string().default('/vibe-ide'),
         /** 挂进 IDE 的目录；空则用安装根 */
         workspace: z.string().default(''),
+        /**
+         * true：node_modules 随 workspace  bind mount（本机已在宿主机 npm install 时用）。
+         * false（默认）：独立 Docker 卷，避免 Linux 容器写 Windows node_modules；全容器 node 时保持 false 并在容器内 install。
+         */
+        useHostNodeModules: z.boolean().default(false),
       })
       .default({
         enabled: false,
         image: LINKAGENT_CODE_SERVER_IMAGE,
         host: '127.0.0.1',
-        port: 8000,
+        port: 8010,
         basePath: '/vibe-ide',
         workspace: '',
+        useHostNodeModules: false,
       }),
   })
   .default({
@@ -232,9 +238,10 @@ export const nodeSectionSchema = z
       enabled: false,
       image: LINKAGENT_CODE_SERVER_IMAGE,
       host: '127.0.0.1',
-      port: 8000,
+      port: 8010,
       basePath: '/vibe-ide',
       workspace: '',
+      useHostNodeModules: false,
     },
   });
 export type NodeSection = z.infer<typeof nodeSectionSchema>;

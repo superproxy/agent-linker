@@ -228,7 +228,7 @@ function main() {
   if (cmd === 'stop') {
     const status = containerStatus(CONTAINER_NAME);
     if (!status) {
-      console.log('节点未在运行');
+      console.log('Docker 模式节点未在运行');
       process.exit(0);
     }
     const res = runDocker(['rm', '-f', CONTAINER_NAME], false);
@@ -236,7 +236,7 @@ function main() {
       console.error((res.stderr || res.stdout).trim());
       process.exit(res.status);
     }
-    console.log('节点已停止');
+    console.log('Docker 模式节点已停止');
     process.exit(0);
   }
   if (cmd === 'restart') {

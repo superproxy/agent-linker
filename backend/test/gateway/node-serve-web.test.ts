@@ -5,15 +5,15 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { nodeSectionSchema, LINKAGENT_CODE_SERVER_IMAGE } from '@linkagent/shared';
-import { adapterResponseHeaders, rewriteSaasLocalPath, rewriteSaasRedirect } from '../../src/node/saas-path.js';
-import { frpcToken, nodeServeWebSuppressed, publishSaasFrpc, renderIdeCompose, renderSaasWorkspaceFrpc, renderWorkspaceFrpc, serveWebDockerArgs, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
+import { adapterResponseHeaders, closeSaasLocalAdapters, rewriteSaasLocalPath, rewriteSaasRedirect } from '../../src/node/saas-path.js';
+import { frpcToken, nodeServeWebSuppressed, publishSaasFrpc, renderIdeCompose, renderSaasWorkspaceFrpc, renderWorkspaceFrpc, serveWebDockerArgs, stackEnhanceIdeEnabled, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
 import { renderEmbeddedHttpFrpc } from '../../../code-server/render-frpc.mjs';
 
 const enabled = {
   enabled: true,
   image: LINKAGENT_CODE_SERVER_IMAGE,
   host: '127.0.0.1',
-  port: 8000,
+  port: 8010,
   basePath: '/vibe-ide/',
   workspace: '',
 };
@@ -23,7 +23,7 @@ test('node.serveWeb 缺省关闭', () => {
   assert.equal(node.serveWeb.enabled, false);
   assert.deepEqual(node.taskProcesses, []);
   assert.equal(node.serveWeb.image, LINKAGENT_CODE_SERVER_IMAGE);
-  assert.equal(node.serveWeb.port, 8000);
+  assert.equal(node.serveWeb.port, 8010);
 });
 
 test('renderIdeCompose：只发布 code-server 到回环地址', () => {
@@ -36,13 +36,21 @@ test('renderIdeCompose：只发布 code-server 到回环地址', () => {
   assert.ok(doc.services['code-serve-web']?.command?.includes('*.localhost:9080'));
   assert.ok(doc.services['code-serve-web']?.command?.includes('/root/workspace'));
   assert.deepEqual(doc.services['code-serve-web']?.ports, [
-    '127.0.0.1:8000:8080',
+    '127.0.0.1:8010:8080',
     '127.0.0.1:5173:5173',
     '127.0.0.1:6080:6080',
   ]);
   assert.match(renderIdeCompose(enabled, 'D:\\work\\repo'), /D:\/work\/repo:\/root\/workspace/);
   assert.match(renderIdeCompose(enabled, 'D:/work/repo'), /linkagent-code-node-modules:\/root\/workspace\/node_modules/);
   assert.equal(doc.services['ide-proxy'], undefined);
+});
+
+test('renderIdeCompose：useHostNodeModules 时不挂独立 node_modules 卷', () => {
+  const withHost = { ...enabled, useHostNodeModules: true };
+  const text = renderIdeCompose(withHost, 'D:/work/repo');
+  assert.doesNotMatch(text, /linkagent-code-node-modules/);
+  const doc = parse(text) as { volumes?: Record<string, unknown> };
+  assert.equal(doc.volumes, undefined);
 });
 
 test('startNodeServeWeb：启用时写 compose 并执行 docker compose up，停止时 down', () => {
@@ -65,22 +73,60 @@ test('startNodeServeWeb：启用时写 compose 并执行 docker compose up，停
   );
   assert.deepEqual(calls[0], serveWebDockerArgs(join(dir, 'compose.yml'), 'up'));
   const compose = readFileSync(join(dir, 'compose.yml'), 'utf8');
-  assert.match(compose, /127\.0\.0\.1:8000:8080/);
+  assert.match(compose, /127\.0\.0\.1:8010:8080/);
   assert.doesNotMatch(compose, /nginx/);
   handle.stop();
   assert.deepEqual(calls[1], serveWebDockerArgs(join(dir, 'compose.yml'), 'down'));
 });
 
-test('renderWorkspaceFrpc：ide、dev 与 VNC 都登记到 frps', () => {
-  const text = renderWorkspaceFrpc('abc');
-  assert.match(text, /serverAddr = "host\.docker\.internal"/);
-  assert.match(text, /customDomains = \["ide\.localhost"\]/);
-  assert.match(text, /customDomains = \["dev\.localhost"\]/);
-  assert.match(text, /customDomains = \["vnc\.localhost"\]/);
-  assert.match(text, /localPort = 8080/);
-  assert.match(text, /localPort = 5173/);
-  assert.match(text, /localPort = 6080/);
+test('startNodeServeWeb：switchTask 重建 compose 并 force-recreate', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ide-proxy-'));
+  const calls: string[][] = [];
+  const child = (): ServeWebChild => ({
+    killed: false,
+    exitCode: null,
+    kill() {
+      return true;
+    },
+    on() {},
+  });
+  const handle = startNodeServeWeb(
+    { serveWeb: enabled, workspaceDir: 'D:/work/a', runtimeDir: dir },
+    (_command, args) => {
+      calls.push(args);
+      return child();
+    },
+  );
+  handle.switchTask('t_1', 'D:/work/b');
+  assert.ok(calls.some((args) => args.includes('--force-recreate')));
+  const compose = readFileSync(join(dir, 'compose.yml'), 'utf8');
+  assert.match(compose, /D:\/work\/b:\/root\/workspace/);
+  assert.match(compose, /current-task:\/etc\/linkagent\/current-task/);
+  assert.equal(readFileSync(join(dir, 'current-task'), 'utf8').trim(), 't_1');
+});
+
+test('renderWorkspaceFrpc：默认 ide.localhost 走路径 locations', () => {
+  const text = renderWorkspaceFrpc('abc', { taskId: 't_1' });
+  assert.match(text, /serverAddr = "127\.0\.0\.1"/);
+  assert.match(renderWorkspaceFrpc('abc', { serverAddr: 'host.docker.internal', taskId: 't_1' }), /serverAddr = "host\.docker\.internal"/);
+  assert.equal(text.match(/customDomains = \["ide\.localhost"\]/g)?.length, 3);
+  assert.match(text, /locations = \["\/t_1-code"\]/);
+  assert.match(text, /localPort = 18080/);
   assert.throws(() => renderWorkspaceFrpc(''), /无效/);
+});
+
+test('renderWorkspaceFrpc：legacy 三 Host', () => {
+  const prev = process.env.LINKAGENT_FRPC_LEGACY_HOSTS;
+  process.env.LINKAGENT_FRPC_LEGACY_HOSTS = '1';
+  try {
+    const text = renderWorkspaceFrpc('abc');
+    assert.match(text, /customDomains = \["dev\.localhost"\]/);
+    assert.match(text, /localPort = 5173/);
+    assert.doesNotMatch(text, /locations/);
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_FRPC_LEGACY_HOSTS;
+    else process.env.LINKAGENT_FRPC_LEGACY_HOSTS = prev;
+  }
 });
 
 test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
@@ -120,7 +166,8 @@ test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
     '/t_41db7238-code/?folder=/root/workspace',
   );
   assert.equal(rewriteSaasRedirect('code', 't_41db7238', '/t_41db7238-code', '/stable/app.js'), '/t_41db7238-code/stable/app.js');
-  assert.throws(() => renderSaasWorkspaceFrpc('abc', { publicHost: 'dev.localhost', taskId: 't_1' }), /公网域名无效/);
+  assert.match(renderSaasWorkspaceFrpc('abc', { publicHost: 'ide.localhost', taskId: 't_1' }), /locations = \["\/t_1-code"\]/);
+  assert.throws(() => renderSaasWorkspaceFrpc('abc', { publicHost: 'dev.localhost', taskId: 't_1' }), /浏览器入口域名无效/);
   assert.throws(() => renderSaasWorkspaceFrpc('abc', { publicHost: 'hubide.ljyd.cn', taskId: 'a/b' }), /taskId 无效/);
 });
 
@@ -141,7 +188,7 @@ test('frpcToken：nt_ 不能当作 frpc 加密令牌', () => {
   }
 });
 
-test('publishSaasFrpc：按任务改写路径，本机域名不改', () => {
+test('publishSaasFrpc：按任务改写路径（含 ide.localhost）', () => {
   const dir = mkdtempSync(join(tmpdir(), 'saas-frpc-'));
   const file = join(dir, 'frpc.toml');
   writeFileSync(file, 'auth.token = "abc"\nserverAddr = "10.0.0.8"\n', 'utf8');
@@ -154,6 +201,7 @@ test('publishSaasFrpc：按任务改写路径，本机域名不改', () => {
   try {
     publishSaasFrpc('t_41db7238', file);
   } finally {
+    closeSaasLocalAdapters();
     if (prevHost === undefined) delete process.env.LINKAGENT_PUBLIC_HOST;
     else process.env.LINKAGENT_PUBLIC_HOST = prevHost;
     if (prevAddr === undefined) delete process.env.FRPS_SERVER_ADDR;
@@ -165,22 +213,45 @@ test('publishSaasFrpc：按任务改写路径，本机域名不改', () => {
   assert.match(text, /serverAddr = "150\.5\.140\.64"/);
   assert.match(text, /locations = \["\/t_41db7238-code"\]/);
   assert.doesNotMatch(text, /localhost/);
-  process.env.LINKAGENT_PUBLIC_HOST = 'dev.localhost';
-  writeFileSync(file, 'keep\n', 'utf8');
+  delete process.env.LINKAGENT_PUBLIC_HOST;
+  publishSaasFrpc('default', file);
+  const local = readFileSync(file, 'utf8');
+  assert.match(local, /customDomains = \["ide\.localhost"\]/);
+  assert.match(local, /locations = \["\/default-code"\]/);
   publishSaasFrpc('t_41db7238', file);
-  assert.equal(readFileSync(file, 'utf8'), 'keep\n');
+  const after = readFileSync(file, 'utf8');
+  assert.match(after, /serverAddr = "10\.0\.0\.8"/);
+  assert.match(after, /locations = \["\/t_41db7238-code"\]/);
+  closeSaasLocalAdapters();
 });
 
 test('startNodeServeWeb：有 frps 令牌时挂上 frpc 配置', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ide-proxy-'));
   writeFileSync(join(dir, 'frps.token'), 'abc\n');
-  startNodeServeWeb(
-    { serveWeb: enabled, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
-    () => ({ killed: false, exitCode: null, kill: () => true, on() {} }),
-  );
+  const prevServeWeb = process.env.LINKAGENT_NODE_SERVE_WEB;
+  const prevEnhance = process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+  delete process.env.LINKAGENT_NODE_SERVE_WEB;
+  delete process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+  let handle: ReturnType<typeof startNodeServeWeb> | undefined;
+  try {
+    handle = startNodeServeWeb(
+      { serveWeb: enabled, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
+      () => ({ killed: false, exitCode: null, kill: () => true, on() {} }),
+    );
+  } finally {
+    handle?.stop();
+    closeSaasLocalAdapters();
+    if (prevServeWeb === undefined) delete process.env.LINKAGENT_NODE_SERVE_WEB;
+    else process.env.LINKAGENT_NODE_SERVE_WEB = prevServeWeb;
+    if (prevEnhance === undefined) delete process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+    else process.env.LINKAGENT_LOCAL_STACK_ENHANCE = prevEnhance;
+  }
   const compose = readFileSync(join(dir, 'compose.yml'), 'utf8');
   const frpc = readFileSync(join(dir, 'frpc.toml'), 'utf8');
-  assert.match(compose, /frpc\.toml:\/etc\/linkagent\/frpc\.toml:ro/);
+  assert.doesNotMatch(compose, /frpc\.toml:\/etc\/linkagent\/frpc\.toml/);
+  assert.match(frpc, /serverAddr = "127\.0\.0\.1"/);
+  assert.match(frpc, /localPort = 18080/);
+  assert.match(frpc, /locations = \["\/default-code"\]/);
   assert.match(frpc, /name = "workspace-ide"/);
   assert.match(frpc, /name = "workspace-dev"/);
   assert.match(frpc, /name = "workspace-vnc"/);
@@ -282,6 +353,40 @@ test('renderEmbeddedHttpFrpc：code-server、dev 与 VNC 三条 HTTP', () => {
   assert.match(text, /localPort = 6080/);
   assert.match(text, /customDomains = \["box-vnc\.localhost"\]/);
   assert.throws(() => renderEmbeddedHttpFrpc({ token: '' }), /无效/);
+});
+
+test('stackEnhanceIdeEnabled：local:stack enhance 环境变量', () => {
+  const prev = process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+  delete process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+  assert.equal(stackEnhanceIdeEnabled(), false);
+  process.env.LINKAGENT_LOCAL_STACK_ENHANCE = '1';
+  assert.equal(stackEnhanceIdeEnabled(), true);
+  if (prev === undefined) delete process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+  else process.env.LINKAGENT_LOCAL_STACK_ENHANCE = prev;
+});
+
+test('startNodeServeWeb：enhance 时未 enabled 也 compose', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ide-proxy-'));
+  writeFileSync(join(dir, 'frps.token'), 'abc\n');
+  const prev = process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+  process.env.LINKAGENT_LOCAL_STACK_ENHANCE = '1';
+  const calls: string[][] = [];
+  let handle: ReturnType<typeof startNodeServeWeb> | undefined;
+  try {
+    handle = startNodeServeWeb(
+      { serveWeb: { ...enabled, enabled: false }, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
+      (_c, args) => {
+        calls.push(args);
+        return { killed: false, exitCode: null, kill: () => true, on() {} };
+      },
+    );
+    assert.ok(calls.some((a) => a.includes('up')));
+  } finally {
+    handle?.stop();
+    closeSaasLocalAdapters();
+    if (prev === undefined) delete process.env.LINKAGENT_LOCAL_STACK_ENHANCE;
+    else process.env.LINKAGENT_LOCAL_STACK_ENHANCE = prev;
+  }
 });
 
 test('startNodeServeWeb：未启用时不调用 docker', () => {

@@ -5,6 +5,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { psScriptPath, shellScriptPath } from "./lib/shell-entry.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -34,10 +35,10 @@ const isWin = process.platform === "win32";
 const child = isWin
   ? spawn(
       "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(dir, "edge.ps1"), ...args],
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScriptPath(dir, "edge"), ...args],
       { stdio: "inherit", windowsHide: false },
     )
-  : spawn("bash", [path.join(dir, "edge.sh"), ...args], { stdio: "inherit" });
+  : spawn("bash", [shellScriptPath(dir, "edge"), ...args], { stdio: "inherit" });
 
 child.on("error", (err) => {
   console.error(err.message);

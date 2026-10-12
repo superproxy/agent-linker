@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
-import { isSaasPublicHost, type GatewayToNode, type NodeAgentInfo, type NodeToGateway, type NodeTurnEvent } from '@linkagent/shared';
+import {
+  useFrpTaskPathRouting,
+  TASK_PUBLIC_HOST,
+  type GatewayToNode,
+  type NodeAgentInfo,
+  type NodeToGateway,
+  type NodeTurnEvent,
+} from '@linkagent/shared';
 import {
   defaultAgentDefinitions,
   findNodeAgentEntry,
@@ -15,7 +22,7 @@ import type { NodeAgentListItem } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { loadNodeConnectorEnvFiles } from './env-load.js';
-import { publishSaasFrpc, startNodeServeWeb } from './serve-web.js';
+import { publishSaasFrpc, stackEnhanceIdeEnabled, startNodeServeWeb } from './serve-web.js';
 import {
   resolveNodeTaskCwd,
   resolveTaskSwitchProcesses,
@@ -76,6 +83,8 @@ interface ConnectorOptions {
   nodeAgentConfigs: NodeAgentListItem[];
   /** node.taskProcesses。switchTask 未带 processes 时用这份命令。 */
   taskProcesses?: TaskProcessSpec[];
+  /** 单机 Docker IDE：切换激活任务时重建 dev / code-server / vnc。 */
+  switchIdeTask?: (taskId: string, cwd: string) => void;
   stateDir: string;
 }
 
@@ -145,7 +154,8 @@ class NodeConnector {
   /** 容器启动时按 LINKAGENT_TASK_ID 登记 SaaS 路径并拉起 dev。网关稍后 switchTask 会再换任务。 */
   bootTask(taskId: string, cwd: string): void {
     const id = taskId.trim();
-    if (!id || !isSaasPublicHost(process.env.LINKAGENT_PUBLIC_HOST)) return;
+    const entryHost = (process.env.LINKAGENT_PUBLIC_HOST?.trim() || TASK_PUBLIC_HOST);
+    if (!id || !useFrpTaskPathRouting(entryHost)) return;
     publishSaasFrpc(id);
     const processes = resolveTaskSwitchProcesses(this.opts.taskProcesses ?? [], undefined);
     if (processes.length === 0) return;
@@ -251,6 +261,7 @@ class NodeConnector {
           if (!this.admitted) return;
           try {
             const cwd = resolveNodeTaskCwd(msg.cwd, process.env.LINKAGENT_NODE_WORKSPACE, msg.taskId);
+            this.opts.switchIdeTask?.(msg.taskId, cwd);
             const processes = resolveTaskSwitchProcesses(this.opts.taskProcesses ?? [], msg.processes);
             this.taskProcesses.switchTo(msg.taskId, cwd, processes);
             publishSaasFrpc(msg.taskId);
@@ -450,6 +461,19 @@ function main(): void {
     }
   }
   const claimToken = process.env.LINKAGENT_NODE_CLAIM?.trim() || undefined;
+  const ideProxyDir = layout.state('ide-proxy');
+  const hostFrpcFile = join(ideProxyDir, 'frpc.toml');
+  if (!process.env.LINKAGENT_FRPC_PATH?.trim()) {
+    process.env.LINKAGENT_FRPC_PATH = hostFrpcFile;
+  }
+  const serveWebWorkspace = config.node.serveWeb.workspace?.trim();
+  const enhanceIde = stackEnhanceIdeEnabled();
+  const serveWeb = startNodeServeWeb({
+    serveWeb: config.node.serveWeb,
+    workspaceDir: serveWebWorkspace || (enhanceIde ? '' : layout.root),
+    runtimeDir: ideProxyDir,
+    frpsTokenFile: layout.state('edge', 'frps.token'),
+  });
   const connector = new NodeConnector({
     gatewayUrl: args.gatewayUrl ?? runtime.gatewayUrl,
     ...(token ? { token } : {}),
@@ -458,22 +482,19 @@ function main(): void {
       args.name ??
       (process.env.LINKAGENT_NODE_NAME?.trim() || config.node.name || `node-${hostname()}`),
     nodeId: envNodeId || loadPersistedNodeId(stateDir),
-    // 配置了网关令牌时无需 secret；否则读取审批模式持久化的节点凭证
     ...(token ? {} : { secret: loadPersistedSecret(stateDir) }),
     agents,
     nodeAgentConfigs: config.node.agents,
     taskProcesses: taskProcessesFromConfig(config.node.taskProcesses, process.env.LINKAGENT_DEV_BY_NODE),
+    switchIdeTask: (taskId, cwd) => {
+      serveWeb.switchTask(taskId, cwd);
+    },
     stateDir,
   });
   connector.start();
-  const serveWeb = startNodeServeWeb({
-    serveWeb: config.node.serveWeb,
-    workspaceDir: config.node.serveWeb.workspace || layout.root,
-    runtimeDir: layout.state('ide-proxy'),
-    frpsTokenFile: layout.state('edge', 'frps.token'),
-  });
   const bootTask = process.env.LINKAGENT_TASK_ID?.trim() ?? '';
-  if (bootTask && isSaasPublicHost(process.env.LINKAGENT_PUBLIC_HOST)) {
+  const entryHost = process.env.LINKAGENT_PUBLIC_HOST?.trim() || TASK_PUBLIC_HOST;
+  if (bootTask && useFrpTaskPathRouting(entryHost)) {
     const workspace = process.env.LINKAGENT_NODE_WORKSPACE;
     connector.bootTask(bootTask, resolveNodeTaskCwd(workspace ?? '', workspace, bootTask));
   }

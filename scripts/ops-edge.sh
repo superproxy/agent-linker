@@ -3,13 +3,19 @@
 #   scripts/edge.sh start|stop|restart|status|log|build
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=lib/install-root.sh
 . "$REPO/scripts/lib/install-root.sh"
 ROOT="$(linkagent_install_root "$REPO")"
 export LINKAGENT_HOME="${LINKAGENT_HOME:-$ROOT}"
 RUNTIME="$ROOT/.runtime-state/edge"
-COMPOSE_FILE="$ROOT/scripts/edge/docker-compose.yaml"
+if [ -d "$SCRIPT_DIR/ops-edge" ]; then
+  EDGE_ASSETS="$SCRIPT_DIR/ops-edge"
+else
+  EDGE_ASSETS="$SCRIPT_DIR/edge"
+fi
+COMPOSE_FILE="$EDGE_ASSETS/docker-compose.yaml"
 export LINKAGENT_EDGE_DIR="$RUNTIME"
 FRPS_PID="$RUNTIME/frps.pid"
 FRPS_LOG="$RUNTIME/frps.log"
@@ -83,8 +89,8 @@ start_apisix() {
 }
 
 build_apisix() {
-  if [ ! -f "$ROOT/scripts/edge/Dockerfile" ]; then
-    echo "缺少 $ROOT/scripts/edge/Dockerfile" >&2
+  if [ ! -f "$EDGE_ASSETS/Dockerfile" ]; then
+    echo "缺少 $EDGE_ASSETS/Dockerfile" >&2
     return 1
   fi
   echo "→ 构建镜像 linkagent-apisix:local"

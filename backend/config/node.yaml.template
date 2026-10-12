@@ -18,10 +18,13 @@ agents:
 #   - id: dev
 #     command: [npm, run, dev, --, --host, 0.0.0.0, --port, 5173, --strictPort]
 
-# node 只拉起本仓库构建的 code-server，发布到 127.0.0.1:8000。先执行 pnpm image:code-server。
+# 默认 false（原生 frpc）；浏览器 IDE 用 pnpm local:stack:enhance 或 enabled: true + pnpm image:code-server。
+# 桌面 VS Code/Cursor 直接打开 workspace，不经过此开关。
 serveWeb:
-  enabled: true
+  enabled: false
   image: linkagent-code-server:local
   host: 127.0.0.1
-  port: 8000
+  port: 8010
   basePath: /vibe-ide
+  # 本机已在 workspace 目录 npm install（含私服包）时设为 true；全容器 node 保持 false（默认）
+  # useHostNodeModules: true

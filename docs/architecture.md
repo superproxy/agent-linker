@@ -47,7 +47,9 @@
 │   ├── node.yaml             # 本机 node 连接器 / serveWeb 等
 │   ├── *.template            # dist 构建附带，供 config-init 重置
 │   └── pi-agent/             # setup:pi 模板（非进程 yaml）
-├── scripts/                  # edge.sh、config-init.sh、setup-pi…
+├── scripts/                  # 装好后运维：edge.sh、config-init、setup-pi…（不含 install）
+├── lib/                      # 仅发布包内 ./install.sh 依赖；同步到运行目录时跳过
+├── install.sh、start.sh      # 安装 / 启停（启停走 bin/pm.mjs）
 ├── web/、dev/                # dist 静态资源
 └── .runtime-state/           # 运行态；按模块分子目录 gateway/ nodes/ pm/ edge/
 ```
