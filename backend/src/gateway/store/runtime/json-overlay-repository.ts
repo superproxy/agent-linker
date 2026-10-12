@@ -10,6 +10,7 @@ import {
   applySetAgentEnabled,
   applySetChildGateway,
   applySetDefaultTaskAgentId,
+  applySetGatewayServerPort,
   applySetWeixinMode,
   mutateOverlay,
   overlayFromYaml,
@@ -85,5 +86,9 @@ export class JsonOverlayGatewayRuntimeRepository implements GatewayRuntimeReposi
 
   setWeixinMode(mode: WeixinMode): void {
     this.persistMutation((o) => applySetWeixinMode(o, mode));
+  }
+
+  setGatewayServerPort(port: number): void {
+    this.persistMutation((o) => applySetGatewayServerPort(o, port));
   }
 }

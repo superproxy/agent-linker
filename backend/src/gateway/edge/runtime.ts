@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { FRPS_VHOST_HTTP_PORT, NGINX_LISTEN_HOST, frpAsset, nginxAsset, type FrpAsset } from './assets.js';
@@ -22,9 +22,25 @@ import {
 import { isSaasPublicHost } from '@linkagent/shared';
 import { renderFrpsConf } from './render.js';
 
+/** Docker Compose 项目名：同机多安装时避免容器栈互相覆盖（可用 LINKAGENT_EDGE_PROJECT 覆盖） */
+export function resolveEdgeComposeProject(installRoot?: string): string {
+  const fromEnv = process.env.LINKAGENT_EDGE_PROJECT?.trim();
+  if (fromEnv) {
+    const safe = fromEnv.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 48);
+    if (safe) return safe;
+  }
+  if (installRoot) {
+    const slug = basename(installRoot).replace(/[^a-zA-Z0-9_.-]/g, '-').toLowerCase();
+    if (slug) return `linkagent-edge-${slug}`;
+  }
+  return APISIX_PROJECT;
+}
+
 export interface GatewayEdgeOptions {
   toolsDir: string;
   runtimeDir: string;
+  /** 安装根，用于推导独立 compose 项目名 */
+  installRoot?: string;
   idePrefix: string;
   ideUpstream: string;
   /** {taskId}-web.localhost 转到网关 */
@@ -247,7 +263,7 @@ export async function prepareGatewayEdge(opts: GatewayEdgeOptions): Promise<Prep
     frpsConf,
     adminKey,
     adminUrl: `http://${NGINX_LISTEN_HOST}:${APISIX_ADMIN_PORT}`,
-    composeProject: APISIX_PROJECT,
+    composeProject: resolveEdgeComposeProject(opts.installRoot),
   };
 }
 

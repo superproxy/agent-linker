@@ -18,6 +18,7 @@ async function main(): Promise<void> {
   const { config } = loadSharedConfig(layout.configFile, layout.state('gateway'));
   const { host, port } = config.gateway.server;
   const prepared = await prepareGatewayEdge({
+    installRoot: layout.root,
     toolsDir: layout.state('tools'),
     runtimeDir: layout.state('edge'),
     idePrefix: '/',

@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import {
   createInstallLayout,
   defaultInstallRoot,
+  findInstallRoot,
+  looksLikeInstallRoot,
   resolveRepoInstallRoot,
 } from '../../src/install/layout.js';
 
@@ -85,6 +87,68 @@ test('configFile：dist 形态选中 config/gateway.yaml', () => {
   writeFileSync(join(root, 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
   const layout = createInstallLayout(root);
   assert.equal(layout.configFile, join(root, 'config', 'gateway.yaml'));
+});
+
+test('looksLikeInstallRoot：monorepo 的 backend 包目录不因 legacy gateway.yaml 误判为安装根', () => {
+  const root = tmpRoot();
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - backend\n');
+  mkdirSync(join(root, 'backend', 'config'), { recursive: true });
+  writeFileSync(join(root, 'backend', 'config', 'gateway.yaml'), 'server:\n  port: 8788\n');
+  assert.equal(looksLikeInstallRoot(join(root, 'backend')), false);
+  mkdirSync(join(root, 'config'), { recursive: true });
+  writeFileSync(join(root, 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
+  assert.equal(looksLikeInstallRoot(root), true);
+});
+
+test('findInstallRoot：cwd=backend 且仅有 backend/config 时回退到 monorepo 根', () => {
+  const root = tmpRoot();
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - backend\n');
+  mkdirSync(join(root, 'backend', 'config'), { recursive: true });
+  writeFileSync(join(root, 'backend', 'config', 'gateway.yaml'), 'server:\n  port: 8788\n');
+  const prevCwd = process.cwd();
+  const prevHome = process.env.LINKAGENT_HOME;
+  delete process.env.LINKAGENT_HOME;
+  try {
+    process.chdir(join(root, 'backend'));
+    assert.equal(findInstallRoot(), root);
+  } finally {
+    process.chdir(prevCwd);
+    if (prevHome === undefined) delete process.env.LINKAGENT_HOME;
+    else process.env.LINKAGENT_HOME = prevHome;
+  }
+});
+
+test('findInstallRoot：未设 LINKAGENT_HOME 时以 cwd 为安装根', () => {
+  const root = tmpRoot();
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - backend\n');
+  mkdirSync(join(root, 'config'), { recursive: true });
+  writeFileSync(join(root, 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
+  const prevCwd = process.cwd();
+  const prevHome = process.env.LINKAGENT_HOME;
+  delete process.env.LINKAGENT_HOME;
+  try {
+    process.chdir(root);
+    assert.equal(findInstallRoot(), root);
+  } finally {
+    process.chdir(prevCwd);
+    if (prevHome === undefined) delete process.env.LINKAGENT_HOME;
+    else process.env.LINKAGENT_HOME = prevHome;
+  }
+});
+
+test('运行态目录：LINKAGENT_STATE_ROOT 可隔离多网关运行态', () => {
+  const root = tmpRoot();
+  const alt = join(root, 'state-alt');
+  const prev = process.env.LINKAGENT_STATE_ROOT;
+  process.env.LINKAGENT_STATE_ROOT = alt;
+  try {
+    const layout = createInstallLayout(root);
+    assert.equal(layout.stateRoot, alt);
+    assert.equal(layout.nodesState, join(alt, 'nodes'));
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_STATE_ROOT;
+    else process.env.LINKAGENT_STATE_ROOT = prev;
+  }
 });
 
 test('运行态目录：state() 与语义化快捷方式一致', () => {

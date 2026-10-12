@@ -35,6 +35,16 @@ function persistViaRuntime(
  * 持久化「默认任务绑定的 agent」到运行时 KV（不写 config.yaml）。
  * 返回 config 文件路径（兼容旧调用方）。
  */
+/** 端口占用自动换绑后写入运行时 overlay（不改 gateway.yaml 底稿）。 */
+export function persistGatewayServerPort(path: string, port: number, runtimeGatewayDir?: string): void {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`无效 gateway 端口：${port}`);
+  }
+  persistViaRuntime(path, runtimeGatewayDir, (store) => {
+    store.setGatewayServerPort(port);
+  });
+}
+
 export function persistDefaultTaskAgentId(path: string, agentId: string, runtimeGatewayDir?: string): string {
   const id = agentId.trim();
   if (!id) throw new Error('defaultAgentId 不能为空');

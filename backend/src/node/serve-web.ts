@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { stringify } from 'yaml';
 import { isSaasPublicHost, type NodeSection } from '@linkagent/shared';
+import { dockerExecutable } from '../gateway/edge/runtime.js';
 import { ensureSaasLocalAdapter, SAAS_DEV_LISTEN, SAAS_IDE_LISTEN, SAAS_VNC_LISTEN } from './saas-path.js';
 
 export type ServeWebConfig = NodeSection['serveWeb'];
@@ -312,15 +313,19 @@ export function startNodeServeWeb(launch: ServeWebLaunch, spawnFn: ServeWebSpawn
   const frpcFile = join(launch.runtimeDir, 'frpc.toml');
   const token = frpcToken(launch.frpsTokenFile);
   const frpcMounted = token.length > 0;
-  if (frpcMounted) writeFileSync(frpcFile, renderWorkspaceFrpc(token), { encoding: 'utf8', mode: 0o600 });
+  if (frpcMounted) {
+    writeFileSync(frpcFile, renderWorkspaceFrpc(token, frpcEndpointFromEnv()), { encoding: 'utf8', mode: 0o600 });
+  }
   writeFileSync(composeFile, renderIdeCompose(serveWeb, launch.workspaceDir, frpcMounted ? frpcFile : undefined), 'utf8');
+
+  const dockerBin = dockerExecutable() ?? 'docker';
 
   const run = (action: 'up' | 'down') => {
     try {
-      const child = spawnFn('docker', serveWebDockerArgs(composeFile, action), {
+      const child = spawnFn(dockerBin, serveWebDockerArgs(composeFile, action), {
         stdio: 'inherit',
         windowsHide: true,
-        shell: false,
+        shell: process.platform === 'win32',
       });
       child.on('error', (err) => {
         const message = err instanceof Error ? err.message : String(err);

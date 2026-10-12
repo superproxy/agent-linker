@@ -130,6 +130,13 @@ export function applyRemoveWeixinAccount(o: GatewayRuntimeOverlay, accountId: st
   o.weixin = { ...o.weixin, accounts: o.weixin.accounts.filter((x) => x !== id) };
 }
 
+export function applySetGatewayServerPort(o: GatewayRuntimeOverlay, port: number): void {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`无效 gateway 端口：${port}`);
+  }
+  o.gateway = { server: { port } };
+}
+
 export function applySetChildGateway(
   o: GatewayRuntimeOverlay,
   section: 'weixin' | 'node',

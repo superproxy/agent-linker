@@ -46,6 +46,10 @@ linkagent_install_root() {
     cd "$LINKAGENT_HOME" && pwd
     return
   fi
+  if [ -f "$(pwd)/.linkagent-root" ] || [ -f "$(pwd)/pnpm-workspace.yaml" ] || [ -f "$(pwd)/config/gateway.yaml" ] || [ -f "$(pwd)/bin/gateway.mjs" ]; then
+    pwd
+    return
+  fi
   if [ "${LINKAGENT_DEV:-}" = "1" ]; then
     echo "$repo"
     return

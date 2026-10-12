@@ -87,7 +87,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'weixin', label: '微信', icon: <MessageOutlined /> },
       { id: 'wecom', label: '企业微信', icon: <MessageOutlined /> },
       { id: 'feishu', label: '飞书', icon: <MessageOutlined /> },
-      { id: 'ide', label: '在线IDE', icon: <CodeOutlined />, adminOnly: true },
     ],
   },
   {
@@ -112,7 +111,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '工具',
     items: [
       { id: 'chat', label: '对话', icon: <MessageOutlined /> },
-      { id: 'ide', label: '在线IDE', icon: <CodeOutlined />, adminOnly: true },
+      { id: 'ide', label: '在线IDE', icon: <CodeOutlined /> },
     ],
   },
   {

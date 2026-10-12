@@ -29,6 +29,21 @@ pnpm --filter @linkagent/backend test
 
 服务/节点运维脚本：根 `pnpm server:*` 与 `pnpm node:*`（封装 `scripts/server.sh`、`scripts/node.sh`）。
 
+## 同机安装两套 gateway（不同目录、端口与进程互不干扰）
+
+**原则**：每一套是 **完整安装目录**（各自 `config/` + `.runtime-state/`）。**不用设 `LINKAGENT_HOME`**：在哪个目录里执行命令，就把 **当前工作目录（cwd）** 当作该套的安装根。
+
+| 能力 | 行为 |
+|------|------|
+| 安装根判定 | 未设 `LINKAGENT_HOME` 时：`cwd` 含 `pnpm-workspace.yaml`、`.linkagent-root`、`config/gateway.yaml` 或 `bin/gateway.mjs` 即视为安装根 |
+| 网关 HTTP 端口 | 两套 `gateway.yaml` 可都写 `8787`；后启动若占用则 **自动换随机可用端口**，并写入 **该套** `.runtime-state/gateway/overlay.json` |
+| 进程管理 | 在 **各自目录** 内执行 `pnpm dev` / `pnpm server:start`（Windows 走 `scripts/server.ps1`）/ `./start.sh start` / `pnpm pm start`；pid 与日志只在 **该套** `.runtime-state/server.pid` |
+| 开发双开 | 两个仓库克隆即可：`cd D:\agent-linker-2` 再 `pnpm dev`（与第一套目录无关） |
+| 访问地址 | 各实例后台 URL 不同；端口见启动日志或该实例 `/api/system/info` 的 `port` |
+| Edge（frps/APISIX） | 每套 edge 在各自 `.runtime-state/edge/`；Compose 项目名默认 `linkagent-edge-<目录名>`。**7000/9080 等同机只能一套**。启停与 node frpc 配置见 [`docs/edge-apisix-node.md`](edge-apisix-node.md) |
+
+**不要**在同一安装目录里起两个 gateway 进程（会抢 overlay 与用户数据）。仅在需要指向非 cwd 的安装根时才设 `LINKAGENT_HOME`。
+
 ## 怎么跑测试
 
 - **新增功能必须补测试**，重构后必须保持全量测试通过（当前基线 **190 passed**）。

@@ -19,6 +19,8 @@ export interface GatewayRuntimeRepository {
   removeWeixinAccount(accountId: string): void;
   setChildGateway(section: 'weixin' | 'node', url: string, token: string): void;
   setWeixinMode(mode: WeixinMode): void;
+  /** 端口冲突自动换绑后写入 overlay，下次启动与 channels/node 推导一致 */
+  setGatewayServerPort(port: number): void;
 }
 
 /** @deprecated 旧名，等同 {@link GatewayRuntimeRepository} */

@@ -68,4 +68,8 @@ export class SqliteGatewayRuntimeRepository implements GatewayRuntimeRepository 
   setWeixinMode(_mode: import('@linkagent/shared').WeixinMode): void {
     this.notReady();
   }
+
+  setGatewayServerPort(_port: number): void {
+    this.notReady();
+  }
 }

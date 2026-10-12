@@ -4,6 +4,10 @@ import { nodeAgentEntryId, normalizeAgentId, normalizeWeixinMode } from '@linkag
 /** 运行时层相对 config.yaml 的覆盖快照（JSON 文件或 SQLite 行集的等价物） */
 export interface GatewayRuntimeOverlay {
   version: 1;
+  /** 端口被占用自动换绑后写入，覆盖 gateway.yaml 的 server.port */
+  gateway?: {
+    server?: { port?: number };
+  };
   agents?: {
     extra?: AgentDefinition[];
     enabled?: Record<string, boolean>;
@@ -42,8 +46,15 @@ export function applyRuntimeOverlay(base: SharedConfig, overlay: GatewayRuntimeO
     return { ...a, enabled: en };
   });
 
+  const overlayPort = overlay.gateway?.server?.port;
+  const server =
+    overlayPort !== undefined && Number.isInteger(overlayPort) && overlayPort >= 1 && overlayPort <= 65535
+      ? { ...base.gateway.server, port: overlayPort }
+      : base.gateway.server;
+
   const gateway = {
     ...base.gateway,
+    server,
     agents: gatewayAgents,
     tasks: overlay.tasks?.defaultAgentId
       ? { ...base.gateway.tasks, defaultAgentId: overlay.tasks.defaultAgentId }

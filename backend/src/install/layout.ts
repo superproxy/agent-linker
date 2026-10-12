@@ -13,7 +13,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CONFIG_BASENAMES } from '@linkagent/shared';
 
@@ -48,18 +48,43 @@ export function findRepoRoot(start: string = process.cwd()): string {
   }
 }
 
+/** monorepo 下的 backend 包目录（legacy config 在 backend/config，安装根仍是仓库根） */
+function isMonorepoBackendPackageDir(dir: string): boolean {
+  const r = resolve(dir);
+  if (basename(r) !== 'backend') return false;
+  const parent = dirname(r);
+  return existsSync(join(parent, 'pnpm-workspace.yaml'));
+}
+
+/** 当前工作目录是否像一套完整安装根（同机多目录时 cd 到目标目录即可，无需 LINKAGENT_HOME） */
+export function looksLikeInstallRoot(dir: string): boolean {
+  const r = resolve(dir);
+  if (existsSync(join(r, DEPLOY_MARKER))) return true;
+  if (existsSync(join(r, INSTALL_BIN_DIR, 'gateway.mjs'))) return true;
+  if (existsSync(join(r, 'pnpm-workspace.yaml'))) return true;
+  if (existsSync(join(r, INSTALL_CONFIG_DIR, CONFIG_BASENAMES.gateway))) {
+    // pnpm --filter @linkagent/backend 时 cwd=backend/；仅有 backend/config/gateway.yaml 不能当安装根
+    if (isMonorepoBackendPackageDir(r)) return false;
+    return true;
+  }
+  return false;
+}
+
 /**
  * 定位「安装根」：独立部署产物（dist/linkagent）或仓库根（开发模式）。
  * 优先级：
  * 1. 环境变量 LINKAGENT_HOME（显式指定安装目录）
- * 2. 从本模块文件位置向上找部署 marker `.linkagent-root`
- * 3. 回退 monorepo 根（开发模式，含 pnpm-workspace.yaml）
+ * 2. **process.cwd()**（在该目录下执行 pnpm / pm / gateway 即视为安装根）
+ * 3. 从本模块文件位置向上找部署 marker `.linkagent-root`
+ * 4. 回退 monorepo 根（由 cwd 向上找 pnpm-workspace.yaml）
  *
  * 产物内所有运行态目录都相对此根解析，因此 dist 目录可整体拷贝到任意机器运行。
  */
 export function findInstallRoot(): string {
   const env = process.env.LINKAGENT_HOME?.trim();
   if (env) return resolve(env);
+  const cwd = resolve(process.cwd());
+  if (looksLikeInstallRoot(cwd)) return cwd;
   let dir = dirname(fileURLToPath(import.meta.url));
   for (;;) {
     if (existsSync(join(dir, DEPLOY_MARKER))) return dir;
@@ -70,10 +95,8 @@ export function findInstallRoot(): string {
   return resolveRepoInstallRoot(findRepoRoot());
 }
 
-/** pm / start.bat 启动时优先用 cwd（已 cd 到安装根），避免错误的 LINKAGENT_HOME 把 dist 判成 dev */
+/** 与 {@link findInstallRoot} 相同（保留别名：pm / start.bat 入口） */
 export function resolveProcessManagerRoot(): string {
-  const cwd = resolve(process.cwd());
-  if (existsSync(join(cwd, DEPLOY_MARKER))) return cwd;
   return findInstallRoot();
 }
 
@@ -193,7 +216,9 @@ export interface InstallLayout {
 export function createInstallLayout(root: string = findInstallRoot()): InstallLayout {
   const installRoot = resolve(root.trim());
   const kind: InstallKind = existsSync(join(installRoot, DEPLOY_MARKER)) ? 'dist' : 'dev';
-  const state = (...segments: string[]) => join(installRoot, STATE_DIR, ...segments);
+  const stateRootOverride = process.env.LINKAGENT_STATE_ROOT?.trim();
+  const stateBase = stateRootOverride ? resolve(stateRootOverride) : join(installRoot, STATE_DIR);
+  const state = (...segments: string[]) => join(stateBase, ...segments);
 
   // dev / dist 统一 <installRoot>/config；legacy server/config、backend/config 兜底
   const configCandidates = [
@@ -270,12 +295,15 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
 let cached: { envHome: string | undefined; layout: InstallLayout } | undefined;
 /**
  * 进程内单例（形态/根只探测一次）；测试可传 root 用 {@link createInstallLayout}。
- * 以 LINKAGENT_HOME 为缓存键：该 env 显式改变安装根时（测试隔离运行态目录）随之重建。
+ * 缓存键含 cwd：同机多套安装时切换工作目录会重建布局。
  */
 export function getLayout(): InstallLayout {
   const envHome = process.env.LINKAGENT_HOME?.trim() || undefined;
-  if (!cached || cached.envHome !== envHome) {
-    cached = { envHome, layout: createInstallLayout() };
+  const stateRoot = process.env.LINKAGENT_STATE_ROOT?.trim() || undefined;
+  const cwd = resolve(process.cwd());
+  const cacheKey = `${envHome ?? ''}\0${stateRoot ?? ''}\0${cwd}`;
+  if (!cached || cached.envHome !== cacheKey) {
+    cached = { envHome: cacheKey, layout: createInstallLayout() };
   }
   return cached.layout;
 }

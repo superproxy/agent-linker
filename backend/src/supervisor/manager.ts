@@ -21,6 +21,7 @@ import {
   type InstallLayout,
   type ProcessTargetId,
 } from '../install/layout.js';
+import { effectiveGatewayPort } from '../gateway/listen-port.js';
 import { loadSharedConfig, resolveChildRuntime, loopbackHost } from '../gateway/config.js';
 import type { SharedConfig } from '@linkagent/shared';
 import {
@@ -159,7 +160,12 @@ export class ProcessManager {
   }
 
   get baseUrl(): string {
-    return `http://${this.gw.host}:${this.gw.port}`;
+    const port = effectiveGatewayPort(
+      this.layout.state('gateway'),
+      this.gw.port,
+      readPid(this.pidFile('gateway')),
+    );
+    return `http://${this.gw.host}:${port}`;
   }
 
   pidFile(id: ProcessInstanceId): string {

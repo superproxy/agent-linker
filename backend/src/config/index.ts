@@ -27,6 +27,7 @@ export {
 } from './legacy.js';
 
 export {
+  persistGatewayServerPort,
   persistDefaultTaskAgentId,
   persistAgentEnabled,
   persistNodeAgentRegistered,

@@ -159,6 +159,10 @@ function copyPiSetup(destRoot) {
     'setup-pi.mjs',
     'setup-channels.mjs',
     'edge.sh',
+    'edge.ps1',
+    'edge.bat',
+    'edge-ctl.mjs',
+    'edge-prepare.mjs',
     'config-init.mjs',
     'config-init.sh',
     'install.sh',
@@ -455,11 +459,12 @@ async function buildFull(dist, skipInstall) {
             gateway: 'node bin/gateway.mjs',
             'setup:pi': 'node scripts/setup-pi.mjs',
             'setup:channels': 'node scripts/setup-channels.mjs',
-            'edge:start': 'bash scripts/edge.sh start',
-            'edge:stop': 'bash scripts/edge.sh stop',
-            'edge:restart': 'bash scripts/edge.sh restart',
-            'edge:status': 'bash scripts/edge.sh status',
-            'edge:build': 'bash scripts/edge.sh build',
+            'edge:start': 'node scripts/edge-ctl.mjs start',
+            'edge:stop': 'node scripts/edge-ctl.mjs stop',
+            'edge:restart': 'node scripts/edge-ctl.mjs restart',
+            'edge:status': 'node scripts/edge-ctl.mjs status',
+            'edge:log': 'node scripts/edge-ctl.mjs log',
+            'edge:build': 'node scripts/edge-ctl.mjs build',
             'config:init': 'node scripts/config-init.mjs',
           },
           dependencies: runtimeDependenciesFull(),
@@ -509,6 +514,15 @@ node bin\\pm.mjs %CMD% %TARGET%
 `,
     );
 
+    writeFileSync(
+      join(dist, 'edge.bat'),
+      `@echo off
+rem frps + APISIX（需 Docker Desktop）
+cd /d "%~dp0"
+node scripts\\edge-ctl.mjs %*
+`,
+    );
+
     writeFileSync(join(dist, 'README.md'), FULL_README);
   });
 
@@ -551,7 +565,10 @@ linkagent/
 ./start.sh start weixin # 仅操作单个进程：gateway|weixin|node
 \`\`\`
 \`\`\`bat
-start.bat               # Windows：后台启动全部；start.bat stop/status/logs
+start.bat               # Windows：后台启动 gateway/channels/node
+edge.bat build          # 首次构建 APISIX 镜像
+edge.bat start          # frps + APISIX；再 start.bat start 拉起网关
+edge.bat status
 \`\`\`
 
 进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；进程崩溃后重新执行 \`./start.sh start\` 即可。

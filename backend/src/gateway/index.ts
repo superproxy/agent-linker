@@ -13,6 +13,7 @@ import {
   persistNodeAgentRegistered,
   persistEnsureWeixinAccount,
   persistEnsureWeixinChannelGateway,
+  persistGatewayServerPort,
   persistRemoveWeixinAccount,
   resolveGatewayAuth,
   deriveGatewayBase,
@@ -20,6 +21,11 @@ import {
 import type { SharedConfig } from '@linkagent/shared';
 import { normalizeWeixinMode, resolveEdgePublic, taskIdFromPublicPath } from '@linkagent/shared';
 import { createInstallLayout, getLayout } from '../install/layout.js';
+import {
+  clearGatewayListenPort,
+  persistGatewayListenPort,
+  resolveGatewayListenPort,
+} from './listen-port.js';
 import { isVibeIdePath, proxyVibeIdeUpgrade, registerVibeIdeProxy } from './vibe-ide-proxy.js';
 import { startGatewayEdge, type GatewayEdge } from './edge/runtime.js';
 import { registerFrpPluginRoute } from './edge/frp-auth.js';
@@ -144,7 +150,11 @@ export async function buildServer(options?: {
   nodeManager: NodeManager;
   weixinBot: null;
   host: string;
+  /** 配置端口；实际 bind 可能因占用而改，见 listenPortRef */
   port: number;
+  listenPortRef: { port: number };
+  configPath: string;
+  runtimeGatewayDir: string;
   authEnabled: boolean;
   edgePublic: { publicHost: string; publicPort: number };
 }> {
@@ -176,6 +186,7 @@ export async function buildServer(options?: {
   const weixinViaChannels =
     channelGatewayEnabled || ((config.weixin.accounts?.length ?? 0) > 0 && config.weixin.enabled !== false);
   const definitions = options?.definitions ?? (gw.agents.length > 0 ? gw.agents : defaultAgentDefinitions());
+  const listenPortRef = { port: gw.server.port };
 
   // 安装布局：形态判定（dev/dist）与所有运行态路径的唯一来源
   // 测试可传 stateRoot 把运行态指到临时根（createInstallLayout 可传任意 root），避免集成测试污染真实 .runtime-state
@@ -380,7 +391,7 @@ export async function buildServer(options?: {
     }
     return {
       host: gw.server.host,
-      port: gw.server.port,
+      port: listenPortRef.port,
       authEnabled,
       token: authGuard.isAdmin(request) && authEnabled ? auth.token : '',
       defaultAgents: defaultAgentDefinitions().map((d) => ({
@@ -406,7 +417,9 @@ export async function buildServer(options?: {
     },
     server: {
       host: gw.server.host,
-      port: gw.server.port,
+      get port() {
+        return listenPortRef.port;
+      },
       authEnabled,
       authMode: auth.mode,
       sessionTtlDays: auth.sessionTtlDays,
@@ -1169,7 +1182,10 @@ export async function buildServer(options?: {
     taskService,
     weixinBot,
     host: gw.server.host,
-    port: gw.server.port,
+    port: listenPortRef.port,
+    listenPortRef,
+    configPath,
+    runtimeGatewayDir,
     authEnabled,
     edgePublic,
   };
@@ -1192,13 +1208,26 @@ function readCodeServerUpstream(nodeYamlPath: string): string {
 }
 
 async function main(): Promise<void> {
-  const { app, manager, nodeManager, taskService, host, port, authEnabled, edgePublic } = await buildServer();
+  const {
+    app,
+    manager,
+    nodeManager,
+    taskService,
+    host,
+    port: configuredPort,
+    listenPortRef,
+    configPath,
+    runtimeGatewayDir,
+    authEnabled,
+    edgePublic,
+  } = await buildServer();
   const layout = getLayout();
   let edge: GatewayEdge | null = null;
 
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, 'shutting down');
     edge?.stop();
+    clearGatewayListenPort(layout.state('gateway'));
     await nodeManager.dispose().catch(() => {});
     await manager.dispose().catch(() => {});
     await app.close().catch(() => {});
@@ -1207,8 +1236,23 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
+  const port = await resolveGatewayListenPort(host, configuredPort);
+  listenPortRef.port = port;
+  if (port !== configuredPort) {
+    persistGatewayServerPort(configPath, port, runtimeGatewayDir);
+    console.warn(
+      `[gateway] 配置端口 ${configuredPort} 已被占用，已绑定 ${port} 并写入运行时配置（.runtime-state/gateway/overlay.json）；同机多网关请在各自安装目录下分别启动（运行目录即安装根）`,
+    );
+  }
   await app.listen({ host, port });
+  persistGatewayListenPort(layout.state('gateway'), {
+    port,
+    configuredPort,
+    pid: process.pid,
+    at: Date.now(),
+  });
   edge = await startGatewayEdge({
+    installRoot: layout.root,
     toolsDir: layout.state('tools'),
     runtimeDir: layout.state('edge'),
     idePrefix: '/',

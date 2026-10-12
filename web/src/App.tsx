@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Spin } from 'antd';
+import { Button, Card, Spin, Typography } from 'antd';
 import { ApiError, AuthClient, OpsClient, type UserPublic } from './api';
 import {
   ALL_TABS,
@@ -312,7 +312,18 @@ function PageRouter(props: {
         />
       );
     case 'ide':
-      if (!isAdmin && !props.ideSession) return null;
+      if (!isAdmin && !props.ideSession) {
+        return (
+          <Card title="在线 IDE">
+            <Typography.Paragraph type="secondary">
+              普通账号需从「任务管理」中打开某个任务后再进入在线 IDE（文件与终端限定在该任务目录）。
+            </Typography.Paragraph>
+            <Button type="primary" onClick={() => props.onGoTab('tasks')}>
+              前往任务管理
+            </Button>
+          </Card>
+        );
+      }
       return (
         <IdePage
           key={props.ideSession?.taskId ?? 'global'}

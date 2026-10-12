@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Modal, Popconfirm, Space, Table, Tag } from 'antd';
+import { NodeLaunchCopyModal } from '../components/node-launch-copy-modal';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined } from '@ant-design/icons';
 import { ApiError, OpsClient, type NodeInfo, type NodeTokenInfo } from '../api';
@@ -8,6 +9,13 @@ import { notify } from '../lib/notify';
 import { CopyableCode, EmptyHint, StateTag } from '../components/common';
 import { relTime, type TabId } from '../lib/constants';
 import { NodeEnrollPanel } from './NodeEnroll';
+
+function guessGatewayUrl(port: number): string {
+  if (typeof window === 'undefined') return `ws://GATEWAY_HOST:${port}`;
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = window.location.hostname || 'GATEWAY_HOST';
+  return `${proto}://${host}:${port}`;
+}
 
 export function NodesPage(props: {
   base: string;
@@ -26,6 +34,24 @@ export function NodesPage(props: {
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showEnroll, setShowEnroll] = useState(false);
+  const [gatewayUrl, setGatewayUrl] = useState('');
+  const [launchNode, setLaunchNode] = useState<NodeInfo | null>(null);
+
+  useEffect(() => {
+    if (props.scope !== 'remote') return;
+    let alive = true;
+    void (async () => {
+      try {
+        const i = await ops.nodeEnroll();
+        if (alive) setGatewayUrl(guessGatewayUrl(i.port));
+      } catch {
+        /* 缺省仍可用当前页 host 推导 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [ops, props.scope]);
 
   const tokenByNodeId = useMemo(() => {
     const m = new Map<string, NodeTokenInfo>();
@@ -171,7 +197,7 @@ export function NodesPage(props: {
     {
       title: '操作',
       key: 'ops',
-      width: 280,
+      width: 340,
       render: (_, n) => {
         const isLocal = n.nodeId === 'local';
         const isPending = n.status === 'pending';
@@ -217,7 +243,10 @@ export function NodesPage(props: {
           );
         if (n.disabled) {
           return (
-            <Space size={6}>
+            <Space size={6} wrap>
+              <Button size="small" disabled={!gatewayUrl} onClick={() => setLaunchNode(n)}>
+                复制重启
+              </Button>
               <Button
                 size="small"
                 type="primary"
@@ -242,7 +271,10 @@ export function NodesPage(props: {
           );
         }
         return (
-          <Space size={6}>
+          <Space size={6} wrap>
+            <Button size="small" disabled={!gatewayUrl} onClick={() => setLaunchNode(n)}>
+              复制重启
+            </Button>
             <Popconfirm
               title={`停用节点「${n.name}」？`}
               description={
@@ -321,6 +353,15 @@ export function NodesPage(props: {
           }}
         />
       </Card>
+
+      <NodeLaunchCopyModal
+        open={launchNode !== null}
+        onClose={() => setLaunchNode(null)}
+        node={launchNode}
+        gatewayUrl={gatewayUrl || guessGatewayUrl(8787)}
+        nodeToken={launchNode ? tokenByNodeId.get(launchNode.nodeId)?.token : undefined}
+        action="restart"
+      />
 
       <Modal
         open={viewNt !== null}

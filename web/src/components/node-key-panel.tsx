@@ -33,7 +33,7 @@ export function NodeKeyPanel(props: {
   /** 嵌入接入向导时使用紧凑样式 */
   embedded?: boolean;
   /** 接入向导传入：与下方 env 格式联动 */
-  envContext?: { gatewayUrl: string; agents: string };
+  envContext?: { gatewayUrl: string; agents: string; nodeName?: string; nodeId?: string };
   envFlavor?: NodeEnvFlavor;
 }) {
   const ops = useMemo(() => new OpsClient(props.base, () => props.token), [props.base, props.token]);

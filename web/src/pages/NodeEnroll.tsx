@@ -3,7 +3,14 @@ import { Alert, Button, Checkbox, Col, Input, Row, Segmented, Space, Steps, Tag 
 import { OpsClient, type NodeEnrollInfo } from '../api';
 import { notify } from '../lib/notify';
 import type { AuthErrorHandler } from '../lib/hooks';
-import { formatNodeEnv, NODE_ENV_FLAVOR_OPTIONS, type NodeEnvFlavor } from '../lib/node-env';
+import {
+  formatNodeEnv,
+  formatNodeLaunchSnippet,
+  formatNodePmCommand,
+  nodeEnvFilePath,
+  NODE_ENV_FLAVOR_OPTIONS,
+  type NodeEnvFlavor,
+} from '../lib/node-env';
 import { NodeKeyPanel } from '../components/node-key-panel';
 
 function guessGatewayUrl(port: number): string {
@@ -75,9 +82,22 @@ export function NodeEnrollPanel(props: {
   const instName = name.trim() || 'node-1';
   const chosen = Object.keys(agents).filter((id) => agents[id]);
   const agentsLine = chosen.length > 0 ? chosen.join(',') : info.defaultAgents.map((a) => a.id).join(',');
-  const envPath = `.runtime-state/node-${instName}.env`;
-  const startCmd = `pnpm node:start ${instName}`;
-  const envFields = { gatewayUrl: url, agents: agentsLine };
+  const envPath = nodeEnvFilePath(instName);
+  const startCmd = formatNodePmCommand('start', instName);
+  const restartCmd = formatNodePmCommand('restart', instName);
+  const envFields = { gatewayUrl: url, agents: agentsLine, nodeName: instName };
+  const launchDirect = formatNodeLaunchSnippet(
+    { ...envFields, token: info.token || undefined },
+    envFlavor,
+    'start',
+    instName,
+  );
+  const launchRestart = formatNodeLaunchSnippet(
+    { ...envFields, token: info.token || undefined },
+    envFlavor,
+    'restart',
+    instName,
+  );
   const envDirect = formatNodeEnv({ ...envFields, token: info.token || undefined }, envFlavor);
   const envApproval = formatNodeEnv(
     { ...envFields, ...(claimToken ? { claimToken } : {}) },
@@ -169,7 +189,7 @@ export function NodeEnrollPanel(props: {
         token={props.token}
         onAuthError={props.onAuthError}
         embedded
-        envContext={{ gatewayUrl: url, agents: agentsLine }}
+        envContext={{ gatewayUrl: url, agents: agentsLine, nodeName: instName }}
         envFlavor={envFlavor}
       />
 
@@ -207,9 +227,15 @@ export function NodeEnrollPanel(props: {
         </Col>
       </Row>
 
-      <div className="enroll-cmd">
-        <code>{startCmd}</code>
-        <Button onClick={() => copy('cmd', startCmd)}>{copied === 'cmd' ? '已复制' : '复制命令'}</Button>
+      <div>
+        <div className="sub-muted" style={{ marginBottom: 8 }}>
+          启动 / 重启（含全部连接参数 + <code>{startCmd}</code> / <code>{restartCmd}</code>）
+        </div>
+        <pre className="enroll-pre">{launchDirect}</pre>
+        <Space size={8} wrap style={{ marginTop: 8 }}>
+          <Button onClick={() => copy('cmd', launchDirect)}>{copied === 'cmd' ? '已复制' : '复制启动'}</Button>
+          <Button onClick={() => copy('restart', launchRestart)}>{copied === 'restart' ? '已复制' : '复制重启'}</Button>
+        </Space>
       </div>
     </div>
   );
