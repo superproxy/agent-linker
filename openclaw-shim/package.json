@@ -11,6 +11,7 @@
     "./plugin-sdk/core": "./src/core.mjs",
     "./plugin-sdk/setup": "./src/setup.mjs",
     "./plugin-sdk/channel-config-schema": "./src/channel-config-schema.mjs",
+    "./plugin-sdk/config-mutation": "./src/config-mutation.mjs",
     "./plugin-sdk/infra-runtime": "./src/infra-runtime.mjs",
     "./plugin-sdk/config-runtime": "./src/config-runtime.mjs",
     "./plugin-sdk/hook-runtime": "./src/hook-runtime.mjs",
