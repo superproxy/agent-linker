@@ -1,7 +1,7 @@
 ﻿# 本机栈：默认原生（edge + gateway + channels + PM node + 宿主机 frpc）
 # enhance = edge 增强 + 单机模式（PM node + code-server 容器 + 宿主机 frpc）
 # enhance:docker = edge 增强 + Docker 模式（linkagent-node 聚合容器）
-#   scripts/local-stack.ps1 start|stop|restart|status|enhance
+#   scripts/dev-local-stack.ps1 start|stop|restart|status|enhance
 
 param(
   [Parameter(Position = 0)]
@@ -111,14 +111,15 @@ switch ($Command.ToLowerInvariant()) {
     }
   }
   'restart' {
-    & (Join-Path $Scripts 'local-stack.ps1') stop
+    $self = Join-Path $Scripts 'dev-local-stack.ps1'
+    & $self stop
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if ($EnhanceDocker) {
-      & (Join-Path $Scripts 'local-stack.ps1') start -EnhanceDocker
+      & $self start -EnhanceDocker
     } elseif ($Enhance) {
-      & (Join-Path $Scripts 'local-stack.ps1') start -Enhance
+      & $self start -Enhance
     } else {
-      & (Join-Path $Scripts 'local-stack.ps1') start
+      & $self start
     }
     exit $LASTEXITCODE
   }
@@ -145,8 +146,8 @@ switch ($Command.ToLowerInvariant()) {
     }
   }
   default {
-    Write-Host '用法: local-stack.ps1 start|start:enhance|start:enhance:docker|stop|restart|status'
-    Write-Host '      local-stack.ps1 start -Enhance | start -EnhanceDocker'
+    Write-Host '用法: dev-local-stack.ps1 start|start:enhance|start:enhance:docker|stop|restart|status'
+    Write-Host '      dev-local-stack.ps1 start -Enhance | start -EnhanceDocker'
     exit 1
   }
 }

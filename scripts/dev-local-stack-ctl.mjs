@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 本机方案一键启停：edge → gateway → node（见 local-stack.ps1 / local-stack.sh）
+ * 本机方案一键启停：edge → gateway → node（见 dev-local-stack.ps1 / dev-local-stack.sh）
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
