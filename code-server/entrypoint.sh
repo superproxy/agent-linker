@@ -14,10 +14,17 @@ prefix() {
   done
 }
 
+dev_by_node() {
+  case "$(printf '%s' "${LINKAGENT_DEV_BY_NODE:-}" | tr 'A-Z' 'a-z')" in
+    1 | true | yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 /usr/bin/entrypoint.sh "$@" &
 
-if [ "${LINKAGENT_DEV_BY_NODE:-}" = 1 ]; then
-  log "[dev] 交给 node，切换任务时在任务目录启动"
+if dev_by_node; then
+  log "[dev] 交给 node，切换任务时在任务目录启动（容器不占 5173）"
 else
 log "[dev] 开启，工作区有 package.json 时监听 0.0.0.0:5173"
 dev_loop() {
@@ -66,6 +73,9 @@ else
   log "[frpc] 未开启：没有 /etc/linkagent/frpc.toml"
 fi
 
+if dev_by_node; then
+  log "[vnc] dev 在宿主机 node，跳过容器内 Chromium 预览 5173"
+else
 (
   i=0
   while [ "$i" -lt 60 ]; do
@@ -78,5 +88,6 @@ fi
     sleep 2
   done
 ) &
+fi
 
 wait

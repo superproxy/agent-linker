@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { ensureTaskCwdExists } from '../util/task-paths.js';
+import { nodeRunsInsideIdeContainer } from './dev-port.js';
 
 /** 与 ACP 一样：一条命令、一个工作目录，由节点进程拉起。 */
 export interface TaskProcessSpec {
@@ -70,7 +71,9 @@ export function taskProcessesFromConfig(
   devByNodeFlag: string | undefined,
 ): TaskProcessSpec[] {
   if (configured.length > 0) return configured.map((spec) => ({ id: spec.id, command: [...spec.command] }));
-  return devOwnedByNode(devByNodeFlag) ? [dockerDevProcess()] : [];
+  if (!devOwnedByNode(devByNodeFlag)) return [];
+  if (nodeRunsInsideIdeContainer()) return [dockerDevProcess()];
+  return [];
 }
 
 function slash(p: string): string {
@@ -115,7 +118,30 @@ export function resolveTaskSwitchProcesses(
 function defaultSpawn(command: string[], cwd: string): SpawnedTaskProcess {
   const [bin, ...args] = command;
   if (!bin) return { kill() {} };
-  const child = spawn(bin, args, { cwd, stdio: 'ignore', windowsHide: true });
+  const logDev = bin === 'powershell' || bin === 'sh';
+  const child = spawn(bin, args, {
+    cwd,
+    stdio: logDev ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+    windowsHide: true,
+  });
+  if (logDev) {
+    const tag = '[dev]';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+        if (line.trim()) console.log(`${tag} ${line}`);
+      }
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString('utf8').split(/\r?\n/)) {
+        if (line.trim()) console.error(`${tag} ${line}`);
+      }
+    });
+    child.on('exit', (code, signal) => {
+      if (code && code !== 0) {
+        console.error(`${tag} 退出 code=${String(code)} signal=${signal ?? '-'} cwd=${cwd}`);
+      }
+    });
+  }
   return {
     kill() {
       child.kill();
@@ -140,10 +166,23 @@ export class TaskProcessGroup {
   switchTo(taskId: string, cwd: string, processes: readonly TaskProcessSpec[]): void {
     const id = taskId.trim();
     if (!id) throw new Error('taskId 不能为空');
-    if (id === this.taskId) return;
-    this.stop();
+    const sameTask = id === this.taskId;
+    if (sameTask && processes.length === 0) return;
+    if (sameTask) {
+      for (const child of this.children) {
+        try {
+          child.kill();
+        } catch {
+          /* 已退出 */
+        }
+      }
+      this.children.length = 0;
+    } else {
+      this.stop();
+      this.taskId = id;
+    }
     const dir = ensureTaskCwdExists(cwd);
-    this.taskId = id;
+    if (!sameTask) this.taskId = id;
     for (const spec of processes) {
       const command = spec.command.map((part) => part.trim()).filter((part) => part.length > 0);
       const bin = command[0];

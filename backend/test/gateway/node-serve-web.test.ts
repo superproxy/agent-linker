@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { nodeSectionSchema, LINKAGENT_CODE_SERVER_IMAGE } from '@linkagent/shared';
-import { adapterResponseHeaders, closeSaasLocalAdapters, rewriteSaasLocalPath, rewriteSaasRedirect } from '../../src/node/saas-path.js';
+import {
+  adapterResponseHeaders,
+  closeSaasLocalAdapters,
+  devPublicWebTrailingSlashRedirect,
+  rewriteSaasLocalPath,
+  rewriteSaasRedirect,
+} from '../../src/node/saas-path.js';
 import { frpcToken, nodeServeWebSuppressed, publishSaasFrpc, renderIdeCompose, renderSaasWorkspaceFrpc, renderWorkspaceFrpc, serveWebDockerArgs, stackEnhanceIdeEnabled, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
 import { renderEmbeddedHttpFrpc } from '../../../code-server/render-frpc.mjs';
 
@@ -35,11 +41,9 @@ test('renderIdeCompose：只发布 code-server 到回环地址', () => {
   assert.ok(doc.services['code-serve-web']?.command?.includes('--trusted-origins'));
   assert.ok(doc.services['code-serve-web']?.command?.includes('*.localhost:9080'));
   assert.ok(doc.services['code-serve-web']?.command?.includes('/root/workspace'));
-  assert.deepEqual(doc.services['code-serve-web']?.ports, [
-    '127.0.0.1:8010:8080',
-    '127.0.0.1:5173:5173',
-    '127.0.0.1:6080:6080',
-  ]);
+  assert.deepEqual(doc.services['code-serve-web']?.ports, ['127.0.0.1:8010:8080', '127.0.0.1:6080:6080']);
+  const svc = doc.services['code-serve-web'] as { environment?: Record<string, string> };
+  assert.equal(svc.environment?.LINKAGENT_DEV_BY_NODE, '1');
   assert.match(renderIdeCompose(enabled, 'D:\\work\\repo'), /D:\/work\/repo:\/root\/workspace/);
   assert.match(renderIdeCompose(enabled, 'D:/work/repo'), /linkagent-code-node-modules:\/root\/workspace\/node_modules/);
   assert.equal(doc.services['ide-proxy'], undefined);
@@ -145,8 +149,11 @@ test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
   assert.match(text, /localPort = 18080/);
   assert.match(text, /localPort = 16080/);
   assert.doesNotMatch(text, /localhost/);
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/t_41db7238/@vite/client');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/'), '/t_41db7238/');
+  assert.equal(devPublicWebTrailingSlashRedirect('t_41db7238', '/t_41db7238-web'), '/t_41db7238-web/');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web'), '/t_41db7238-web/');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web?foo=1'), '/t_41db7238-web/?foo=1');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/t_41db7238-web/@vite/client');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/'), '/t_41db7238-web/');
   assert.equal(rewriteSaasLocalPath('code', 't_41db7238', '/t_41db7238-code/?folder=/root/workspace'), '/?folder=/root/workspace');
   assert.equal(rewriteSaasLocalPath('vnc', 't_41db7238', '/t_41db7238-vnc/vnc.html'), '/vnc.html');
   const headers = adapterResponseHeaders(

@@ -29,6 +29,9 @@ test('切换任务：停掉上一组进程，在新目录按命令拉起', () =>
   group.switchTo('t_a', join(root, 'a'), [dev]);
   assert.equal(group.currentTaskId(), 't_a');
   assert.equal(spawned.length, 1);
+
+  group.switchTo('t_a', join(root, 'a'), [dev]);
+  assert.equal(spawned.length, 2, '同任务再次下发 dev 时应重启进程');
   assert.deepEqual(spawned[0]?.command, ['npm', 'run', 'dev']);
   assert.equal(spawned[0]?.cwd, join(root, 'a'));
 
@@ -56,7 +59,7 @@ test('容器工作区把宿主机任务目录换到 /root/workspace/<taskId>', (
 
 test('容器未配 taskProcesses 时用 dev 命令，本机配置优先', () => {
   assert.deepEqual(taskProcessesFromConfig([], undefined), []);
-  assert.equal(taskProcessesFromConfig([], '1')[0]?.id, 'dev');
+  assert.deepEqual(taskProcessesFromConfig([], '1'), []);
   assert.equal(dockerDevProcess().command[0], 'sh');
   assert.match(dockerDevProcess().command.join('\n'), /allowedHosts: true/);
   assert.match(dockerDevProcess().command.join('\n'), /current-task/);

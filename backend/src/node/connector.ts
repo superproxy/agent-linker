@@ -25,11 +25,11 @@ import { loadNodeConnectorEnvFiles } from './env-load.js';
 import { publishSaasFrpc, stackEnhanceIdeEnabled, startNodeServeWeb } from './serve-web.js';
 import {
   resolveNodeTaskCwd,
-  resolveTaskSwitchProcesses,
   taskProcessesFromConfig,
   TaskProcessGroup,
   type TaskProcessSpec,
 } from './task-processes.js';
+import { augmentTaskProcessesWithHostDev, restoreDevPortFromRuntime } from './host-dev.js';
 import {
   AcpEngine,
   DEFAULT_COMMANDS,
@@ -85,6 +85,9 @@ interface ConnectorOptions {
   taskProcesses?: TaskProcessSpec[];
   /** 单机 Docker IDE：切换激活任务时重建 dev / code-server / vnc。 */
   switchIdeTask?: (taskId: string, cwd: string) => void;
+  /** ide-proxy：dev-port.json、frpc.toml */
+  runtimeDir: string;
+  devByNodeFlag?: string;
   stateDir: string;
 }
 
@@ -153,13 +156,41 @@ class NodeConnector {
 
   /** 容器启动时按 LINKAGENT_TASK_ID 登记 SaaS 路径并拉起 dev。网关稍后 switchTask 会再换任务。 */
   bootTask(taskId: string, cwd: string): void {
+    void this.applyTaskSwitch(taskId, cwd, undefined);
+  }
+
+  private async applyTaskSwitch(
+    taskId: string,
+    cwd: string,
+    fromMessage: readonly TaskProcessSpec[] | undefined,
+  ): Promise<void> {
     const id = taskId.trim();
-    const entryHost = (process.env.LINKAGENT_PUBLIC_HOST?.trim() || TASK_PUBLIC_HOST);
-    if (!id || !useFrpTaskPathRouting(entryHost)) return;
-    publishSaasFrpc(id);
-    const processes = resolveTaskSwitchProcesses(this.opts.taskProcesses ?? [], undefined);
-    if (processes.length === 0) return;
-    this.taskProcesses.switchTo(id, cwd, processes);
+    const entryHost = process.env.LINKAGENT_PUBLIC_HOST?.trim() || TASK_PUBLIC_HOST;
+    if (!id) return;
+    try {
+      const dir = resolveNodeTaskCwd(cwd, process.env.LINKAGENT_NODE_WORKSPACE, id);
+      const processes = await augmentTaskProcessesWithHostDev({
+        taskId: id,
+        runtimeDir: this.opts.runtimeDir,
+        configured: this.opts.taskProcesses ?? [],
+        fromMessage,
+        devByNodeFlag: this.opts.devByNodeFlag,
+        publicHost: entryHost,
+        pathRouting: useFrpTaskPathRouting(entryHost),
+      });
+      this.opts.switchIdeTask?.(id, dir);
+      if (processes.length > 0) {
+        this.taskProcesses.switchTo(id, dir, processes);
+      }
+      if (useFrpTaskPathRouting(entryHost)) {
+        publishSaasFrpc(id);
+      }
+      console.log(
+        `[node] 切换任务 taskId=${id} cwd=${dir} processes=${processes.map((p) => p.id).join(',') || '-'}`,
+      );
+    } catch (err) {
+      console.error(`[node] 切换任务失败 taskId=${id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   stop(): void {
@@ -259,18 +290,7 @@ class NodeConnector {
           this.turns.get(msg.requestId)?.abort();
         } else if (msg.type === 'switchTask') {
           if (!this.admitted) return;
-          try {
-            const cwd = resolveNodeTaskCwd(msg.cwd, process.env.LINKAGENT_NODE_WORKSPACE, msg.taskId);
-            this.opts.switchIdeTask?.(msg.taskId, cwd);
-            const processes = resolveTaskSwitchProcesses(this.opts.taskProcesses ?? [], msg.processes);
-            this.taskProcesses.switchTo(msg.taskId, cwd, processes);
-            publishSaasFrpc(msg.taskId);
-            console.log(
-              `[node] 切换任务 taskId=${msg.taskId} cwd=${cwd} processes=${processes.map((p) => p.id).join(',') || '-'}`,
-            );
-          } catch (err) {
-            console.error(`[node] 切换任务失败 taskId=${msg.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-          }
+          void this.applyTaskSwitch(msg.taskId, msg.cwd, msg.processes);
         }
         // closeSession：空闲关闭由引擎自身管理，持久状态保留，这里无需动作
       });
@@ -468,6 +488,10 @@ function main(): void {
   }
   const serveWebWorkspace = config.node.serveWeb.workspace?.trim();
   const enhanceIde = stackEnhanceIdeEnabled();
+  if (enhanceIde && !process.env.LINKAGENT_DEV_BY_NODE?.trim()) {
+    process.env.LINKAGENT_DEV_BY_NODE = '1';
+  }
+  restoreDevPortFromRuntime(ideProxyDir);
   const serveWeb = startNodeServeWeb({
     serveWeb: config.node.serveWeb,
     workspaceDir: serveWebWorkspace || (enhanceIde ? '' : layout.root),
@@ -489,6 +513,8 @@ function main(): void {
     switchIdeTask: (taskId, cwd) => {
       serveWeb.switchTask(taskId, cwd);
     },
+    runtimeDir: ideProxyDir,
+    devByNodeFlag: process.env.LINKAGENT_DEV_BY_NODE,
     stateDir,
   });
   connector.start();

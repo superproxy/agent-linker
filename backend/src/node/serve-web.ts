@@ -7,6 +7,7 @@ import { dockerExecutable } from '../gateway/edge/runtime.js';
 import {
   closeSaasLocalAdapters,
   ensureSaasLocalAdapter,
+  getSaasDevTargetPort,
   SAAS_DEV_LISTEN,
   SAAS_IDE_LISTEN,
   SAAS_VNC_LISTEN,
@@ -197,7 +198,7 @@ function browserEntryPublicHost(): string {
 function saasAdapterPortsFromEnv(): { dev: number; code: number; vnc: number } {
   const code = Number(process.env.LINKAGENT_IDE_LOCAL_PORT ?? '');
   return {
-    dev: WORKSPACE_DEV_PORT,
+    dev: getSaasDevTargetPort(),
     code: Number.isInteger(code) && code > 0 && code <= 65535 ? code : WORKSPACE_IDE_PORT,
     vnc: WORKSPACE_VNC_PORT,
   };
@@ -334,6 +335,10 @@ export function writeCurrentTaskMarker(runtimeDir: string, taskId: string): stri
   return file;
 }
 
+/**
+ * 形态 B：容器只跑 code-server + VNC，**不**把 5173 发布到宿主机。
+ * Vite dev 由宿主机 node 在 switchTask 时监听动态端口（15173 适配器转发）。
+ */
 export function renderIdeCompose(
   opts: ServeWebConfig,
   workspaceDir: string,
@@ -350,30 +355,28 @@ export function renderIdeCompose(
   if (currentTaskFile) {
     volumes.push(`${dockerVolumeHost(currentTaskFile)}:/etc/linkagent/current-task:ro`);
   }
+  const service: Record<string, unknown> = {
+    image: opts.image,
+    container_name: CODE_CONTAINER,
+    restart: 'unless-stopped',
+    user: '0:0',
+    shm_size: '1gb',
+    extra_hosts: ['host.docker.internal:host-gateway'],
+    environment: { LINKAGENT_DEV_BY_NODE: '1' },
+    entrypoint: ['/usr/local/bin/linkagent-entrypoint.sh'],
+    command: [
+      '--auth', 'none',
+      '--bind-addr', '0.0.0.0:8080',
+      '--abs-proxy-base-path', prefix,
+      '--trusted-origins', IDE_TRUSTED_ORIGIN,
+      IDE_CONTAINER_WORKSPACE,
+    ],
+    ports: [`${opts.host}:${opts.port}:8080`, `127.0.0.1:${WORKSPACE_VNC_PORT}:${WORKSPACE_VNC_PORT}`],
+    volumes,
+  };
   const doc: Record<string, unknown> = {
     services: {
-      'code-serve-web': {
-        image: opts.image,
-        container_name: CODE_CONTAINER,
-        restart: 'unless-stopped',
-        user: '0:0',
-        shm_size: '1gb',
-        extra_hosts: ['host.docker.internal:host-gateway'],
-        entrypoint: ['/usr/local/bin/linkagent-entrypoint.sh'],
-        command: [
-          '--auth', 'none',
-          '--bind-addr', '0.0.0.0:8080',
-          '--abs-proxy-base-path', prefix,
-          '--trusted-origins', IDE_TRUSTED_ORIGIN,
-          IDE_CONTAINER_WORKSPACE,
-        ],
-        ports: [
-          `${opts.host}:${opts.port}:8080`,
-          `127.0.0.1:${WORKSPACE_DEV_PORT}:${WORKSPACE_DEV_PORT}`,
-          `127.0.0.1:${WORKSPACE_VNC_PORT}:${WORKSPACE_VNC_PORT}`,
-        ],
-        volumes,
-      },
+      'code-serve-web': service,
     },
   };
   if (isolatedNodeModules) {
@@ -442,6 +445,9 @@ export function startNodeServeWeb(
   if (enhanceIde && !serveWeb.enabled) {
     console.log('[node] LINKAGENT_LOCAL_STACK_ENHANCE：Docker code-server（宿主机共享 frpc）');
   }
+  if (useDockerIde && !process.env.LINKAGENT_DEV_BY_NODE?.trim()) {
+    process.env.LINKAGENT_DEV_BY_NODE = '1';
+  }
   mkdirSync(launch.runtimeDir, { recursive: true });
   const composeFile = join(launch.runtimeDir, 'compose.yml');
   let mountedWorkspace = launch.workspaceDir;
@@ -454,11 +460,7 @@ export function startNodeServeWeb(
     mountedWorkspace = workspaceDir;
     activeTaskId = taskId.trim();
     const marker = activeTaskId ? writeCurrentTaskMarker(launch.runtimeDir, activeTaskId) : undefined;
-    writeFileSync(
-      composeFile,
-      renderIdeCompose(serveWeb, workspaceDir, undefined, marker),
-      'utf8',
-    );
+    writeFileSync(composeFile, renderIdeCompose(serveWeb, workspaceDir, undefined, marker), 'utf8');
     run('up', recreate);
   };
 

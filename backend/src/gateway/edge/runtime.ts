@@ -16,7 +16,8 @@ import {
   taskDevRouteId,
   taskOpenRouteId,
   taskRouteId,
-  taskRouteUri,
+  taskOpenRouteUris,
+  taskRouteUris,
   taskVncRouteId,
 } from './apisix.js';
 import { useFrpTaskPathRouting } from '@linkagent/shared';
@@ -306,7 +307,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         await admin.upsert({
           id: taskOpenRouteId(taskId),
           host,
-          uri: `/${taskId}*`,
+          uris: taskOpenRouteUris(taskId),
           upstream: frps,
           enabled: change.enabled,
           priority: 1,
@@ -315,7 +316,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         await admin.upsert({
           id: taskRouteId(taskId),
           host,
-          uri: taskRouteUri(taskId, 'web'),
+          uris: taskRouteUris(taskId, 'web'),
           upstream: frps,
           enabled: change.enabled,
           priority: 10,
@@ -324,7 +325,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         await admin.upsert({
           id: taskCodeRouteId(taskId),
           host,
-          uri: taskRouteUri(taskId, 'code'),
+          uris: taskRouteUris(taskId, 'code'),
           upstream: frps,
           enabled: change.enabled,
           priority: 10,
@@ -335,7 +336,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         await admin.upsert({
           id: taskVncRouteId(taskId),
           host,
-          uri: taskRouteUri(taskId, 'vnc'),
+          uris: taskRouteUris(taskId, 'vnc'),
           upstream: frps,
           enabled: change.enabled,
           priority: 10,

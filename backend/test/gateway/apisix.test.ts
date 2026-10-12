@@ -13,6 +13,7 @@ import {
   taskCodeServerHost,
   taskRouteHost,
   taskRouteId,
+  taskRouteUris,
 } from '../../src/gateway/edge/apisix.ts';
 
 test('任务路由按任务号生成主机名，回环改写到宿主机', () => {
@@ -22,6 +23,19 @@ test('任务路由按任务号生成主机名，回环改写到宿主机', () =>
   assert.equal(taskCodeRouteId('t_41db7238'), 'task-code-t_41db7238');
   assert.equal(taskCodeServerHost('test', 't_41db7238'), 'test-t-41db7238-ide.localhost');
   assert.equal(apisixUpstreamNode('http://127.0.0.1:8787'), 'host.docker.internal:8787');
+  assert.deepEqual(taskRouteUris('t_6795b0f8', 'web'), [
+    '/t_6795b0f8-web',
+    '/t_6795b0f8-web/',
+    '/t_6795b0f8-web/*',
+  ]);
+  const exactWeb = renderApisixRoute({
+    id: 'task-web',
+    host: 'ide.localhost',
+    uris: taskRouteUris('t_6795b0f8', 'web'),
+    upstream: 'http://127.0.0.1:8080',
+    enabled: true,
+  });
+  assert.deepEqual(exactWeb.uris, ['/t_6795b0f8-web', '/t_6795b0f8-web/', '/t_6795b0f8-web/*']);
   const route = renderApisixRoute({
     id: 'task-default',
     host: 'ide.localhost',

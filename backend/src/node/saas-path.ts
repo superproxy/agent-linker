@@ -20,7 +20,7 @@ export type SaasPathKind = 'dev' | 'code' | 'vnc';
 
 /**
  * frps 只按 Host + 最长 location 选代理，不剥路径。
- * dev 把 `/<taskId>-web` 收成 `/<taskId>`，让 Vite 的 base 仍是任务号。
+ * dev：Vite `--base /${taskId}-web/`，路径原样或把 `/<taskId>/` 入口归到 `-web`。
  * code / vnc 去掉任务前缀，本机进程仍挂在 `/`。
  */
 export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: string): string {
@@ -29,7 +29,11 @@ export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: st
   const query = queryAt >= 0 ? url.slice(queryAt) : '';
   if (kind === 'dev') {
     const web = `/${taskId}-web`;
-    if (path === web || path.startsWith(`${web}/`)) return `/${taskId}${path.slice(web.length)}${query}`;
+    const open = `/${taskId}`;
+    if (path === web) return `${web}/${query}`;
+    if (path.startsWith(`${web}/`)) return url;
+    if (path === open) return `${web}/${query}`;
+    if (path.startsWith(`${open}/`)) return `${web}${path.slice(open.length)}${query}`;
     return url;
   }
   const prefix = `/${taskId}-${kind === 'code' ? 'code' : 'vnc'}`;
@@ -78,13 +82,39 @@ function readUpstreamBody(upstream: http.IncomingMessage): Promise<Buffer> {
   });
 }
 
-function forward(kind: SaasPathKind, taskId: () => string, targetPort: number, listenPort: number): http.Server {
+type TargetPort = number | (() => number);
+
+function resolveTargetPort(targetPort: TargetPort): number {
+  return typeof targetPort === 'function' ? targetPort() : targetPort;
+}
+
+/** 公网入口 `/<taskId>-web` 无尾斜杠时，浏览器应 301 到 `/<taskId>-web/`（与 Vite base 尾斜杠一致）。 */
+export function devPublicWebTrailingSlashRedirect(taskId: string, url: string): string | null {
+  const queryAt = url.indexOf('?');
+  const path = queryAt >= 0 ? url.slice(0, queryAt) : url;
+  const query = queryAt >= 0 ? url.slice(queryAt) : '';
+  const web = `/${taskId}-web`;
+  if (path === web) return `${web}/${query}`;
+  return null;
+}
+
+function forward(kind: SaasPathKind, taskId: () => string, targetPort: TargetPort, listenPort: number): http.Server {
   const server = http.createServer((req, res) => {
-    const path = rewriteSaasLocalPath(kind, taskId(), req.url || '/');
+    const rawUrl = req.url || '/';
+    if (kind === 'dev') {
+      const location = devPublicWebTrailingSlashRedirect(taskId(), rawUrl);
+      if (location) {
+        res.writeHead(301, { Location: location });
+        res.end();
+        return;
+      }
+    }
+    const port = resolveTargetPort(targetPort);
+    const path = rewriteSaasLocalPath(kind, taskId(), rawUrl);
     const headers = { ...req.headers };
-    if (kind !== 'dev') headers.host = `127.0.0.1:${targetPort}`;
+    if (kind !== 'dev') headers.host = `127.0.0.1:${port}`;
     const upstream = http.request(
-      { host: '127.0.0.1', port: targetPort, path, method: req.method, headers },
+      { host: '127.0.0.1', port, path, method: req.method, headers },
       (up) => {
         readUpstreamBody(up)
           .then((body) => {
@@ -110,10 +140,11 @@ function forward(kind: SaasPathKind, taskId: () => string, targetPort: number, l
     req.pipe(upstream);
   });
   server.on('upgrade', (req, socket, head) => {
+    const port = resolveTargetPort(targetPort);
     const path = rewriteSaasLocalPath(kind, taskId(), req.url || '/');
-    const conn = net.connect(targetPort, '127.0.0.1', () => {
+    const conn = net.connect(port, '127.0.0.1', () => {
       const headers = { ...req.headers };
-      if (kind !== 'dev') headers.host = `127.0.0.1:${targetPort}`;
+      if (kind !== 'dev') headers.host = `127.0.0.1:${port}`;
       let raw = `${req.method} ${path} HTTP/1.1\r\n`;
       for (const [key, value] of Object.entries(headers)) {
         if (value == null) continue;
@@ -149,15 +180,26 @@ const DEFAULT_ADAPTER_PORTS: SaasAdapterPorts = {
 };
 
 let currentTaskId = '';
+let devTargetPort = DEFAULT_ADAPTER_PORTS.dev;
 let servers: http.Server[] | null = null;
+
+/** Vite 实际监听口（可动态）；frpc 仍指向 {@link SAAS_DEV_LISTEN}。 */
+export function setSaasDevTargetPort(port: number): void {
+  if (Number.isInteger(port) && port > 0 && port <= 65535) devTargetPort = port;
+}
+
+export function getSaasDevTargetPort(): number {
+  return devTargetPort;
+}
 
 /** 同一进程里换任务只改前缀，不重新占端口。单机 enhance 时 code 口常为宿主机 8010。 */
 export function ensureSaasLocalAdapter(taskId: string, ports: SaasAdapterPorts = DEFAULT_ADAPTER_PORTS): void {
   currentTaskId = taskId;
+  if (ports.dev !== DEFAULT_ADAPTER_PORTS.dev) devTargetPort = ports.dev;
   if (servers) return;
   const task = () => currentTaskId;
   servers = [
-    forward('dev', task, ports.dev, SAAS_DEV_LISTEN),
+    forward('dev', task, () => devTargetPort, SAAS_DEV_LISTEN),
     forward('code', task, ports.code, SAAS_IDE_LISTEN),
     forward('vnc', task, ports.vnc, SAAS_VNC_LISTEN),
   ];

@@ -7,8 +7,10 @@ export const APISIX_PROJECT = 'linkagent-edge';
 export interface ApisixRouteSpec {
   id: string;
   host: string;
-  /** 缺省匹配全部路径。任务路由写成 `/<taskId>-web*` 这种前缀。 */
+  /** 缺省匹配全部路径。与 {@link uris} 二选一。 */
   uri?: string;
+  /** 多条 URI（精确路径 + 子路径）。`/-web*` 匹配不到无尾斜杠的 `/-web`。 */
+  uris?: string[];
   /** 形如 http://127.0.0.1:8787，容器内回环会改写成 host.docker.internal */
   upstream: string;
   enabled: boolean;
@@ -22,10 +24,25 @@ export interface ApisixRouteSpec {
 
 export { TASK_PUBLIC_HOST };
 
-/** APISIX 前缀匹配，例如 `/t_41db7238-code*`。 */
+/** APISIX 前缀匹配，例如 `/t_41db7238-code*`（不含精确 `/-code` 无斜杠路径）。 */
 export function taskRouteUri(taskId: string, type: TaskRouteType): string {
   const path = taskPublicPath(taskId, type);
   return path ? `${path}*` : '/*';
+}
+
+/** 正式入口路径：精确 `/-web` 与子路径 `/-web/…` 都能匹配。 */
+export function taskRouteUris(taskId: string, type: TaskRouteType): string[] {
+  const path = taskPublicPath(taskId, type);
+  if (!path) return ['/*'];
+  return [path, `${path}/`, `${path}/*`];
+}
+
+/** 用户入口 `/<taskId>` / `/<taskId>/…`（不含 `/-web` 等后缀段）。 */
+export function taskOpenRouteUris(taskId: string): string[] {
+  const id = taskId.trim();
+  if (!id) return [];
+  const base = `/${id}`;
+  return [base, `${base}/`, `${base}/*`];
 }
 
 export function taskRouteId(taskId: string): string {
@@ -92,7 +109,7 @@ export function renderApisixRoute(spec: ApisixRouteSpec): Record<string, unknown
   const upstreamHost = spec.upstreamHost?.trim();
   return {
     name: spec.id,
-    uri: spec.uri ?? '/*',
+    ...(spec.uris && spec.uris.length > 0 ? { uris: spec.uris } : { uri: spec.uri ?? '/*' }),
     host: spec.host,
     enable_websocket: true,
     status: spec.enabled ? 1 : 0,
