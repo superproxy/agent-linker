@@ -31,11 +31,11 @@ write_pid() {
 
 do_start() {
   if is_running; then
-    echo "gateway 已在运行 (pid $(cat "$PID_FILE")，安装根 $INSTALL，${HOST_URL}/v1)"
+    echo "gateway 已在运行 (pid $(cat "$PID_FILE")，安装根 ${INSTALL}，${HOST_URL}/v1)"
     return 0
   fi
   mkdir -p "$(dirname "$LOG_FILE")"
-  echo "→ 后台启动 gateway（安装根 $INSTALL，期望端口 ${PORT}）..."
+  echo "→ 后台启动 gateway（安装根 ${INSTALL}，期望端口 ${PORT}）..."
   (
     cd "$REPO"
     nohup pnpm --filter @linkagent/backend start >>"$LOG_FILE" 2>&1 &
@@ -57,7 +57,7 @@ do_start() {
 
 do_stop() {
   if ! is_running; then
-    echo "gateway 未在运行（安装根 $INSTALL）"
+    echo "gateway 未在运行（安装根 ${INSTALL}）"
     rm -f "$PID_FILE"
     return 0
   fi
@@ -80,7 +80,7 @@ do_status() {
   if is_running; then
     echo "运行中 pid=$(cat "$PID_FILE")  install=$INSTALL  url=${HOST_URL}/v1"
   else
-    echo "未运行（安装根 $INSTALL）"
+    echo "未运行（安装根 ${INSTALL}）"
   fi
 }
 
@@ -99,7 +99,7 @@ case "${1:-start}" in
   status) do_status ;;
   log) do_log ;;
   foreground)
-    echo "→ 前台运行 gateway（Ctrl-C 停止，安装根 $INSTALL）..."
+    echo "→ 前台运行 gateway（Ctrl-C 停止，安装根 ${INSTALL}）..."
     cd "$REPO" && exec pnpm --filter @linkagent/backend start
     ;;
   *)

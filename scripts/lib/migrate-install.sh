@@ -53,12 +53,12 @@ linkagent_merge_runtime_into() {
   for src in "$@"; do
     [ -d "$src" ] || continue
     echo "→ 合并运行态：$src → $dest"
-    while IFS= read -r rel; do
+    (cd "$src" && find . -mindepth 1 2>/dev/null) | while IFS= read -r rel; do
       [ -n "$rel" ] || continue
       if [ ! -e "$dest/$rel" ]; then
         mkdir -p "$(dirname "$dest/$rel")"
         cp -a "$src/$rel" "$dest/$rel"
       fi
-    done < <(cd "$src" && find . -mindepth 1 2>/dev/null)
+    done
   done
 }

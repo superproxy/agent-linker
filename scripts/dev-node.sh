@@ -114,7 +114,7 @@ do_status() {
     if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
       echo "运行中  $n  pid=$p"
     else
-      echo "已停止  $n（残留 pid 文件）"
+      echo "已停止  ${n}（残留 pid 文件）"
     fi
   done
   [ "$found" = 0 ] && echo "无节点实例（.runtime-state 下无 pid 文件）"

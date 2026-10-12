@@ -21,7 +21,7 @@ linkagent_sync_publish_to_install() {
 
   mkdir -p "$install" "$install_cfg" "$install_state"
 
-  echo "→ 同步程序文件 → $install（不覆盖 config、.runtime-state）"
+  echo "→ 同步程序文件 → ${install}（不覆盖 config、.runtime-state）"
   local entry base
   for entry in "$package"/*; do
     base="$(basename "$entry")"
@@ -47,7 +47,7 @@ linkagent_sync_publish_to_install() {
   linkagent_materialize_config_from_templates "$install_cfg"
 
   if [ "$skip_npm" = 0 ] || [ ! -d "$install/node_modules" ]; then
-    echo "→ npm install --omit=dev（$install）"
+    echo "→ npm install --omit=dev（${install}）"
     (cd "$install" && npm install --omit=dev --legacy-peer-deps --no-audit --no-fund --loglevel=error)
   fi
 

@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
       cat <<EOF
 用法: $0 [--install-dir <path>] [--restart] [--no-pull] [--skip-build] [--skip-deploy-npm]
 
-  在已 clone 的源码仓库（$ROOT）执行三步：
+  在已 clone 的源码仓库（${ROOT}）执行三步：
 
     1/3 同步源码   git pull --ff-only（--no-pull 跳过）
     2/3 构建       pnpm install && pnpm build:dist → $BUILD
@@ -121,7 +121,7 @@ else
   echo ""
   echo "==> 2/3 构建（跳过 --skip-build）"
   if [ ! -f "$BUILD/.linkagent-root" ]; then
-    echo "缺少发布包：$BUILD（请先构建或去掉 --skip-build）" >&2
+    echo "缺少发布包：${BUILD}（请先构建或去掉 --skip-build）" >&2
     exit 1
   fi
 fi
