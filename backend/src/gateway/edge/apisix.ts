@@ -90,6 +90,20 @@ export function taskVncRouteId(taskId: string): string {
   return `task-vnc-${taskRouteId(taskId).slice('task-'.length)}`;
 }
 
+/** 远程 node 经公网 Host 升级 WebSocket 到网关进程（SaaS 路径模式）。 */
+export const GATEWAY_NODE_WS_ROUTE_ID = 'gateway-node-ws';
+
+export function gatewayNodeWsRouteSpec(host: string, gatewayUpstream: string): ApisixRouteSpec {
+  return {
+    id: GATEWAY_NODE_WS_ROUTE_ID,
+    host,
+    uris: ['/api/nodes/ws'],
+    upstream: gatewayUpstream,
+    enabled: true,
+    priority: 200,
+  };
+}
+
 /** noVNC，例如 test-t_41db7238-vnc.localhost。 */
 export function taskVncHost(name: string, taskId: string): string {
   return taskHostForProxy(name, taskId, 'vnc');

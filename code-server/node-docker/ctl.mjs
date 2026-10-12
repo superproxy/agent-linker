@@ -2,7 +2,8 @@
 /**
  * Docker 聚合节点启停。用法与 linkagent-node 的 start.sh 相同：
  *   node ctl.mjs {start|stop|restart|status|log|foreground}
- * 配置读同目录 node.env，不覆盖已有环境变量。
+ * 配置（后项覆盖前项，且优先于 shell 环境变量）：
+ *   <安装根>/.runtime-state/node.env → code-server/node-docker/node.env
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -110,19 +111,35 @@ export function envFileFor(dir, exists = existsSync) {
   return '';
 }
 
-function loadEnv(dir) {
-  const file = envFileFor(dir);
-  if (!file) {
-    throw new Error(`缺少 ${join(dir, 'node.env')}。`);
+/** 与 dist/linkagent-node 相同：安装根 .runtime-state/node.env，可选 node-docker/node.env 覆盖宿主机路径。 */
+export function nodeEnvConfigPaths(dir, repoRoot = join(dir, '..', '..'), exists = existsSync) {
+  const paths = [join(repoRoot, '.runtime-state', 'node.env'), join(dir, 'node.env')];
+  return paths.filter((p) => exists(p));
+}
+
+/** 合并 env 文件；文件中已定义的键不被 shell 里的 LINKAGENT_/FRPS_ 覆盖。 */
+export function mergeNodeEnvFromFiles(paths, processEnv = process.env, readFile = readFileSync) {
+  const env = {};
+  for (const file of paths) {
+    Object.assign(env, readDotenv(readFile(file, 'utf8')));
   }
-  const fromFile = readDotenv(readFileSync(file, 'utf8'));
-  const env = { ...fromFile };
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && (key.startsWith('LINKAGENT_') || key === 'ARK_API_KEY' || key.startsWith('FRPS_'))) {
-      env[key] = value;
-    }
+  for (const [key, value] of Object.entries(processEnv)) {
+    if (value === undefined || value === '') continue;
+    if (!key.startsWith('LINKAGENT_') && key !== 'ARK_API_KEY' && !key.startsWith('FRPS_')) continue;
+    if (env[key] === undefined) env[key] = value;
   }
   return env;
+}
+
+function loadEnv(dir) {
+  const paths = nodeEnvConfigPaths(dir);
+  if (paths.length === 0) {
+    const hint = join(dir, 'node.env.example');
+    throw new Error(
+      `缺少节点配置：请复制 ${hint} 为 <安装根>/.runtime-state/node.env 或 ${join(dir, 'node.env')}。`,
+    );
+  }
+  return mergeNodeEnvFromFiles(paths);
 }
 
 function runDocker(args, inherit) {
@@ -214,7 +231,7 @@ function start(dir, foreground) {
     if (detail) console.error(detail);
     return res.status;
   }
-  if (!foreground) console.log(`✅ 节点已启动 (容器 ${CONTAINER_NAME}，日志：pnpm node:docker:log)`);
+  if (!foreground) console.log(`✅ 节点已启动 (容器 ${CONTAINER_NAME}，日志：start.bat log 或 start.sh log)`);
   return 0;
 }
 

@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { agentConfigHost, containerEnvText, dockerRunArgs, envFileFor, readDotenv, shouldBuildImage, userWorkspaceHost } from '../../../code-server/node-docker/ctl.mjs';
+import {
+  agentConfigHost,
+  containerEnvText,
+  dockerRunArgs,
+  envFileFor,
+  mergeNodeEnvFromFiles,
+  readDotenv,
+  shouldBuildImage,
+  userWorkspaceHost,
+} from '../../../code-server/node-docker/ctl.mjs';
 
 test('shouldBuildImage：只在缺省镜像不存在时构建', () => {
   assert.equal(shouldBuildImage('linkagent-node:local', false), true);
@@ -13,6 +22,22 @@ test('envFileFor：没有 node.env 时用 example', () => {
   assert.match(envFileFor('/opt/node-docker', exists), /node\.env\.example$/);
   const preferEnv = (path) => path.endsWith('node.env') || path.endsWith('node.env.example');
   assert.match(envFileFor('/opt/node-docker', preferEnv), /node\.env$/);
+});
+
+test('mergeNodeEnvFromFiles：后文件覆盖前文件，且文件优先于 process.env', () => {
+  const merged = mergeNodeEnvFromFiles(
+    [
+      'LINKAGENT_GATEWAY_URL=ws://first\nFRPS_TOKEN=a\n',
+      'LINKAGENT_GATEWAY_URL=ws://second\n',
+    ].map((text, i) => `/fake/${i}.env`),
+    { LINKAGENT_GATEWAY_URL: 'ws://shell', FRPS_TOKEN: 'b', PATH: '/bin' },
+    (path) => (path === '/fake/0.env' ? 'LINKAGENT_GATEWAY_URL=ws://first\nFRPS_TOKEN=a\n' : 'LINKAGENT_GATEWAY_URL=ws://second\n'),
+  );
+  assert.equal(merged.LINKAGENT_GATEWAY_URL, 'ws://second');
+  assert.equal(merged.FRPS_TOKEN, 'a');
+  assert.equal(merged.PATH, undefined);
+  const fill = mergeNodeEnvFromFiles(['/fake/0.env'], { LINKAGENT_NODE_NAME: 'from-shell' }, () => '');
+  assert.equal(fill.LINKAGENT_NODE_NAME, 'from-shell');
 });
 
 test('containerEnvText 去掉宿主机专用项', () => {

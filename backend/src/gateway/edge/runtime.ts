@@ -19,6 +19,7 @@ import {
   taskOpenRouteUris,
   taskRouteUris,
   taskVncRouteId,
+  gatewayNodeWsRouteSpec,
 } from './apisix.js';
 import { useFrpTaskPathRouting } from '@linkagent/shared';
 import { renderFrpsConf } from './render.js';
@@ -347,6 +348,10 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         // 9080 只走任务路径 /<taskId>-code；/vibe-ide 仅网关 /ui 同源代理，不写 APISIX。
         await admin.remove('code-localhost');
         await admin.remove('code-ide');
+        const platformHost = opts.publicHost ?? TASK_PUBLIC_HOST;
+        if (useFrpTaskPathRouting(platformHost)) {
+          await admin.upsert(gatewayNodeWsRouteSpec(platformHost, opts.gatewayUpstream));
+        }
         for (const task of tasks) {
           await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });
         }

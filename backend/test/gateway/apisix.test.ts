@@ -14,7 +14,19 @@ import {
   taskRouteHost,
   taskRouteId,
   taskRouteUris,
+  gatewayNodeWsRouteSpec,
+  GATEWAY_NODE_WS_ROUTE_ID,
 } from '../../src/gateway/edge/apisix.ts';
+
+test('SaaS 公网 Host 登记 node WebSocket 到网关 upstream', () => {
+  const spec = gatewayNodeWsRouteSpec('hubide.ljyd.cn', 'http://127.0.0.1:8787');
+  assert.equal(spec.id, GATEWAY_NODE_WS_ROUTE_ID);
+  const route = renderApisixRoute(spec);
+  assert.equal(route.host, 'hubide.ljyd.cn');
+  assert.deepEqual(route.uris, ['/api/nodes/ws']);
+  const upstream = route.upstream as { nodes: Record<string, number> };
+  assert.equal(upstream.nodes['host.docker.internal:8787'], 1);
+});
 
 test('任务路由按任务号生成主机名，回环改写到宿主机', () => {
   assert.equal(taskRouteId('t_41db7238'), 'task-t_41db7238');
