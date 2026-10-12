@@ -165,10 +165,37 @@ test('handleCommand: use 支持名称/序号/唯一前缀定位', () => {
   // 唯一前缀（名称前缀）
   const r3 = svc.handleCommand(state, '/task use 股票')!;
   assert.equal(r3.activeTaskId, t.id);
-  // 前缀歧义（id 前缀 't_' 能命中多个）→ 任务不存在
+  // 前缀歧义（id 前缀 't_' 能命中多个）→ 列出候选简写，不说成不存在
   svc.createTask(state, '汇率监控', 'opencode');
   const r4 = svc.handleCommand(state, '/task use t_')!;
-  assert.ok(r4.text.includes('任务不存在'));
+  assert.ok(r4.text.includes('匹配多个'));
+  assert.ok(r4.text.includes('/t '));
+});
+
+test('handleCommand: 简写 id 切换，不填参数则返回带切换命令的列表', () => {
+  const svc = freshService();
+  const state = svc.load('weixin', 'wx_1');
+  state.tasks.push(
+    { id: 't_aaaa1111', key: 'k_aaaabbbbcccc', name: '甲', agentId: 'pi', createdAt: 1 },
+    { id: 't_aaaa2222', key: 'k_ddddeeeeffff', name: '乙', agentId: 'pi', createdAt: 2 },
+    { id: 't_bbbb3333', key: 'k_111122223333', name: '丙', agentId: 'pi', createdAt: 3 },
+  );
+  const listed = svc.handleCommand(state, '/t')!;
+  assert.ok(listed.text.includes('/t aaaa1'));
+  assert.ok(listed.text.includes('/t bbbb'));
+  assert.equal(listed.activeTaskId, undefined);
+
+  const amb = svc.handleCommand(state, '/t aaaa')!;
+  assert.ok(amb.text.includes('匹配多个'));
+  assert.ok(amb.text.includes('甲'));
+  assert.ok(amb.text.includes('乙'));
+  assert.ok(!amb.text.includes('丙'));
+
+  const switched = svc.handleCommand(state, '/t AAAA2')!;
+  assert.equal(switched.activeTaskId, 't_aaaa2222');
+  const byIndex = svc.handleCommand(state, '/t 4')!;
+  assert.equal(byIndex.activeTaskId, 't_bbbb3333');
+  assert.equal(svc.handleCommand(state, '/tfoo'), null);
 });
 
 test('handleCommand: default 快捷切回默认任务', () => {
@@ -192,14 +219,18 @@ test('handleCommand: default 快捷切回默认任务', () => {
   assert.ok(again.text.includes('已存在'));
 });
 
-test('handleCommand: list 展示任务 id，new 回复携带新 id', () => {
+test('handleCommand: list 展示简写，new 回复携带新 id', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_1');
   const rNew = svc.handleCommand(state, '/task new 排查 pi')!;
   assert.ok(rNew.text.includes('t_'));
+  assert.ok(rNew.text.includes('/t '));
+  const created = state.tasks.find((t) => t.name === '排查');
+  assert.ok(created);
   const r = svc.handleCommand(state, '/task list')!;
-  assert.ok(r.text.includes('t_'));
   assert.ok(r.text.includes('默认'));
+  assert.ok(r.text.includes(`/t ${created.id.slice(2, 6)}`));
+  assert.ok(!r.text.includes(created.key));
 });
 
 test('handleCommand: use/del/rename 不存在的引用报任务不存在', () => {
@@ -274,7 +305,7 @@ test('旧数据（无 key）load 时惰性补齐并落盘，幂等', () => {
   assert.equal(again.tasks[0].key, state.tasks[0].key);
 });
 
-test('handleCommand: /task use 支持 key 定位，list/new 展示 key', () => {
+test('handleCommand: /task use 支持 key 定位，list 用简写、new 仍展示 key', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_1');
   const t = svc.createTask(state, '股票', 'pi');
@@ -282,7 +313,8 @@ test('handleCommand: /task use 支持 key 定位，list/new 展示 key', () => {
   assert.equal(rUse.activeTaskId, t.id);
   assert.equal(rUse.activeAgentId, 'pi');
   const rList = svc.handleCommand(state, '/task list')!;
-  assert.ok(rList.text.includes(t.key));
+  assert.ok(rList.text.includes(`/t ${t.id.slice(2, 6)}`));
+  assert.ok(!rList.text.includes(t.key));
   const rNew = svc.handleCommand(state, '/task new 分享 pi')!;
   assert.ok(rNew!.text.includes('k_'));
 });

@@ -45,15 +45,63 @@ export function newTaskId(): string {
   return `t_${randomUUID().replace(/-/g, '').slice(0, 8)}`;
 }
 
+/** 简写至少这么多位，避免和列表序号（通常 1～2 位）撞车 */
+const TASK_SHORT_ID_MIN = 4;
+
+/** t_ 后面的十六进制；default 等自选 id 整段保留 */
+export function taskIdBody(id: string): string {
+  return id.startsWith('t_') && id.length > 2 ? id.slice(2) : id;
+}
+
+/**
+ * 列表和 /task use 用的简写。
+ * t_ 任务取十六进制的最短唯一前缀（至少 4 位）；其它 id 用原文。
+ */
+export function taskShortIds(tasks: readonly { id: string }[]): Map<string, string> {
+  const rows = tasks.map((t) => ({
+    id: t.id,
+    body: taskIdBody(t.id).toLowerCase(),
+    abbreviate: t.id.startsWith('t_'),
+  }));
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.abbreviate) {
+      map.set(row.id, row.id);
+      continue;
+    }
+    let n = Math.min(TASK_SHORT_ID_MIN, row.body.length);
+    while (n < row.body.length) {
+      const prefix = row.body.slice(0, n);
+      const hits = rows.filter((other) => other.body.startsWith(prefix));
+      if (hits.length === 1) break;
+      n += 1;
+    }
+    map.set(row.id, row.body.slice(0, n));
+  }
+  return map;
+}
+
 /** 全局唯一任务 key：k_<12 hex>（跨用户反查/直连路由用） */
 export function newTaskKey(): string {
   return `${TASK_KEY_PREFIX}${randomUUID().replace(/-/g, '').slice(0, 12)}`;
 }
 
+/** `/t <简写>` 切换。必须带空格或单独 `/t`，避免把 `/task` 吃掉。 */
+export function isShortTaskSwitch(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  return t === '/t' || t.startsWith('/t ');
+}
+
 export function isTaskCommand(text: string): boolean {
+  if (isShortTaskSwitch(text)) return true;
   const t = text.trim().toLowerCase();
   return t === TASK_COMMAND_PREFIX || t.startsWith(`${TASK_COMMAND_PREFIX} `);
 }
+
+type TaskLookup =
+  | { kind: 'one'; task: TaskItem }
+  | { kind: 'none' }
+  | { kind: 'many'; tasks: TaskItem[] };
 
 /** 内建 default 任务钉死本机 pi；有改动返回 true */
 function pinDefaultTaskBinding(task: TaskItem): boolean {
@@ -699,25 +747,82 @@ export class TaskService {
   }
 
   /**
-   * 按引用定位任务：精确 id > 精确 key > 精确名称 > 列表序号(1-based) > 唯一前缀(id/key/名称)。
-   * 供 use/del/rename 使用，让路由控制不必记 t_xxx 原始 id（/task list 也展示 id 与 key）。
-   * 找不到返回 undefined（调用方报「任务不存在」）。
+   * 按引用定位任务：精确 id > 精确 key > 精确名称 > 列表序号(1-based) > 唯一前缀。
+   * 前缀同时认完整 id、去掉 t_ 的简写、key、名称（id/简写/key 忽略大小写）。
+   * 多个命中与找不到分开，调用方分别回候选列表或「不存在」。
    */
-  private findTask(state: UserTasks, ref: string): TaskItem | undefined {
+  private lookupTask(state: UserTasks, ref: string): TaskLookup {
     const key = ref.trim();
-    if (!key) return undefined;
-    const byId = state.tasks.find((t) => t.id === key);
-    if (byId) return byId;
-    const byKey = state.tasks.find((t) => t.key === key);
-    if (byKey) return byKey;
+    if (!key) return { kind: 'none' };
+    const folded = key.toLowerCase();
+    const byId = state.tasks.find((t) => t.id.toLowerCase() === folded);
+    if (byId) return { kind: 'one', task: byId };
+    const byKey = state.tasks.find((t) => t.key.toLowerCase() === folded);
+    if (byKey) return { kind: 'one', task: byKey };
     const byName = state.tasks.find((t) => t.name === key);
-    if (byName) return byName;
+    if (byName) return { kind: 'one', task: byName };
     if (/^\d+$/.test(key)) {
       const nth = state.tasks[Number(key) - 1];
-      if (nth) return nth;
+      if (nth) return { kind: 'one', task: nth };
     }
-    const byPrefix = state.tasks.filter((t) => t.id.startsWith(key) || t.key.startsWith(key) || t.name.startsWith(key));
-    return byPrefix.length === 1 ? byPrefix[0] : undefined;
+    const matches = state.tasks.filter((t) => {
+      const id = t.id.toLowerCase();
+      const body = taskIdBody(t.id).toLowerCase();
+      return id.startsWith(folded) || body.startsWith(folded) || t.key.toLowerCase().startsWith(folded) || t.name.toLowerCase().startsWith(folded);
+    });
+    if (matches.length === 1) {
+      const task = matches[0];
+      return task ? { kind: 'one', task } : { kind: 'none' };
+    }
+    if (matches.length > 1) return { kind: 'many', tasks: matches };
+    return { kind: 'none' };
+  }
+
+  /** 任务列表：每行带可直接发送的 /task use <简写> */
+  private listText(state: UserTasks): string {
+    const shorts = taskShortIds(state.tasks);
+    const lines = state.tasks.map((t, i) => {
+      const mark = t.id === state.activeTaskId ? ' ← 激活' : '';
+      const cwd = t.cwd ? ` 📂 ${t.cwd}` : '';
+      const short = shorts.get(t.id) ?? t.id;
+      return `[${i + 1}] ${short}  ${t.name} → ${t.agentId}${cwd}${mark}    /t ${short}`;
+    });
+    const head = `📋 任务列表（${state.tasks.length}），切换：/t <简写>`;
+    return lines.length > 0 ? `${head}\n${lines.join('\n')}` : head;
+  }
+
+  private missText(state: UserTasks, ref: string, found: TaskLookup): string {
+    if (found.kind === 'many') {
+      const shorts = taskShortIds(state.tasks);
+      const lines = found.tasks.map((t) => {
+        const i = state.tasks.findIndex((x) => x.id === t.id);
+        const short = shorts.get(t.id) ?? t.id;
+        return `[${i + 1}] ${short}  ${t.name}    /t ${short}`;
+      });
+      return `❌ 「${ref}」匹配多个任务，请用更长的简写或序号：\n${lines.join('\n')}`;
+    }
+    return `❌ 任务不存在: ${ref}\n${this.listText(state)}`;
+  }
+
+  private requireTask(state: UserTasks, ref: string): { task: TaskItem } | { text: string } {
+    const found = this.lookupTask(state, ref);
+    if (found.kind === 'one') return { task: found.task };
+    return { text: this.missText(state, ref, found) };
+  }
+
+  /** `/t <简写>` 与 `/task use <简写>`。空引用返回带切换命令的列表。 */
+  private switchByRef(state: UserTasks, ref: string): CommandResult {
+    const token = ref.trim();
+    if (!token) return { text: this.listText(state) };
+    const hit = this.requireTask(state, token);
+    if ('text' in hit) return { text: hit.text };
+    const task = hit.task;
+    this.activateTask(state, task.id);
+    return {
+      text: `🔀 已切换到 [${task.name}] → ${task.agentId}`,
+      activeTaskId: task.id,
+      activeAgentId: task.agentId,
+    };
   }
 
   /**
@@ -728,6 +833,7 @@ export class TaskService {
   handleCommand(state: UserTasks, text: string): CommandResult | null {
     const line = text.trim();
     if (!isTaskCommand(line)) return null;
+    if (isShortTaskSwitch(line)) return this.switchByRef(state, line.slice(2).trim());
     const parts = line.slice(TASK_COMMAND_PREFIX.length).trim().split(/\s+/).filter(Boolean);
     const cmd = (parts[0] ?? 'help').toLowerCase();
     const known = [...KNOWN_AGENT_IDS, this.defaultAgentId];
@@ -761,32 +867,17 @@ export class TaskService {
           }
         }
         const task = this.createTask(state, name, agentId);
+        const short = taskShortIds(state.tasks).get(task.id) ?? task.id;
         return {
-          text: `✅ 已新建任务 [${task.name}]（${task.id} · ${task.key}）→ ${task.agentId}（已激活）`,
+          text: `✅ 已新建任务 [${task.name}]（${task.id} · ${task.key}）→ ${task.agentId}（已激活）\n切换 /t ${short}`,
           activeTaskId: task.id,
           activeAgentId: task.agentId,
         };
       }
-      case 'list': {
-        const lines = state.tasks.map((t, i) => {
-          const mark = t.id === state.activeTaskId ? ' ← 激活' : '';
-          const cwd = t.cwd ? ` 📂 ${t.cwd}` : '';
-          return `[${i + 1}] ${t.name}（${t.id} · ${t.key}）→ ${t.agentId}${cwd}${mark}`;
-        });
-        return { text: `📋 任务列表（${state.tasks.length}）：\n${lines.join('\n')}` };
-      }
-      case 'use': {
-        const ref = parts[1];
-        if (!ref) return { text: '用法：/task use <id|名称|序号>' };
-        const task = this.findTask(state, ref);
-        if (!task) return { text: `❌ 任务不存在: ${ref}` };
-        this.activateTask(state, task.id);
-        return {
-          text: `🔀 已切换到 [${task.name}] → ${task.agentId}`,
-          activeTaskId: task.id,
-          activeAgentId: task.agentId,
-        };
-      }
+      case 'list':
+        return { text: this.listText(state) };
+      case 'use':
+        return this.switchByRef(state, parts[1] ?? '');
       case 'default': {
         const task = state.tasks.find((t) => t.id === DEFAULT_TASK_ID);
         if (!task) return { text: '❌ 默认任务不存在（已删除）。用 /task new default 重建。' };
@@ -799,9 +890,10 @@ export class TaskService {
       }
       case 'del': {
         const ref = parts[1];
-        if (!ref) return { text: '用法：/task del <id|名称|序号>' };
-        const task = this.findTask(state, ref);
-        if (!task) return { text: `❌ 任务不存在: ${ref}` };
+        if (!ref) return { text: '用法：/task del <简写|序号|名称>' };
+        const hit = this.requireTask(state, ref);
+        if ('text' in hit) return { text: hit.text };
+        const task = hit.task;
         this.deleteTask(state, task.id);
         const active = state.tasks.find((t) => t.id === state.activeTaskId);
         return {
@@ -813,18 +905,20 @@ export class TaskService {
       case 'rename': {
         const ref = parts[1];
         const name = parts.slice(2).join(' ');
-        if (!ref || !name) return { text: '用法：/task rename <id|名称|序号> <新名称>' };
-        const task = this.findTask(state, ref);
-        if (!task) return { text: `❌ 任务不存在: ${ref}` };
+        if (!ref || !name) return { text: '用法：/task rename <简写|序号|名称> <新名称>' };
+        const hit = this.requireTask(state, ref);
+        if ('text' in hit) return { text: hit.text };
+        const task = hit.task;
         const renamed = this.renameTask(state, task.id, name);
         return { text: `✏️ 已重命名 → [${renamed.name}]` };
       }
       case 'cwd': {
         const ref = parts[1];
         const path = parts.slice(2).join(' ');
-        if (!ref) return { text: '用法：/task cwd <id|名称|序号> <工作目录路径>' };
-        const task = this.findTask(state, ref);
-        if (!task) return { text: `❌ 任务不存在: ${ref}` };
+        if (!ref) return { text: '用法：/task cwd <简写|序号|名称> <工作目录路径>' };
+        const hit = this.requireTask(state, ref);
+        if ('text' in hit) return { text: hit.text };
+        const task = hit.task;
         if (!path) {
           return { text: task.cwd ? `📂 [${task.name}] 工作目录: ${task.cwd}` : `📂 [${task.name}] 未设置工作目录（用 agent 默认）` };
         }
@@ -834,12 +928,13 @@ export class TaskService {
       case 'agent': {
         const ref = parts[1];
         const agentId = parts[2]?.toLowerCase();
-        if (!ref || !agentId) return { text: '用法：/task agent <id|名称|序号> <agentId>' };
+        if (!ref || !agentId) return { text: '用法：/task agent <简写|序号|名称> <agentId>' };
         if (!known.includes(agentId)) {
           return { text: `❌ 未知 agent: ${agentId}（可用：${[...KNOWN_AGENT_IDS, this.defaultAgentId].join('/')}）` };
         }
-        const task = this.findTask(state, ref);
-        if (!task) return { text: `❌ 任务不存在: ${ref}` };
+        const hit = this.requireTask(state, ref);
+        if ('text' in hit) return { text: hit.text };
+        const task = hit.task;
         if (isDefaultTaskId(task.id)) return { text: '❌ 默认任务固定使用本机 pi，不能修改' };
         const set = this.setTaskAgent(state, task.id, agentId);
         return { text: `🔀 [${set.name}] agent → ${set.agentId}` };
@@ -850,13 +945,14 @@ export class TaskService {
             '📌 任务命令：',
             '/task new <名称> [agent]    新建任务（agent: pi/opencode）',
             '/task new default           重建已删除的默认任务（本机 pi）',
-            '/task list                 查看全部任务（带 id/key/序号）',
-            '/task use <id|key|名称|序号> 切换到指定任务（支持唯一前缀）',
+            '/t <简写>                  切换任务（简写是 t_ 后至少 4 位；不填则列出）',
+            '/task list                 查看全部任务（每行带 /t <简写>）',
+            '/task use <简写|序号|名称>  与 /t 相同',
             '/task default              切回默认任务',
-            '/task del <id|key|名称|序号> 删除任务（含默认任务）',
-            '/task rename <id|key|名称|序号> <新名称>  重命名',
-            '/task cwd <id|key|名称|序号> [路径]     查看/设置工作目录（不填路径=查看）',
-            '/task agent <id|key|名称|序号> <agentId>  切换任务绑定 agent（默认任务固定本机 pi，不可改）',
+            '/task del <简写|序号|名称> 删除任务（含默认任务）',
+            '/task rename <简写|序号|名称> <新名称>  重命名',
+            '/task cwd <简写|序号|名称> [路径]     查看/设置工作目录（不填路径=查看）',
+            '/task agent <简写|序号|名称> <agentId>  切换任务绑定 agent（默认任务固定本机 pi，不可改）',
             '普通消息自动进入「激活任务」对应的 agent。',
           ].join('\n'),
         };

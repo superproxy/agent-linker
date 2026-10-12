@@ -109,7 +109,7 @@ curl -s -X PATCH "$BASE/api/tasks/<taskId>/activate" \
   -d "{\"channel\":\"$CH\",\"userId\":\"$UID\"}"
 ```
 
-`taskId` 来自列表（如 `t_fbcdae18`）或按名称查找。
+`taskId` 来自列表的完整 id（如 `t_fbcdae18`）。用户只给了简写时，用 `t_` 后面的十六进制前缀（至少 4 位）或列表序号对上完整 id，再调这个接口。微信里发 `/t` 列出任务，发 `/t 41db` 直接切换。
 
 ### 重命名
 

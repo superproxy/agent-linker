@@ -193,7 +193,8 @@ test('decideTaskRouting: taskKey 单 key 直连路由，sessionKey 与三元素�
   // 命令同样作用于反查出的用户状态
   const dc = decideTaskRouting(svc, { text: '/task list', taskKey: t.key });
   assert.equal(dc.kind, 'command');
-  assert.ok(dc.text!.includes(t.key));
+  assert.ok(dc.text!.includes('股票'));
+  assert.ok(dc.text!.includes('/t '));
   // key 不存在 → notfound
   const dn = decideTaskRouting(svc, { text: 'hi', taskKey: 'k_nope' });
   assert.equal(dn.kind, 'notfound');
