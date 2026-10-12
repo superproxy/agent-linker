@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
-import type { GatewayToNode, NodeAgentInfo, NodeToGateway, NodeTurnEvent } from '@linkagent/shared';
+import { isSaasPublicHost, type GatewayToNode, type NodeAgentInfo, type NodeToGateway, type NodeTurnEvent } from '@linkagent/shared';
 import {
   defaultAgentDefinitions,
   findNodeAgentEntry,
@@ -15,7 +15,14 @@ import type { NodeAgentListItem } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
 import { loadNodeConnectorEnvFiles } from './env-load.js';
-import { startNodeServeWeb } from './serve-web.js';
+import { publishSaasFrpc, startNodeServeWeb } from './serve-web.js';
+import {
+  resolveNodeTaskCwd,
+  resolveTaskSwitchProcesses,
+  taskProcessesFromConfig,
+  TaskProcessGroup,
+  type TaskProcessSpec,
+} from './task-processes.js';
 import {
   AcpEngine,
   DEFAULT_COMMANDS,
@@ -67,6 +74,8 @@ interface ConnectorOptions {
   agents: NodeAgentInfo[];
   /** node.agents 原始配置（含 key/command，仅本机 spawn，不经 hello 上报） */
   nodeAgentConfigs: NodeAgentListItem[];
+  /** node.taskProcesses。switchTask 未带 processes 时用这份命令。 */
+  taskProcesses?: TaskProcessSpec[];
   stateDir: string;
 }
 
@@ -121,6 +130,8 @@ class NodeConnector {
   private readonly engines = new Map<string, AcpEngine>();
   /** requestId → AbortController */
   private readonly turns = new Map<string, AbortController>();
+  /** 当前任务的附属进程（dev / code / vnc 等），切换时整组替换 */
+  private readonly taskProcesses = new TaskProcessGroup();
 
   constructor(opts: ConnectorOptions) {
     this.opts = opts;
@@ -131,9 +142,20 @@ class NodeConnector {
     void this.connectLoop();
   }
 
+  /** 容器启动时按 LINKAGENT_TASK_ID 登记 SaaS 路径并拉起 dev。网关稍后 switchTask 会再换任务。 */
+  bootTask(taskId: string, cwd: string): void {
+    const id = taskId.trim();
+    if (!id || !isSaasPublicHost(process.env.LINKAGENT_PUBLIC_HOST)) return;
+    publishSaasFrpc(id);
+    const processes = resolveTaskSwitchProcesses(this.opts.taskProcesses ?? [], undefined);
+    if (processes.length === 0) return;
+    this.taskProcesses.switchTo(id, cwd, processes);
+  }
+
   stop(): void {
     this.stopped = true;
     for (const c of this.turns.values()) c.abort();
+    this.taskProcesses.stop();
     this.ws?.close(1001, 'node shutdown');
   }
 
@@ -225,6 +247,19 @@ class NodeConnector {
           if (this.admitted) void this.runTurn(msg);
         } else if (msg.type === 'cancel') {
           this.turns.get(msg.requestId)?.abort();
+        } else if (msg.type === 'switchTask') {
+          if (!this.admitted) return;
+          try {
+            const cwd = resolveNodeTaskCwd(msg.cwd, process.env.LINKAGENT_NODE_WORKSPACE, msg.taskId);
+            const processes = resolveTaskSwitchProcesses(this.opts.taskProcesses ?? [], msg.processes);
+            this.taskProcesses.switchTo(msg.taskId, cwd, processes);
+            publishSaasFrpc(msg.taskId);
+            console.log(
+              `[node] 切换任务 taskId=${msg.taskId} cwd=${cwd} processes=${processes.map((p) => p.id).join(',') || '-'}`,
+            );
+          } catch (err) {
+            console.error(`[node] 切换任务失败 taskId=${msg.taskId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
         }
         // closeSession：空闲关闭由引擎自身管理，持久状态保留，这里无需动作
       });
@@ -232,6 +267,7 @@ class NodeConnector {
       ws.on('close', () => {
         for (const c of this.turns.values()) c.abort();
         this.turns.clear();
+        this.taskProcesses.stop();
         if (opened) console.log('[node] 连接已关闭');
         resolve();
       });
@@ -310,7 +346,7 @@ class NodeConnector {
     try {
       let taskCwd: string | undefined;
       if (msg.cwd?.trim()) {
-        taskCwd = ensureTaskCwdExists(msg.cwd);
+        taskCwd = ensureTaskCwdExists(resolveNodeTaskCwd(msg.cwd, process.env.LINKAGENT_NODE_WORKSPACE));
         console.log(`[node] task cwd ready requestId=${msg.requestId} path=${taskCwd}`);
       }
       const result = await this.engineFor(msg.agentId).runTurn({
@@ -426,6 +462,7 @@ function main(): void {
     ...(token ? {} : { secret: loadPersistedSecret(stateDir) }),
     agents,
     nodeAgentConfigs: config.node.agents,
+    taskProcesses: taskProcessesFromConfig(config.node.taskProcesses, process.env.LINKAGENT_DEV_BY_NODE),
     stateDir,
   });
   connector.start();
@@ -435,6 +472,11 @@ function main(): void {
     runtimeDir: layout.state('ide-proxy'),
     frpsTokenFile: layout.state('edge', 'frps.token'),
   });
+  const bootTask = process.env.LINKAGENT_TASK_ID?.trim() ?? '';
+  if (bootTask && isSaasPublicHost(process.env.LINKAGENT_PUBLIC_HOST)) {
+    const workspace = process.env.LINKAGENT_NODE_WORKSPACE;
+    connector.bootTask(bootTask, resolveNodeTaskCwd(workspace ?? '', workspace, bootTask));
+  }
 
   const shutdown = () => {
     console.log('[node] 关闭中…');

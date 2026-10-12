@@ -21,6 +21,7 @@ export type FrpLoginDecision =
 /**
  * frps 内置校验只认一个 auth.token。
  * 已是这份 token 则原样通过；对上任一 nt_ 则把 privilege_key 改写成内部 token，再交给 frps。
+ * 这只影响 Login。控制连接的加密仍用两边配置里的 auth.token，所以 frpc 不能填 nt_。
  */
 export function resolveFrpLogin(input: {
   privilegeKey: string;

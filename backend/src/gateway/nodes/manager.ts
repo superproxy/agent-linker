@@ -208,6 +208,29 @@ export class NodeManager {
     return conn?.approved ? conn : undefined;
   }
 
+  /**
+   * 通知已准入节点切换当前任务。节点不在线或未准入时返回 false，不抛错。
+   * 不带 processes 时，节点用本机 node.taskProcesses 的命令，在这次的 cwd 里启动。
+   */
+  switchTask(
+    nodeId: string,
+    msg: { taskId: string; cwd: string; processes?: { id: string; command: string[] }[] },
+  ): boolean {
+    if (this.registry.get(nodeId)?.disabled === true) return false;
+    const conn = this.connections.get(nodeId);
+    if (!conn?.approved) return false;
+    const taskId = msg.taskId.trim();
+    const cwd = msg.cwd.trim();
+    if (!taskId || !cwd) return false;
+    this.send(conn.ws, {
+      type: 'switchTask',
+      taskId,
+      cwd,
+      ...(msg.processes ? { processes: msg.processes } : {}),
+    });
+    return true;
+  }
+
   /** 已准入在线节点的自报 agent id 列表（任务绑定校验用，被禁用时返回空） */
   onlineAgentIds(nodeId: string): string[] {
     if (this.registry.get(nodeId)?.disabled === true) return [];

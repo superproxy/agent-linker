@@ -188,11 +188,18 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
   assert.match(put('code-localhost')?.body ?? '', new RegExp(`"host":"${TASK_PUBLIC_HOST}"`));
   assert.match(put('code-localhost')?.body ?? '', /"uri":"\/vibe-ide\*"/);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/code-ide')), true);
+  assert.match(put('task-open-default')?.body ?? '', /"uri":"\/default\*"/);
+  assert.match(put('task-open-default')?.body ?? '', /"upstream_host":"dev\.localhost"/);
+  assert.match(put('task-open-default')?.body ?? '', /host\.docker\.internal:7080/);
+  assert.match(put('task-open-default')?.body ?? '', /"priority":1/);
   assert.match(put('task-default')?.body ?? '', new RegExp(`"host":"${TASK_PUBLIC_HOST}"`));
   assert.match(put('task-default')?.body ?? '', /"uri":"\/default-web\*"/);
-  assert.match(put('task-default')?.body ?? '', /host\.docker\.internal:8787/);
+  assert.match(put('task-default')?.body ?? '', /host\.docker\.internal:7080/);
+  assert.match(put('task-default')?.body ?? '', /"upstream_host":"dev\.localhost"/);
+  assert.match(put('task-default')?.body ?? '', /"priority":10/);
   assert.match(put('task-code-default')?.body ?? '', /"uri":"\/default-code\*"/);
-  assert.match(put('task-code-default')?.body ?? '', /host\.docker\.internal:8010/);
+  assert.match(put('task-code-default')?.body ?? '', /host\.docker\.internal:7080/);
+  assert.match(put('task-code-default')?.body ?? '', /"upstream_host":"ide\.localhost"/);
   assert.match(put('task-code-default')?.body ?? '', /\/vibe-ide\/\$1/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"uri":"\/t_41db7238-code\*"/);
   assert.match(put('task-code-t_41db7238')?.body ?? '', /"status":0/);
@@ -204,10 +211,48 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"upstream_host":"vnc\.localhost"/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"status":0/);
   await edge.applyTaskHost({ taskId: 'default', enabled: false, removed: true });
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-open-default')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-default')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-code-default')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-dev-default')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-vnc-default')), true);
+  edge.stop();
+});
+
+test('SaaS 公网域名只校验并原样转到 frps', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'edge-saas-'));
+  const calls: { method: string; url: string; body?: string }[] = [];
+  const edge = await startGatewayEdge({
+    toolsDir: join(root, 'tools'),
+    runtimeDir: join(root, 'runtime'),
+    idePrefix: '/',
+    ideUpstream: 'http://127.0.0.1:8010',
+    gatewayUpstream: 'http://127.0.0.1:8787',
+    publicHost: 'hubide.ljyd.cn',
+    platform: 'freebsd',
+    arch: 'x64',
+    adminFetch: async (input, init) => {
+      calls.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      });
+      return new Response('{}', { status: 200 });
+    },
+  });
+  await edge.syncTaskHosts([{ id: 't_41db7238', name: 'test', enabled: true }]);
+  const put = (id: string) => calls.find((call) => call.method === 'PUT' && call.url.endsWith(`/routes/${id}`));
+  const open = put('task-open-t_41db7238')?.body ?? '';
+  assert.match(open, /"host":"hubide\.ljyd\.cn"/);
+  assert.match(open, /"uri":"\/t_41db7238\*"/);
+  assert.match(open, /"pass_host":"pass"/);
+  assert.doesNotMatch(open, /upstream_host/);
+  assert.doesNotMatch(open, /proxy-rewrite/);
+  const code = put('task-code-t_41db7238')?.body ?? '';
+  assert.match(code, /"uri":"\/t_41db7238-code\*"/);
+  assert.doesNotMatch(code, /localhost/);
+  assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/code-localhost')), false);
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/code-localhost')), true);
   edge.stop();
 });
 

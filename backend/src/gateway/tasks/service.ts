@@ -94,13 +94,33 @@ export class TaskService {
     this.hostChange = handler;
   }
 
+  /**
+   * 当前任务变了：激活、新建并激活、或删掉激活项后落到另一项。
+   * 只通知远程节点且已有 cwd 的任务。本机 local 与缺目录的不发。
+   */
+  setTaskSwitchHandler(handler: (task: TaskItem) => void): void {
+    this.taskSwitch = handler;
+  }
+
   private hostChange?: (change: { taskId: string; name: string; enabled: boolean; removed?: boolean }) => void;
+  private taskSwitch?: (task: TaskItem) => void;
 
   private notifyHost(task: { id: string; name: string }, enabled: boolean, removed = false): void {
     try {
       this.hostChange?.({ taskId: task.id, name: task.name, enabled, removed });
     } catch (err) {
       console.error(`[tasks] 同步任务域名失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private notifyTaskSwitch(task: TaskItem): void {
+    const nodeId = task.nodeId?.trim();
+    if (!nodeId || nodeId === LOCAL_NODE_ID) return;
+    if (!task.cwd?.trim()) return;
+    try {
+      this.taskSwitch?.(task);
+    } catch (err) {
+      console.error(`[tasks] 下发切换任务失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -401,6 +421,7 @@ export class TaskService {
     this.store.write(state);
     this.syncSkillFiles(state);
     this.notifyHost(task, task.keyEnabled !== false);
+    this.notifyTaskSwitch(task);
     return task;
   }
 
@@ -436,6 +457,7 @@ export class TaskService {
     this.store.write(state);
     this.syncSkillFiles(state);
     this.notifyHost(task, task.keyEnabled !== false);
+    this.notifyTaskSwitch(task);
     return task;
   }
 
@@ -558,6 +580,7 @@ export class TaskService {
     if (!task) throw new Error(`任务不存在: ${id}`);
     state.activeTaskId = task.id;
     this.store.write(state);
+    this.notifyTaskSwitch(task);
     return task;
   }
 
@@ -565,12 +588,17 @@ export class TaskService {
     const idx = state.tasks.findIndex((t) => t.id === id);
     const task = idx >= 0 ? state.tasks[idx] : undefined;
     if (!task) throw new Error(`任务不存在: ${id}`);
+    const wasActive = state.activeTaskId === id;
     state.tasks.splice(idx, 1);
-    if (state.activeTaskId === id) {
+    if (wasActive) {
       state.activeTaskId = state.tasks[0]?.id ?? '';
     }
     this.store.write(state);
     this.notifyHost(task, false, true);
+    if (wasActive) {
+      const next = state.tasks.find((t) => t.id === state.activeTaskId);
+      if (next) this.notifyTaskSwitch(next);
+    }
     return state.tasks;
   }
 

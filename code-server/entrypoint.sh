@@ -16,6 +16,9 @@ prefix() {
 
 /usr/bin/entrypoint.sh "$@" &
 
+if [ "${LINKAGENT_DEV_BY_NODE:-}" = 1 ]; then
+  log "[dev] 交给 node，切换任务时在任务目录启动"
+else
 log "[dev] 开启，工作区有 package.json 时监听 0.0.0.0:5173"
 dev_loop() {
   while true; do
@@ -32,9 +35,12 @@ dev_loop() {
   done
 }
 dev_loop &
+fi
 
 log "[vnc] 开启，Xvfb :1，x11vnc 127.0.0.1:5900，noVNC 0.0.0.0:6080"
 export DISPLAY=:1
+# 容器重启后上次的 X 锁还在，Xvfb 会直接退出，桌面就连不上。
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 Xvfb :1 -screen 0 1280x800x24 2>&1 | prefix "[vnc]" &
 sleep 1
 openbox 2>&1 | prefix "[vnc]" &

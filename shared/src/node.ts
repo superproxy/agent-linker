@@ -166,4 +166,14 @@ export type GatewayToNode =
       permissionPolicy?: PermissionPolicySpec;
     }
   | { type: 'cancel'; requestId: string }
-  | { type: 'closeSession'; sessionKey: string };
+  | { type: 'closeSession'; sessionKey: string }
+  /**
+   * 切换当前任务。节点停掉上一任务拉起的附属进程，再按命令在新 cwd 里启动。
+   * 任务目录仍由既有 ensureTaskCwdExists 创建，不另造布局。
+   */
+  | {
+      type: 'switchTask';
+      taskId: string;
+      cwd: string;
+      processes?: { id: string; command: string[] }[];
+    };

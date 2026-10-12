@@ -182,6 +182,19 @@ export const nodeSectionSchema = z
     /** 回连网关的永久 token；缺省取 gateway.auth.token 或自动生成的 gateway-token */
     gatewayToken: z.string().default(''),
     /**
+     * 随任务切换拉起的附属进程。命令只配在节点本机，和 ACP 的 command 一样。
+     * 网关 switchTask 只带 taskId 与 cwd；消息里若自带 processes 则覆盖这里。
+     * 缺省空：不拉起。容器入口仍负责 code-server / VNC，不要在这里重复同一条命令。
+     */
+    taskProcesses: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          command: z.array(z.string().min(1)).min(1),
+        }),
+      )
+      .default([]),
+    /**
      * 浏览器 IDE。node 只拉起 code-server，端口发布到回环地址。
      * nginx 与 frps 由网关安装并监听，不在 node 里起反代容器。
      * 缺省关闭，避免没有 docker 的节点启动失败。
@@ -214,6 +227,7 @@ export const nodeSectionSchema = z
     agents: [],
     gatewayUrl: '',
     gatewayToken: '',
+    taskProcesses: [],
     serveWeb: {
       enabled: false,
       image: LINKAGENT_CODE_SERVER_IMAGE,

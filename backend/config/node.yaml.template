@@ -11,6 +11,13 @@ agents:
     # key: <Cursor API key>   # 启动：agent acp --key <key>（也可写 command: [agent, acp, --key, ...]）
   - hermes
 
+# 切换任务时在该任务目录拉起，命令只写在节点上。网关只下发 taskId 与 cwd。
+# 缺省不拉起。聚合容器设 LINKAGENT_DEV_BY_NODE=1 时，未写这里就用 npm run dev。
+# code-server 与 VNC 仍由容器入口常驻，不要在这里再写同一条命令。
+# taskProcesses:
+#   - id: dev
+#     command: [npm, run, dev, --, --host, 0.0.0.0, --port, 5173, --strictPort]
+
 # node 只拉起本仓库构建的 code-server，发布到 127.0.0.1:8000。先执行 pnpm image:code-server。
 serveWeb:
   enabled: true

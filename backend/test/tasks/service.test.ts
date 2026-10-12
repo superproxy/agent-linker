@@ -32,6 +32,26 @@ test('createTask 追加并激活，agent 缺省继承当前激活', () => {
   assert.equal(t2.agentId, 'pi');
 });
 
+test('远程任务激活时通知节点，本机任务不通知', () => {
+  const svc = freshService();
+  const seen: string[] = [];
+  svc.setTaskSwitchHandler((task) => seen.push(`${task.nodeId}:${task.id}`));
+  const state = svc.load('web', 'alice');
+  const remote = svc.createTask(state, '远端', 'pi', undefined, 'D:\\work\\remote', 'n_abc');
+  assert.deepEqual(seen, [`n_abc:${remote.id}`]);
+  seen.length = 0;
+  svc.activateTask(state, DEFAULT_TASK_ID);
+  assert.deepEqual(seen, []);
+  svc.activateTask(state, remote.id);
+  assert.deepEqual(seen, [`n_abc:${remote.id}`]);
+  const other = svc.createTask(state, '另一个远端', 'pi', undefined, 'D:\\work\\other', 'n_def');
+  svc.activateTask(state, remote.id);
+  svc.deleteTask(state, DEFAULT_TASK_ID);
+  seen.length = 0;
+  svc.deleteTask(state, remote.id);
+  assert.deepEqual(seen, [`n_def:${other.id}`]);
+});
+
 test('activate / delete / rename', () => {
   const svc = freshService();
   const state = svc.load('weixin', 'wx_1');

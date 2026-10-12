@@ -33,6 +33,7 @@ test('build-dist --target=node --skip-install 产出仅含连接器的独立包'
   const pkg = JSON.parse(readFileSync(join(out, 'package.json'), 'utf8'));
   assert.equal(pkg.name, 'linkagent-node');
   assert.ok(pkg.dependencies.acpx);
+  assert.ok(pkg.dependencies['@agentclientprotocol/sdk']);
   assert.ok(pkg.dependencies.ws);
   assert.equal(pkg.dependencies.fastify, undefined);
 

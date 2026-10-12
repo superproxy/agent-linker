@@ -14,10 +14,12 @@ import {
   TASK_PUBLIC_HOST,
   taskCodeRouteId,
   taskDevRouteId,
+  taskOpenRouteId,
   taskRouteId,
   taskRouteUri,
   taskVncRouteId,
 } from './apisix.js';
+import { isSaasPublicHost } from '@linkagent/shared';
 import { renderFrpsConf } from './render.js';
 
 export interface GatewayEdgeOptions {
@@ -272,6 +274,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         const host = opts.publicHost ?? TASK_PUBLIC_HOST;
         const taskId = change.taskId;
         if (change.removed) {
+          await admin.remove(taskOpenRouteId(taskId));
           await admin.remove(taskRouteId(taskId));
           await admin.remove(taskCodeRouteId(taskId));
           await admin.remove(taskDevRouteId(taskId));
@@ -280,40 +283,60 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         }
         await admin.remove(taskDevRouteId(taskId));
         const codePrefix = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const frps = vncUpstream;
+        const saas = isSaasPublicHost(host);
+        await admin.upsert({
+          id: taskOpenRouteId(taskId),
+          host,
+          uri: `/${taskId}*`,
+          upstream: frps,
+          enabled: change.enabled,
+          priority: 1,
+          ...(saas ? {} : { upstreamHost: 'dev.localhost', rewrite: [`^/${codePrefix}/?(.*)`, '/$1'] as [string, string] }),
+        });
         await admin.upsert({
           id: taskRouteId(taskId),
           host,
           uri: taskRouteUri(taskId, 'web'),
-          upstream: opts.gatewayUpstream,
+          upstream: frps,
           enabled: change.enabled,
+          priority: 10,
+          ...(saas ? {} : { upstreamHost: 'dev.localhost', rewrite: [`^/${codePrefix}-web/?(.*)`, '/$1'] as [string, string] }),
         });
         await admin.upsert({
           id: taskCodeRouteId(taskId),
           host,
           uri: taskRouteUri(taskId, 'code'),
-          upstream: opts.ideUpstream,
+          upstream: frps,
           enabled: change.enabled,
-          rewrite: [`^/${codePrefix}-code/?(.*)`, '/vibe-ide/$1'],
+          priority: 10,
+          ...(saas
+            ? {}
+            : { upstreamHost: 'ide.localhost', rewrite: [`^/${codePrefix}-code/?(.*)`, '/vibe-ide/$1'] as [string, string] }),
         });
         await admin.upsert({
           id: taskVncRouteId(taskId),
           host,
           uri: taskRouteUri(taskId, 'vnc'),
-          upstream: vncUpstream,
-          upstreamHost: 'vnc.localhost',
+          upstream: frps,
           enabled: change.enabled,
-          rewrite: [`^/${codePrefix}-vnc/?(.*)`, '/$1'],
+          priority: 10,
+          ...(saas ? {} : { upstreamHost: 'vnc.localhost', rewrite: [`^/${codePrefix}-vnc/?(.*)`, '/$1'] as [string, string] }),
         });
       },
       async syncTaskHosts(tasks) {
         const host = opts.publicHost ?? TASK_PUBLIC_HOST;
-        await admin.upsert({
-          id: 'code-localhost',
-          host,
-          uri: '/vibe-ide*',
-          upstream: opts.ideUpstream,
-          enabled: true,
-        });
+        if (isSaasPublicHost(host)) {
+          await admin.remove('code-localhost');
+        } else {
+          await admin.upsert({
+            id: 'code-localhost',
+            host,
+            uri: '/vibe-ide*',
+            upstream: opts.ideUpstream,
+            enabled: true,
+          });
+        }
         await admin.remove('code-ide');
         for (const task of tasks) {
           await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });

@@ -5,36 +5,41 @@
  */
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultInstallRoot } from './lib/install-paths.mjs';
 import { migrateIntoTarget, writeExternalInstallMarkers } from './lib/migrate-run.mjs';
+import {
+  InstallCliError,
+  parseInstallCliArgs,
+  printMigrateCopyInstallHelp,
+  resolveTargetInstallDir,
+} from './lib/install-cli-args.mjs';
 
 const ROOT = resolve(join(fileURLToPath(import.meta.url), '..', '..'));
 
-if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log(`用法: node scripts/migrate-copy-install.mjs [--dry-run]
+let parsed;
+try {
+  parsed = parseInstallCliArgs(process.argv.slice(2), { extras: ['--dry-run'] });
+} catch (err) {
+  if (err instanceof InstallCliError) {
+    console.error(`${err.message}\n`);
+    printMigrateCopyInstallHelp();
+    process.exit(1);
+  }
+  throw err;
+}
 
-  复制到 LINKAGENT_INSTALL（缺省 Linux /opt/agent-linker，Windows %%ProgramData%%\\linkagent）。
-  写入 .linkagent-install + .linkagent-server，后续 pm/edge/server-install-update 走该目录。
-
-  环境变量：
-    LINKAGENT_INSTALL   目标绝对路径
-    LINKAGENT_LEGACY_ROOT  额外来源（如曾在 dist/linkagent 内运行）
-
-  **服务器首次从旧布局迁出**：必须先执行 migrate-repo-layout，再本脚本（或 migrate-server-from-legacy.sh）。
-`);
+if (parsed.help) {
+  printMigrateCopyInstallHelp();
   process.exit(0);
 }
 
-function resolveInstallTarget() {
-  const env = process.env.LINKAGENT_INSTALL?.trim();
-  if (env) return resolve(env);
-  return resolve(defaultInstallRoot());
-}
-
-const install = resolveInstallTarget();
+const install = resolveTargetInstallDir({
+  installDir: parsed.installDir,
+  repoRoot: ROOT,
+  readInstallMarker: false,
+});
 const legacy = process.env.LINKAGENT_LEGACY_ROOT?.trim();
 
-if (process.argv.includes('--dry-run')) {
+if (parsed.flags['--dry-run']) {
   console.log(`[dry-run] 目标安装目录：${install}`);
   process.exit(0);
 }

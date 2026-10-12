@@ -14,6 +14,7 @@
  */
 import { watch } from 'node:fs';
 import { readFileSync } from 'node:fs';
+import { resolveProcessManagerRoot } from '../install/layout.js';
 import {
   ProcessManager,
   parseTargets,
@@ -89,7 +90,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const pm = new ProcessManager();
+  const pm = new ProcessManager(resolveProcessManagerRoot());
 
   switch (command) {
     case 'start':

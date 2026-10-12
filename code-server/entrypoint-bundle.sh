@@ -9,6 +9,8 @@ export LINKAGENT_NODE_AGENTS="${LINKAGENT_NODE_AGENTS:-pi}"
 mkdir -p "$LINKAGENT_NODE_STATE_DIR" /etc/linkagent
 # 与主机模式相同：node 写入 frpc.toml，本入口只负责执行 frpc。文件在容器内，不再挂载。
 export LINKAGENT_FRPC_BY_NODE=1
+# dev 由 node 在切换任务时拉起，入口不再占 5173。
+export LINKAGENT_DEV_BY_NODE=1
 
 if [ ! -f /root/.pi/agent/models.json ]; then
   node "$LINKAGENT_HOME/scripts/setup-pi.mjs" --skip-install || true

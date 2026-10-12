@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -147,6 +147,22 @@ test('resolveRepoInstallRoot：LINKAGENT_DEV=1 时仍用仓库根', () => {
     if (prev === undefined) delete process.env.LINKAGENT_DEV;
     else process.env.LINKAGENT_DEV = prev;
   }
+});
+
+test('createInstallLayout：安装根首尾空白仍按 dist 解析', () => {
+  const root = tmpRoot();
+  writeFileSync(join(root, '.linkagent-root'), 'marker\n');
+  mkdirSync(join(root, 'config'), { recursive: true });
+  writeFileSync(join(root, 'config', 'gateway.yaml'), 'server:\n  port: 8787\n');
+  const layout = createInstallLayout(`${root} `);
+  assert.equal(layout.kind, 'dist');
+  assert.ok(layout.entry('node').endsWith(join('bin', 'node.mjs')));
+});
+
+test('defaultInstallRoot：Windows 缺省为 %USERPROFILE%/agent-linker', () => {
+  if (process.platform !== 'win32') return;
+  const home = process.env.USERPROFILE?.trim() || homedir();
+  assert.equal(defaultInstallRoot(''), join(home, 'agent-linker'));
 });
 
 test('webRoot：dev 探测 web/dist（vite 产物），而非源码 web/', () => {

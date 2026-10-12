@@ -12,6 +12,7 @@
  * 其余代码只描述「要什么」（state('nodes') / entry('gateway') / page('chat')），不关心形态。
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CONFIG_BASENAMES } from '@linkagent/shared';
@@ -57,7 +58,7 @@ export function findRepoRoot(start: string = process.cwd()): string {
  * 产物内所有运行态目录都相对此根解析，因此 dist 目录可整体拷贝到任意机器运行。
  */
 export function findInstallRoot(): string {
-  const env = process.env.LINKAGENT_HOME;
+  const env = process.env.LINKAGENT_HOME?.trim();
   if (env) return resolve(env);
   let dir = dirname(fileURLToPath(import.meta.url));
   for (;;) {
@@ -69,11 +70,18 @@ export function findInstallRoot(): string {
   return resolveRepoInstallRoot(findRepoRoot());
 }
 
+/** pm / start.bat 启动时优先用 cwd（已 cd 到安装根），避免错误的 LINKAGENT_HOME 把 dist 判成 dev */
+export function resolveProcessManagerRoot(): string {
+  const cwd = resolve(process.cwd());
+  if (existsSync(join(cwd, DEPLOY_MARKER))) return cwd;
+  return findInstallRoot();
+}
+
 /** 默认运行安装目录（Release `install.sh` 默认 `/opt/agent-linker`） */
 export function defaultInstallRoot(_repoRoot: string): string {
   if (process.platform === 'win32') {
-    const base = process.env.ProgramData ?? 'C:\\ProgramData';
-    return join(base, 'linkagent');
+    const base = process.env.USERPROFILE?.trim() || homedir();
+    return join(base, 'agent-linker');
   }
   return DEFAULT_INSTALL_UNIX;
 }
@@ -183,14 +191,15 @@ export interface InstallLayout {
 
 /** 依据安装根构造布局（可传任意 root，便于单测） */
 export function createInstallLayout(root: string = findInstallRoot()): InstallLayout {
-  const kind: InstallKind = existsSync(join(root, DEPLOY_MARKER)) ? 'dist' : 'dev';
-  const state = (...segments: string[]) => join(root, STATE_DIR, ...segments);
+  const installRoot = resolve(root.trim());
+  const kind: InstallKind = existsSync(join(installRoot, DEPLOY_MARKER)) ? 'dist' : 'dev';
+  const state = (...segments: string[]) => join(installRoot, STATE_DIR, ...segments);
 
   // dev / dist 统一 <installRoot>/config；legacy server/config、backend/config 兜底
   const configCandidates = [
-    join(root, INSTALL_CONFIG_DIR, CONFIG_BASENAMES.gateway),
-    join(root, 'server', 'config', CONFIG_BASENAMES.gateway),
-    join(root, 'backend', 'config', CONFIG_BASENAMES.gateway),
+    join(installRoot, INSTALL_CONFIG_DIR, CONFIG_BASENAMES.gateway),
+    join(installRoot, 'server', 'config', CONFIG_BASENAMES.gateway),
+    join(installRoot, 'backend', 'config', CONFIG_BASENAMES.gateway),
   ];
   let configDir = dirname(configCandidates[0]!);
   let configMode: InstallLayout['configMode'] = 'none';
@@ -205,7 +214,8 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
   }
 
   // web 管理端：dist 为 <root>/web；dev 为 vite 产物 <root>/web/dist（兜底 <root>/web）
-  const webCandidates = kind === 'dist' ? [join(root, 'web')] : [join(root, 'web', 'dist'), join(root, 'web')];
+  const webCandidates =
+    kind === 'dist' ? [join(installRoot, 'web')] : [join(installRoot, 'web', 'dist'), join(installRoot, 'web')];
   const webRoot = webCandidates.find((p) => existsSync(join(p, 'index.html')) && existsSync(join(p, 'assets')));
 
   // 内置页面随代码走：本模块 dev 在 src/install/、dist bundle 在 server/，两者的 ../dev 即页面目录。
@@ -229,7 +239,7 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
 
   return {
     kind,
-    root,
+    root: installRoot,
     configCandidates,
     configDir,
     configMode,
@@ -249,8 +259,8 @@ export function createInstallLayout(root: string = findInstallRoot()): InstallLa
     pmLogs: state('pm', 'logs'),
     webRoot,
     page: pageFile,
-    tsxLoader: tsxLoaderFor(root),
-    entry: (id) => join(root, PROCESS_ENTRIES[id][kind]),
+    tsxLoader: tsxLoaderFor(installRoot),
+    entry: (id) => join(installRoot, PROCESS_ENTRIES[id][kind]),
     loginHint,
     restartWeixinHint,
     restartChannelsHint,
@@ -263,7 +273,7 @@ let cached: { envHome: string | undefined; layout: InstallLayout } | undefined;
  * 以 LINKAGENT_HOME 为缓存键：该 env 显式改变安装根时（测试隔离运行态目录）随之重建。
  */
 export function getLayout(): InstallLayout {
-  const envHome = process.env.LINKAGENT_HOME;
+  const envHome = process.env.LINKAGENT_HOME?.trim() || undefined;
   if (!cached || cached.envHome !== envHome) {
     cached = { envHome, layout: createInstallLayout() };
   }

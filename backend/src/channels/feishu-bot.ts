@@ -1,9 +1,17 @@
 /**
  * 飞书 bot：官方长连接，不加载 @openclaw/feishu。
- * 飞书用户 → WSClient → runChatSession → 网关 /v1 → im.v1.message.reply。
+ * 飞书用户 → WSClient → runChatSession → 网关 /v1。
+ * 正文用 CardKit 流式卡片推送；创建失败时回退为一次性文本回复。
  */
 import { createRequire } from 'node:module';
 import { GatewayUnauthorizedError, runChatSession } from './gateway-chat.js';
+import {
+  closeStreamSettings,
+  FeishuTextStream,
+  isFeishuStatusChunk,
+  replyCardContent,
+  type FeishuCardApi,
+} from './feishu-push.js';
 import { emitChannelDispatchTrace, newDispatchTraceId } from '../store/dispatch-trace.js';
 import type { UserTokenProvider } from './user-token.js';
 
@@ -21,6 +29,12 @@ interface FeishuEventData {
   sender?: { sender_type?: string; sender_id?: { open_id?: string } };
 }
 
+interface LarkReplyResult {
+  code?: number;
+  msg?: string;
+  data?: { card_id?: string };
+}
+
 interface LarkSdk {
   Client: new (opts: { appId: string; appSecret: string }) => {
     im: {
@@ -30,6 +44,23 @@ interface LarkSdk {
             path: { message_id: string };
             data: { msg_type: string; content: string };
           }) => Promise<unknown>;
+        };
+      };
+    };
+    cardkit: {
+      v1: {
+        card: {
+          create: (payload: { data: { type: string; data: string } }) => Promise<LarkReplyResult>;
+          settings: (payload: {
+            data: { settings: string; sequence: number };
+            path: { card_id: string };
+          }) => Promise<LarkReplyResult>;
+        };
+        cardElement: {
+          content: (payload: {
+            data: { content: string; sequence: number };
+            path: { card_id: string; element_id: string };
+          }) => Promise<LarkReplyResult>;
         };
       };
     };
@@ -74,6 +105,42 @@ export function feishuTextFromContent(messageType: string, content: string): str
   } catch {
     return '';
   }
+}
+
+function assertLarkOk(res: LarkReplyResult, action: string): void {
+  if (res.code && res.code !== 0) throw new Error(`飞书${action}失败 ${res.code} ${res.msg ?? ''}`);
+}
+
+function cardApi(client: InstanceType<LarkSdk['Client']>): FeishuCardApi {
+  return {
+    async createCard(cardJson) {
+      const res = await client.cardkit.v1.card.create({ data: { type: 'card_json', data: cardJson } });
+      assertLarkOk(res, '创建卡片');
+      const cardId = res.data?.card_id?.trim();
+      if (!cardId) throw new Error('飞书未返回 card_id');
+      return cardId;
+    },
+    async replyCard(messageId, cardId) {
+      await client.im.v1.message.reply({
+        path: { message_id: messageId },
+        data: { msg_type: 'interactive', content: replyCardContent(cardId) },
+      });
+    },
+    async updateContent(cardId, elementId, content, sequence) {
+      const res = await client.cardkit.v1.cardElement.content({
+        path: { card_id: cardId, element_id: elementId },
+        data: { content, sequence },
+      });
+      assertLarkOk(res, '更新卡片');
+    },
+    async closeStream(cardId, sequence) {
+      const res = await client.cardkit.v1.card.settings({
+        path: { card_id: cardId },
+        data: { settings: closeStreamSettings(), sequence },
+      });
+      assertLarkOk(res, '结束流式');
+    },
+  };
 }
 
 function splitText(text: string): string[] {
@@ -146,7 +213,9 @@ export async function startFeishuBot(opts: FeishuBotOptions): Promise<FeishuBotH
         owner: opts.ownerUsername,
         textLen: text.length,
       });
+      const stream = new FeishuTextStream(cardApi(client), messageId);
       const send = async (chunk: string) => {
+        if (stream.started && !stream.failed && !isFeishuStatusChunk(chunk)) return;
         await client.im.v1.message.reply({
           path: { message_id: messageId },
           data: { msg_type: 'text', content: JSON.stringify({ text: chunk }) },
@@ -165,8 +234,8 @@ export async function startFeishuBot(opts: FeishuBotOptions): Promise<FeishuBotH
           source: 'feishu-bot',
           ...(gatewayToken ? { gatewayToken } : {}),
           send,
+          onPartial: (full) => stream.push(full),
           split: splitText,
-          maxTextChars: 512,
           log,
         });
       };
@@ -183,8 +252,11 @@ export async function startFeishuBot(opts: FeishuBotOptions): Promise<FeishuBotH
             throw err;
           }
         }
+        await stream.finish(out.text).catch((err: unknown) => {
+          errLog('[feishu] 结束流式卡片失败:', err instanceof Error ? err.message : err);
+        });
         if (out.text.trim()) {
-          log(`[feishu] outbound open_id=${openId} len=${out.text.length}`);
+          log(`[feishu] outbound open_id=${openId} len=${out.text.length} streamed=${stream.started}`);
           emitChannelDispatchTrace('channels.reply', {
             traceId,
             channel: 'feishu',

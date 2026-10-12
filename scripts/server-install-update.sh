@@ -10,23 +10,43 @@ SKIP_DEPLOY_NPM=0
 NO_PULL=0
 SKIP_BUILD=0
 
-for arg in "$@"; do
-  case "$arg" in
-    --restart) RESTART=1 ;;
-    --skip-install|--skip-deploy-npm) SKIP_DEPLOY_NPM=1 ;;
-    --no-pull) NO_PULL=1 ;;
-    --skip-build) SKIP_BUILD=1 ;;
+INSTALL_OVERRIDE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --restart) RESTART=1; shift ;;
+    --skip-install|--skip-deploy-npm) SKIP_DEPLOY_NPM=1; shift ;;
+    --no-pull) NO_PULL=1; shift ;;
+    --skip-build) SKIP_BUILD=1; shift ;;
+    --install-dir)
+      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "缺少 --install-dir 后的路径" >&2
+        exit 1
+      fi
+      INSTALL_OVERRIDE="$2"
+      shift 2
+      ;;
+    --install-dir=*)
+      INSTALL_OVERRIDE="${1#*=}"
+      if [ -z "$INSTALL_OVERRIDE" ]; then
+        echo "--install-dir= 需要非空路径" >&2
+        exit 1
+      fi
+      shift
+      ;;
     -h|--help)
       cat <<EOF
-用法: $0 [--restart] [--no-pull] [--skip-build] [--skip-deploy-npm]
+用法: $0 [--install-dir <path>] [--restart] [--no-pull] [--skip-build] [--skip-deploy-npm]
 
   在已 clone 的源码仓库（$ROOT）执行三步：
 
     1/3 同步源码   git pull --ff-only（--no-pull 跳过）
     2/3 构建       pnpm install && pnpm build:dist → $BUILD
-    3/3 部署       发布包同步到 LINKAGENT_INSTALL（默认 /opt/agent-linker）
+    3/3 部署       发布包同步到运行安装目录
 
-  首次从旧布局：bash scripts/migrate-server-from-legacy.sh（先 repo 再 LINKAGENT_INSTALL）
+  --install-dir <path>  部署目标（优先于 LINKAGENT_INSTALL）
+  LINKAGENT_INSTALL     缺省 /opt/agent-linker（Linux）或 %%USERPROFILE%%\\agent-linker（Windows）
+
+  首次从旧布局：bash scripts/migrate-server-from-legacy.sh（先 repo 再安装目录）
 
   --skip-build       仅部署（假定 dist/linkagent 已构建）
   --skip-deploy-npm  部署时不于安装目录执行 npm install
@@ -35,7 +55,8 @@ EOF
       exit 0
       ;;
     *)
-      echo "未知参数: $arg" >&2
+      echo "未知参数: $1" >&2
+      echo "提示: $0 --help" >&2
       exit 1
       ;;
   esac
@@ -47,7 +68,11 @@ cd "$ROOT"
 # shellcheck source=lib/sync-install.sh
 . "$ROOT/scripts/lib/sync-install.sh"
 
-INSTALL="${LINKAGENT_INSTALL:-$(linkagent_default_install_dir)}"
+if [ -n "$INSTALL_OVERRIDE" ]; then
+  INSTALL="$INSTALL_OVERRIDE"
+else
+  INSTALL="${LINKAGENT_INSTALL:-$(linkagent_default_install_dir)}"
+fi
 INSTALL_CFG="$INSTALL/config"
 INSTALL_STATE="$INSTALL/.runtime-state"
 
@@ -115,5 +140,5 @@ echo "✅ 构建：$BUILD"
 echo "✅ 部署：$INSTALL"
 
 if [ "$RESTART" = 1 ]; then
-  (cd "$INSTALL" && LINKAGENT_HOME="$INSTALL" ./start.sh restart gateway)
+  (cd "$INSTALL" && ./start.sh restart gateway)
 fi

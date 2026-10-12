@@ -167,6 +167,11 @@ export interface RunChatSessionOptions {
   timeoutMs?: number;
   /** 正文累计字符上限：达到即中断请求快速返回（用户只收到前 N 字符）。不设则完整生成 */
   maxTextChars?: number;
+  /**
+   * 正文累积过程中的增量。参数是当前全文，不是单次 delta。
+   * 飞书用它做卡片打字机；失败只记日志，不影响结束后的 send。
+   */
+  onPartial?: (fullText: string) => Promise<void>;
   /** 日志回调（可选） */
   log?: (...args: unknown[]) => void;
 }
@@ -227,6 +232,13 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
   // 达到 maxTextChars 主动截断（快速返回）：与超时/异常区分，不作为错误推送
   let truncated = false;
   let receivedText = '';
+  let partialDone = Promise.resolve();
+  const notePartial = (full: string) => {
+    if (!opts.onPartial) return;
+    partialDone = partialDone.then(() => opts.onPartial!(full)).catch((err: unknown) => {
+      log('[chat] 增量推送失败:', err instanceof Error ? err.message : err);
+    });
+  };
   try {
     if (opts.traceId) {
       emitChannelDispatchTrace('channels.v1.request', {
@@ -261,6 +273,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
           textReceived = true;
           void flushReasoningNow(); // 正文第一条输出 → 先推思考块（fire，不等正文）
         }
+        notePartial(receivedText);
         // 正文累计达到上限 → 中断请求，让模型提前停、快速返回（已收内容截断发给用户）
         if (opts.maxTextChars && receivedText.length >= opts.maxTextChars && !controller.signal.aborted) {
           truncated = true;
@@ -269,6 +282,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
       },
     });
     await flushReasoningNow();
+    await partialDone;
     if (out.text.trim()) {
       const capped = opts.maxTextChars ? out.text.trim().slice(0, opts.maxTextChars) : out.text.trim();
       await pushChunks(capped);
@@ -287,6 +301,7 @@ export async function runChatSession(opts: RunChatSessionOptions): Promise<RunCh
     if (err instanceof GatewayUnauthorizedError) throw err;
     // 主动截断（abort）不算失败：把已收到的前 N 字符发给用户即可
     if (truncated) {
+      await partialDone;
       if (reasoning && !reasoningFlushed) await flushReasoningNow().catch(() => {});
       const capped = receivedText.trim().slice(0, opts.maxTextChars ?? Infinity);
       if (capped) await pushChunks(capped).catch(() => {});

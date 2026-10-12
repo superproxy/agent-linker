@@ -93,7 +93,7 @@ function runtimeDependenciesFull() {
 
 function runtimeDependenciesNode() {
   const deps = {};
-  for (const name of NODE_EXTERNAL) {
+  for (const name of [...NODE_EXTERNAL, '@agentclientprotocol/sdk']) {
     const ver = BACKEND_PKG.dependencies[name];
     if (!ver) throw new Error(`backend/package.json 缺少运行时依赖 ${name}`);
     deps[name] = ver;
@@ -483,7 +483,6 @@ async function buildFull(dist, skipInstall) {
 set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
-export LINKAGENT_HOME="$DIR"
 CMD="\${1:-start}"
 TARGET="\${2:-all}"
 case "$CMD" in
@@ -500,7 +499,7 @@ esac
     writeFileSync(
       join(dist, 'start.bat'),
       `@echo off
-rem linkagent 单机进程管理器（gateway + 微信 + node 三进程）
+rem linkagent pm (gateway + channels + node)
 cd /d "%~dp0"
 set "CMD=%~1"
 if "%CMD%"=="" set "CMD=start"
@@ -642,7 +641,6 @@ set -u
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 CMD="\${1:-start}"
-export LINKAGENT_HOME="$DIR"
 exec node bin/ctl.mjs "$CMD"
 `,
       { mode: 0o755 },

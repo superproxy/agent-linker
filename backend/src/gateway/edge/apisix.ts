@@ -16,6 +16,8 @@ export interface ApisixRouteSpec {
   rewrite?: [string, string];
   /** 转给上游时改写 Host。frps 按 frpc 登记的域名匹配，例如 vnc.localhost。 */
   upstreamHost?: string;
+  /** 越大越优先。`/<taskId>-code` 必须压过 `/<taskId>`。 */
+  priority?: number;
 }
 
 export { TASK_PUBLIC_HOST };
@@ -29,6 +31,11 @@ export function taskRouteUri(taskId: string, type: TaskRouteType): string {
 export function taskRouteId(taskId: string): string {
   const safe = taskId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   return `task-${safe}`;
+}
+
+/** 用户入口 `/<taskId>`，转到 dev。 */
+export function taskOpenRouteId(taskId: string): string {
+  return `task-open-${taskRouteId(taskId).slice('task-'.length)}`;
 }
 
 function taskHostForProxy(name: string, taskId: string, kind: 'web' | 'ide' | 'dev' | 'vnc'): string {
@@ -89,6 +96,7 @@ export function renderApisixRoute(spec: ApisixRouteSpec): Record<string, unknown
     host: spec.host,
     enable_websocket: true,
     status: spec.enabled ? 1 : 0,
+    ...(spec.priority != null ? { priority: spec.priority } : {}),
     ...(spec.rewrite ? { plugins: { 'proxy-rewrite': { regex_uri: spec.rewrite } } } : {}),
     upstream: {
       type: 'roundrobin',

@@ -7,24 +7,43 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { syncPublishToInstall } from './lib/sync-install.mjs';
-import { resolveInstallDir } from './lib/install-paths.mjs';
+import {
+  InstallCliError,
+  parseInstallCliArgs,
+  printInstallDirEnvHint,
+  resolveTargetInstallDir,
+} from './lib/install-cli-args.mjs';
 
 const ROOT = resolve(join(fileURLToPath(import.meta.url), '..', '..'));
 const BUILD = join(ROOT, 'dist', 'linkagent');
 
-const skipBuild = process.argv.includes('--skip-build');
-const skipNpm = process.argv.includes('--skip-deploy-npm');
-
-function installFromFile() {
-  const f = join(ROOT, '.linkagent-install');
-  if (existsSync(f)) {
-    const line = readFileSync(f, 'utf8').trim().split(/\r?\n/)[0]?.trim();
-    if (line) return resolve(line);
+let parsed;
+try {
+  parsed = parseInstallCliArgs(process.argv.slice(2), {
+    extras: ['--skip-build', '--skip-deploy-npm', '--skip-install'],
+  });
+} catch (err) {
+  if (err instanceof InstallCliError) {
+    console.error(`${err.message}\n`);
+    printInstallDirEnvHint('local-install-update.mjs');
+    process.exit(1);
   }
-  return resolve(resolveInstallDir());
+  throw err;
 }
 
-const install = installFromFile();
+if (parsed.help) {
+  printInstallDirEnvHint('local-install-update.mjs');
+  process.exit(0);
+}
+
+const skipBuild = Boolean(parsed.flags['--skip-build']);
+const skipNpm = Boolean(parsed.flags['--skip-deploy-npm'] || parsed.flags['--skip-install']);
+
+const install = resolveTargetInstallDir({
+  installDir: parsed.installDir,
+  repoRoot: ROOT,
+  readInstallMarker: true,
+});
 
 console.log(`==> 构建产物：${BUILD}`);
 console.log(`==> 部署目标：${install}`);
@@ -47,4 +66,4 @@ writeFileSync(join(ROOT, '.linkagent-install'), `${install}\n`, 'utf8');
 writeFileSync(join(ROOT, '.linkagent-server'), 'local\n', 'utf8');
 
 console.log(`✅ 部署：${install}`);
-console.log(`   启动：cd "${install}" && set LINKAGENT_HOME=${install} && start.bat start（或 ./start.sh）`);
+console.log(`   启动：cd "${install}" && start.bat start（或 ./start.sh start）`);

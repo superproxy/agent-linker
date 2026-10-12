@@ -265,6 +265,13 @@ export async function buildServer(options?: {
         }
       : {}),
   });
+  taskService.setTaskSwitchHandler((task) => {
+    const nodeId = task.nodeId?.trim();
+    const cwd = task.cwd?.trim();
+    if (!nodeId || !cwd) return;
+    const sent = nodeManager.switchTask(nodeId, { taskId: task.id, cwd });
+    if (!sent) console.warn(`[tasks] 节点 ${nodeId} 不在线，任务 ${task.id} 的切换未下发`);
+  });
   const taskTranscripts = createTaskTranscripts(layout.state('task-transcripts'), layout.nodeState);
 
   const authGuard = new AuthGuard(userStore, {

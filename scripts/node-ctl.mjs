@@ -40,7 +40,7 @@ export const NODE_LAUNCH_HELP = `用法
 
 仅 Docker
   ARK_API_KEY                   模型密钥，启动时注入，不写进镜像
-  FRPS_TOKEN                    不填则用 LINKAGENT_GATEWAY_TOKEN（nt_）。每台节点一枚
+  FRPS_TOKEN                    必须与 frps auth.token 相同。不要填 nt_，控制连接加密对不上会马上断开
   FRPS_SERVER_ADDR              frps 地址，缺省 host.docker.internal
   FRPS_SERVER_PORT              frpc 控制口，缺省 7000
   LINKAGENT_WORKSPACE           宿主机任务根，缺省 code-server/node-docker/workspace

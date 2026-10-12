@@ -8,7 +8,7 @@
   ▼
 SLB
   ▼
-APISIX :9080          三条都转到 frps:7080，用 Host 区分是哪一条 frpc 代理
+APISIX :9080          都转到同一个 frps:7080。本机用 Host 区分，SaaS 用路径区分
   ├─ web  ──▶ frps:7080 ──▶ frpc ──▶ 本机 5173
   ├─ code ──▶ frps:7080 ──▶ frpc ──▶ 本机 code-server 8000
   └─ vnc  ──▶ frps:7080 ──▶ frpc ──▶ 本机 VNC
@@ -35,10 +35,12 @@ frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 
 
 聚合容器里 IDE、VNC、frpc 由入口脚本拉起，node 不再 compose 第二个 code-server（`LINKAGENT_NODE_SERVE_WEB=0`）。
 
-1. node 启动后写 `/etc/linkagent/frpc.toml`。令牌优先用 `FRPS_TOKEN`，否则用 `LINKAGENT_GATEWAY_TOKEN`（`nt_`）。只从环境读 `FRPS_SERVER_ADDR`、`FRPS_SERVER_PORT`（缺省 `host.docker.internal:7000`）。**SaaS 不在节点上配置公网域名**；`customDomains` 固定为 `ide.localhost`、`dev.localhost`、`vnc.localhost`，公网 `hubide.ljyd.cn` 等由 APISIX 在转发到 frps:7080 时改写 Host。
+1. node 启动后写 `/etc/linkagent/frpc.toml`。`FRPS_TOKEN` 必须和 frps 的 `auth.token` 相同。不要填 `nt_`。只从环境读 `FRPS_SERVER_ADDR`、`FRPS_SERVER_PORT`（缺省 `host.docker.internal:7000`）。
 2. 入口脚本等到这个文件出现后执行 `frpc -c /etc/linkagent/frpc.toml`。进程退出则 3 秒后重连。node 不负责拉起 frpc。
-3. frpc 用明文 TCP 连 `serverPort`（控制口 `7000`）。`auth.method = "token"`。frps 只认 `.runtime-state/edge/frps.token` 里的服务端令牌；节点的 `nt_` 由网关 `POST /internal/frp/handler` 在 Login 时改写成服务端令牌。
-4. 登记三条 HTTP 代理，都暴露在 frps 的 `7080` 上，靠域名区分：
+3. frpc 连控制口 `7000`。Login 的 `privilege_key` 可以由网关 `POST /internal/frp/handler` 把 `nt_` 改写成服务端令牌。登录之后，0.60 用两边配置里的 `auth.token` 加密控制连接，插件改不了这把密钥。两边不一致时，日志是 `login to server success` 接着马上 `try to connect`，frps 侧没有 `new proxy`。
+4. HTTP 代理登记在 `7080`。frps 的匹配键是 Host（`customDomains`）加最长路径前缀（`locations`）。命中之后，原始 Host 和路径原样送到 `localIP:localPort`，frps 自己不剥路径。同一 Host 且没有互斥路径时，后登记的代理会失败，控制连接被关掉。
+
+本机模式靠三个不同的 Host，不写 `locations`：
 
    | 代理 | 本机端口 | frps 用来匹配的 Host |
    |---|---|---|
@@ -46,7 +48,17 @@ frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 
    | code | `8000` | `ide.localhost` |
    | vnc | `6080` | `vnc.localhost` |
 
-   `customDomains` 只写主机名，配置里的 `:端口` 会被去掉。
+   `customDomains` 只写主机名，配置里的 `:端口` 会被去掉。APISIX 把公网 Host 改成这三个名字，并去掉 `/<taskId>` 前缀，本机进程才能看到自己的路径。
+
+SaaS 模式只有一个公网 Host（如 `hubide.ljyd.cn`），三条代理用路径分开。frps 取最长前缀，所以 `/<taskId>` 不会吃掉 `/<taskId>-code`：
+
+| 代理 | frpc 本机口 | 应用端口 | location |
+|---|---|---|---|
+| dev | `15173` | `5173` | `/<taskId>`、`/<taskId>-web` |
+| code | `18080` | `8080` | `/<taskId>-code` |
+| vnc | `16080` | `6080` | `/<taskId>-vnc` |
+
+`15173` / `18080` / `16080` 是节点上的适配器。dev 把 `/<taskId>-web` 收成 `/<taskId>`（Vite 的 base）。code、vnc 去掉任务前缀，进程仍挂在 `/`。APISIX 在 SaaS 下不改 Host、不剥路径，否则 `7080` 匹配不到。
 
 登录成功只表示控制连接建立。frps 日志里出现对应代理名，才算 HTTP 路由挂上。`proxy added` 是 frpc 本地列表，还没有完成服务端登记。
 
@@ -58,23 +70,21 @@ frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 
 
 公网 Host 是 `edge.publicHost`（例如 `hubide.ljyd.cn`）。路径是 `/<taskId>-web|code|vnc`。
 
-三条路由的上游都是 frps `7080`。frps 只看 Host，所以 APISIX 要把 Host 改成 frpc 登记的域名。
+本机模式的三条路由上游都是 frps `7080`。frpc 登记的是 localhost Host，所以 APISIX 要改写 Host。SaaS 模式同一条上游，但 `pass_host=pass`，路径保持浏览器原来的样子。
 
-| 路由 id | 匹配 | 上游 | Host | 再由 frpc 转到 |
+下面这张表是本机模式。SaaS 的 Host 列改为原样传递公网域名，路径列不改写。
+
+| 路由 id | 匹配 | 上游 | 本机模式的 Host | 再由 frpc 转到 |
 |---|---|---|---|---|
 | `task-<taskId>` | `/<taskId>-web*` | frps `7080` | `dev.localhost` | `5173` |
 | `task-code-<taskId>` | `/<taskId>-code*` | frps `7080` | `ide.localhost` | code-server `8000` |
 | `task-vnc-<taskId>` | `/<taskId>-vnc*` | frps `7080` | `vnc.localhost` | VNC `6080` |
 | `code-localhost` | `/vibe-ide*` | frps `7080` | `ide.localhost` | code-server `8000` |
 
-code 去掉任务前缀后把路径改成 `/vibe-ide/...`。vnc 去掉 `/<taskId>-vnc` 前缀。公网域名不能当作 frps 的 Host，否则 `7080` 上找不到对应的 frpc 代理。
+本机模式里，code 去掉任务前缀后把路径改成 `/vibe-ide/...`，vnc 去掉 `/<taskId>-vnc`。这是 APISIX 在 frps 匹配之前做的，只适用于 localhost Host。SaaS 不能在 APISIX 做这一步。
 
-以 `https://hubide.ljyd.cn/t_2fc1aed6-vnc/vnc.html` 为例：
+本机模式以 `https://ide.localhost:9080/t_2fc1aed6-vnc/vnc.html` 为例：APISIX 把路径改成 `/vnc.html`、Host 改成 `vnc.localhost`，frps 只凭 Host 找到 vnc 代理。
 
-1. APISIX 命中 `/t_2fc1aed6-vnc*`，上游是 frps `7080`。
-2. 路径变成 `/vnc.html`，Host 变成 `vnc.localhost`。
-3. frps 按这个 Host 找到 frpc 的 vnc 代理，转到本机 VNC。
-
-web、code 同样先到 `7080`，Host 分别是 `dev.localhost` 和 `ide.localhost`。
+SaaS 以 `https://hubide.ljyd.cn/t_2fc1aed6-vnc/vnc.html` 为例：APISIX 不改 Host 和路径。frps 用 `hubide.ljyd.cn` + `/t_2fc1aed6-vnc` 选中 vnc 代理，把原始路径送到节点 `16080`，适配器再变成 `/vnc.html` 交给 `6080`。
 
 WebSocket（noVNC 的 `/websockify`）走同一条规则，APISIX 打开了 `enable_websocket`。

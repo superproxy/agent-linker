@@ -324,6 +324,27 @@ test('disable → 重连被拒(4408 rejected)；enable → 解除标记', async 
   await h.dispose();
 });
 
+test('switchTask 发给已准入节点，离线节点返回 false', async () => {
+  const h = await startManager();
+  const { ws, nodeId } = await connectAndHandshake(h.url, hello({ nodeId: 'node-a' }));
+  const got = new Promise<GatewayToNode>((resolve) => {
+    ws.on('message', (raw) => {
+      const m = JSON.parse(raw.toString()) as GatewayToNode;
+      if (m.type === 'switchTask') resolve(m);
+    });
+  });
+  assert.equal(h.manager.switchTask(nodeId, { taskId: 't_1', cwd: '/tmp/t_1' }), true);
+  const msg = await got;
+  assert.equal(msg.type, 'switchTask');
+  if (msg.type === 'switchTask') {
+    assert.equal(msg.taskId, 't_1');
+    assert.equal(msg.cwd, '/tmp/t_1');
+  }
+  assert.equal(h.manager.switchTask('missing', { taskId: 't_1', cwd: '/tmp/t_1' }), false);
+  ws.close();
+  await h.dispose();
+});
+
 test('enableNode 不存在：抛错；已启用态幂等', async () => {
   const h = await startManager();
   assert.throws(() => h.manager.enableNode('ghost'), /不存在/);

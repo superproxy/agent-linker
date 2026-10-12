@@ -10,16 +10,34 @@ INSTALL="${LINKAGENT_INSTALL:-/opt/agent-linker}"
 RESTART=0
 SKIP_NPM=0
 
-for arg in "$@"; do
-  case "$arg" in
-    --restart) RESTART=1 ;;
-    --skip-npm) SKIP_NPM=1 ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --restart) RESTART=1; shift ;;
+    --skip-npm) SKIP_NPM=1; shift ;;
+    --install-dir)
+      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "缺少 --install-dir 后的路径" >&2
+        exit 1
+      fi
+      INSTALL="$2"
+      shift 2
+      ;;
+    --install-dir=*)
+      INSTALL="${1#*=}"
+      if [ -z "$INSTALL" ]; then
+        echo "--install-dir= 需要非空路径" >&2
+        exit 1
+      fi
+      shift
+      ;;
     -h|--help)
       cat <<EOF
-用法: $0 [--restart] [--skip-npm]
+用法: $0 [--install-dir <path>] [--restart] [--skip-npm]
 
-  从发布包（当前目录，含 bin/ config/ .linkagent-root）安装到：
-    LINKAGENT_INSTALL（默认 /opt/agent-linker）
+  从发布包（当前目录，含 bin/ config/ .linkagent-root）安装到运行目录。
+
+  --install-dir <path>  目标目录（优先于环境变量 LINKAGENT_INSTALL）
+  LINKAGENT_INSTALL     缺省 /opt/agent-linker
 
   不覆盖安装目录已有 config/*.yaml 与 .runtime-state/（含登录账号）。
   迁入：migrate-repo-layout.sh（仓库）或 migrate-copy-install.sh（外部目录），不随本脚本执行。
@@ -27,7 +45,8 @@ EOF
       exit 0
       ;;
     *)
-      echo "未知参数: $arg" >&2
+      echo "未知参数: $1" >&2
+      echo "提示: $0 --help" >&2
       exit 1
       ;;
   esac
@@ -44,8 +63,8 @@ linkagent_sync_publish_to_install "$PACKAGE" "$INSTALL" "$SKIP_NPM"
 
 echo "✅ 已安装到 $INSTALL"
 echo "   配置：$INSTALL/config/"
-echo "   启动：cd $INSTALL && LINKAGENT_HOME=$INSTALL ./start.sh start"
+echo "   启动：cd $INSTALL && ./start.sh start"
 
 if [ "$RESTART" = 1 ]; then
-  (cd "$INSTALL" && LINKAGENT_HOME="$INSTALL" ./start.sh restart gateway)
+  (cd "$INSTALL" && ./start.sh restart gateway)
 fi

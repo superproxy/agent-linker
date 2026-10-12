@@ -26,6 +26,9 @@ importers:
 
   backend:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^1.4.0
+        version: 1.4.0(zod@4.6.5)
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.0.0
@@ -135,6 +138,14 @@ packages:
       zod: ^3.25.0 || ^4.0.0
     dependencies:
       zod: 4.5.2
+    dev: false
+
+  /@agentclientprotocol/sdk@1.4.0(zod@4.6.5):
+    resolution: {integrity: sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+    dependencies:
+      zod: 4.6.5
     dev: false
 
   /@ant-design/colors@7.2.1:
