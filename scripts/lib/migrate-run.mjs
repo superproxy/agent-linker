@@ -4,11 +4,12 @@ import { migrateConfigInto, mergeRuntimeInto } from './migrate-install.mjs';
 
 export function collectMigrationSources(repoRoot, legacyRoot) {
   const legacy = legacyRoot?.trim();
+  // 开发态 live yaml 在 repo/config；backend/config 多为 template / pi-agent
   const configSources = [
-    join(repoRoot, 'backend', 'config'),
     join(repoRoot, 'config'),
     join(repoRoot, 'server', 'config'),
     join(repoRoot, 'dist', 'linkagent', 'config'),
+    join(repoRoot, 'backend', 'config'),
     legacy ? join(legacy, 'config') : '',
   ].filter((d) => d && existsSync(d));
 
@@ -21,8 +22,12 @@ export function collectMigrationSources(repoRoot, legacyRoot) {
   return { configSources, runtimeSources };
 }
 
-/** 缺项复制 config / .runtime-state 到 target；不删源。 */
-export function migrateIntoTarget(repoRoot, target, legacyRoot) {
+/**
+ * 缺项复制 config / .runtime-state 到 target；不删源。
+ * @param {{ overwriteConfig?: boolean, overwriteRuntime?: boolean, includeRuntime?: boolean }} [migrateOpts]
+ * @returns {{ target: string, configConflicts: object[], runtimeConflicts: object[] }}
+ */
+export function migrateIntoTarget(repoRoot, target, legacyRoot, migrateOpts = {}) {
   const targetResolved = resolve(target);
   const installCfg = join(targetResolved, 'config');
   const installState = join(targetResolved, '.runtime-state');
@@ -31,13 +36,26 @@ export function migrateIntoTarget(repoRoot, target, legacyRoot) {
 
   const { configSources, runtimeSources } = collectMigrationSources(repoRoot, legacyRoot);
 
-  if (configSources.length) migrateConfigInto(installCfg, configSources);
-  else console.log('→ 未找到可迁入的配置目录');
+  /** @type {Array<{ kind: 'config', name: string, dest: string, src: string }>} */
+  let configConflicts = [];
+  /** @type {Array<{ kind: 'runtime', rel: string, dest: string, src: string }>} */
+  let runtimeConflicts = [];
 
-  if (runtimeSources.length) mergeRuntimeInto(installState, runtimeSources);
-  else console.log('→ 未找到可合并的 .runtime-state');
+  if (configSources.length) {
+    configConflicts = migrateConfigInto(installCfg, configSources, {
+      overwriteConfig: migrateOpts.overwriteConfig,
+    });
+  } else console.log('→ 未找到可迁入的配置目录');
 
-  return targetResolved;
+  if (migrateOpts.includeRuntime) {
+    if (runtimeSources.length) {
+      runtimeConflicts = mergeRuntimeInto(installState, runtimeSources, {
+        overwriteRuntime: migrateOpts.overwriteRuntime,
+      });
+    } else console.log('→ 未找到可合并的 .runtime-state');
+  }
+
+  return { target: targetResolved, configConflicts, runtimeConflicts };
 }
 
 export function clearExternalInstallMarkers(repoRoot) {

@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # 一次性迁入：旧目录 config / .runtime-state → 运行安装目录。
-# 由 migrate-repo-layout / migrate-copy-install 使用，不打包进 dist。
+# 由 migrate-config / migrate-install-config 使用，不打包进 dist。
+
+linkagent_materialize_config_from_templates() {
+  local dest="$1"
+  local f
+  mkdir -p "$dest"
+  for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
+    [ -f "$dest/$f" ] && continue
+    if [ -f "$dest/$f.template" ]; then
+      cp -a "$dest/$f.template" "$dest/$f"
+      echo "→ 配置：由模板生成 $dest/$f"
+    fi
+  done
+}
 
 linkagent_migrate_config_into() {
   local dest="$1"
@@ -18,6 +31,7 @@ linkagent_migrate_config_into() {
       fi
     done
   done
+  linkagent_materialize_config_from_templates "$dest"
   if [ ! -d "$dest/pi-agent" ]; then
     for src in "$@"; do
       [ -n "$src" ] || continue

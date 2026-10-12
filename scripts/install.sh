@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
   LINKAGENT_INSTALL     缺省 /opt/agent-linker
 
   不覆盖安装目录已有 config/*.yaml 与 .runtime-state/（含登录账号）。
-  迁入：migrate-repo-layout.sh（仓库）或 migrate-copy-install.sh（外部目录），不随本脚本执行。
+  迁入：migrate-config.sh（仓库）或 migrate-install-config.sh（外部目录），不随本脚本执行。
 EOF
       exit 0
       ;;

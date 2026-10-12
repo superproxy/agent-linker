@@ -95,14 +95,20 @@ export function printInstallDirEnvHint(scriptLabel) {
 `);
 }
 
-export function printMigrateCopyInstallHelp() {
+export function printMigrateInstallConfigHelp() {
   const def = defaultInstallRoot();
-  console.log(`用法: node scripts/migrate-copy-install.mjs [选项]
+  console.log(`用法: node scripts/migrate-install-config.mjs [选项]
 
-  复制 config / .runtime-state 到另一安装目录，并写入 .linkagent-install。
+  在 **clone 仓库根** 执行：把 config **补缺** 到外部安装目录，
+  并写入仓库根 .linkagent-install（后续 local-install-update / pm 走该目录）。
+  默认 **仅配置**、**不覆盖** 目标已有文件；冲突时以退出码 1 结束。
 
 选项:
   --install-dir <path>   目标目录（优先于 LINKAGENT_INSTALL）
+  --overwrite-config     覆盖已有 gateway/weixin/channels/node.yaml 与 pi-agent/
+  --with-runtime         同时合并 .runtime-state（缺省不复制运行态）
+  --overwrite-runtime    与 --with-runtime 联用，覆盖已有运行态路径
+  --overwrite            覆盖配置；若含 --with-runtime 则也覆盖运行态
   --dry-run              仅打印将使用的目标路径
   -h, --help             显示本帮助
 
@@ -110,6 +116,19 @@ export function printMigrateCopyInstallHelp() {
   LINKAGENT_INSTALL      目标绝对路径（缺省 ${def}）
   LINKAGENT_LEGACY_ROOT  额外来源（如曾在 dist/linkagent 内运行）
 
-  **服务器首次从旧布局迁出**：先 migrate-repo-layout，再本脚本（或 migrate-server-from-legacy.sh）。
+本机 Windows 示例（在仓库根）:
+  node scripts/migrate-install-config.mjs --install-dir=%USERPROFILE%\\agent-linker
+  pnpm local:install-update
+  cd %USERPROFILE%\\agent-linker && start.bat start
+
+  安装目录已有 template 生成的 yaml，需改用仓库里调好的配置：
+  node scripts/migrate-install-config.mjs --overwrite-config
+
+  **服务器从旧整包迁出（含登录态）**：pnpm migrate:server（内部带 --with-runtime）
 `);
+}
+
+/** @deprecated 旧名，请用 printMigrateInstallConfigHelp */
+export function printMigrateCopyInstallHelp() {
+  printMigrateInstallConfigHelp();
 }

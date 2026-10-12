@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-console.error('已拆分：开发/运行迁移 → scripts/migrate-repo-layout.mjs');
-console.error('         目录切换迁移 → scripts/migrate-copy-install.mjs');
-console.error('  pnpm migrate:repo  /  pnpm migrate:copy');
+console.error('已更名：');
+console.error('  仓库内配置 → scripts/migrate-config.mjs       （pnpm migrate:config）');
+console.error('  迁到安装目录 → scripts/migrate-install-config.mjs （pnpm migrate:install-config）');
+console.error('  旧 pnpm migrate:repo / migrate:copy 仍可用（转发到新脚本）');
 process.exit(1);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 源码网关机：在 git clone 的仓库根执行 — 同步源码 → 构建 dist → 部署到运行安装目录。
-# 与 Release 包 ./install.sh 不同：本脚本需要 pnpm monorepo，不负责迁入（见 migrate-repo-layout / migrate-copy-install）。
+# 与 Release 包 ./install.sh 不同：本脚本需要 pnpm monorepo，不负责迁入（见 migrate-config / migrate-install-config）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

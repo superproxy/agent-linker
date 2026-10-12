@@ -378,8 +378,10 @@ WantedBy=multi-user.target
 
 | 脚本 | 用途 |
 |---|---|
-| **`migrate-repo-layout`** | **开发/运行迁移**：在 **clone 目录** 内合并 `config/`、`.runtime-state/`（来源含 `backend/config`、`dist/linkagent` 等）；去掉外部安装 marker；**运行根=仓库** |
-| **`migrate-copy-install`** | **目录切换**：复制到 **另一路径**（如 `/opt/agent-linker`），写 `.linkagent-install`；再 `server-install-update` 同步 dist 程序 |
+| **`migrate-config`** | **配置迁移（仓库）**：在 **clone 目录** 内合并 `config/`（来源含 `repo/config`、`backend/config`、`dist/linkagent` 等）；去掉外部安装 marker；**运行根=仓库**；默认不碰 `.runtime-state` |
+| **`migrate-install-config`** | **配置迁到安装目录**：复制 `config/` 到 **另一路径**（如 `/opt/agent-linker`），写 `.linkagent-install`；再 `server-install-update` 同步 dist 程序 |
+
+旧名 `migrate-repo-layout` / `migrate-copy-install` 仍转发到新脚本。需要运行态时加 **`--with-runtime`**（`migrate-server-from-legacy.sh` 已自带）。
 
 **从旧布局迁到 /opt（服务器推荐一条命令，内部两步）：**
 
@@ -393,20 +395,20 @@ bash scripts/server-install-update.sh --restart
 等价于：
 
 ```bash
-LINKAGENT_LEGACY_ROOT=/root/agent-linker/dist/linkagent bash scripts/migrate-repo-layout.sh
-LINKAGENT_INSTALL=/opt/agent-linker bash scripts/migrate-copy-install.sh
+LINKAGENT_LEGACY_ROOT=/root/agent-linker/dist/linkagent bash scripts/migrate-config.sh --with-runtime
+LINKAGENT_INSTALL=/opt/agent-linker bash scripts/migrate-install-config.sh --with-runtime
 ```
 
-**不要**跳过第 1 步直接 `migrate-copy-install`（会从分散路径拼数据，易漏/不一致）。
+**不要**跳过第 1 步直接 `migrate-install-config`（会从分散路径拼数据，易漏/不一致）。
 
 仅在仓库内运行、不用 /opt：
 
 ```bash
-bash scripts/migrate-repo-layout.sh
+bash scripts/migrate-config.sh
 ```
 
-本机：`pnpm migrate:repo` / `pnpm migrate:copy`。  
-两脚本均只复制**目标尚缺**的文件，不覆盖已有配置/登录态。
+本机：`pnpm migrate:config` / `pnpm migrate:install-config`（`migrate:repo` / `migrate:copy` 仍可用）。  
+默认只迁配置；只复制**目标尚缺**的文件，不覆盖已有 yaml（冲突时用 `--overwrite-config`）。
 
 #### 标准流程
 
@@ -414,7 +416,7 @@ bash scripts/migrate-repo-layout.sh
 
 ```bash
 cd /root/agent-linker
-bash scripts/migrate-repo-layout.sh   # 首次整理
+bash scripts/migrate-config.sh   # 首次整理配置
 pnpm dev   # 或 build 后 pm / dist 启停
 ```
 
@@ -423,7 +425,7 @@ pnpm dev   # 或 build 后 pm / dist 启停
 **B. 独立安装目录**（clone 仅构建，运行在 `/opt/agent-linker`）
 
 ```bash
-bash scripts/migrate-copy-install.sh
+bash scripts/migrate-install-config.sh
 bash scripts/server-install-update.sh --restart
 ```
 

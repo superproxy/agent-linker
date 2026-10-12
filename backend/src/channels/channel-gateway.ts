@@ -3,6 +3,8 @@
  * 不加载 OpenClaw 渠道插件。对话统一 SSE 回连主 gateway /v1。
  * 运行态推送到主 gateway，本进程不挂插件 HTTP。
  */
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../config/index.js';
 import type { Logger } from '../plugins/manager.js';
@@ -296,7 +298,18 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
-if (process.argv[1] && /channel-gateway\.(ts|mjs|js|cjs)$/.test(process.argv[1])) {
+/** dist 产物为 bin/channels.mjs；dev 为 channel-gateway.ts */
+function isChannelGatewayCliEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  if (/channel-gateway\.(ts|mjs|js|cjs)$/.test(entry)) return true;
+  if (/channels\.(ts|mjs|js|cjs)$/.test(entry)) {
+    return import.meta.url === pathToFileURL(resolve(entry)).href;
+  }
+  return false;
+}
+
+if (isChannelGatewayCliEntry()) {
   main().catch((err) => {
     console.error('[channel-gateway] 启动失败:', err instanceof Error ? err.message : err);
     process.exit(1);

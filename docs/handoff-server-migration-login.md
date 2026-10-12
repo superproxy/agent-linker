@@ -50,8 +50,8 @@ Web 登录流程：
 
 | 脚本 | 行为 |
 |---|---|
-| `scripts/migrate-repo-layout.sh` | 在 **clone 根** 合并 `config/`、`.runtime-state/`（多源：`backend/config`、`.runtime-state`、`dist/linkagent/.runtime-state` 等） |
-| `scripts/migrate-copy-install.sh` | 复制到 `LINKAGENT_INSTALL`（默认 `/opt/agent-linker`），写 `.linkagent-install` |
+| `scripts/migrate-config.sh` | 在 **clone 根** 合并 `config/`（多源；`--with-runtime` 才合并 `.runtime-state`） |
+| `scripts/migrate-install-config.sh` | 复制 `config/` 到 `LINKAGENT_INSTALL`（默认 `/opt/agent-linker`），写 `.linkagent-install` |
 | `scripts/migrate-server-from-legacy.sh` | **必须先 1 再 2** |
 | `scripts/server-install-update.sh` | `build:dist` → 同步到 `$INSTALL`，**不覆盖** 已有 `config/`、`.runtime-state/`；写 `repo/.linkagent-install` + `touch .linkagent-server`；`--restart` 时 `LINKAGENT_HOME=$INSTALL ./start.sh restart gateway` |
 
@@ -130,8 +130,8 @@ cd /root/agent-linker
 LINKAGENT_LEGACY_ROOT=/root/agent-linker/dist/linkagent \
   bash scripts/migrate-server-from-legacy.sh
 # 或仅仓库内整理：
-# bash scripts/migrate-repo-layout.sh
-# LINKAGENT_INSTALL=/opt/agent-linker bash scripts/migrate-copy-install.sh
+# bash scripts/migrate-config.sh --with-runtime
+# LINKAGENT_INSTALL=/opt/agent-linker bash scripts/migrate-install-config.sh --with-runtime
 
 bash scripts/server-install-update.sh --restart
 ```

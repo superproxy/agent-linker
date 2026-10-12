@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 将发布包目录（含 .linkagent-root）同步到运行安装目录，保留已有 config / .runtime-state。
-# 供 dist/install.sh 与 server-install-update.sh 共用。迁入见 migrate-repo-layout / migrate-copy-install。
+# 供 dist/install.sh 与 server-install-update.sh 共用。迁入见 migrate-config / migrate-install-config。
 
 linkagent_default_install_dir() {
   echo "/opt/agent-linker"
@@ -42,6 +42,9 @@ linkagent_sync_publish_to_install() {
     [ -f "$t" ] || continue
     cp -a "$t" "$install_cfg/$(basename "$t")"
   done
+  # shellcheck source=migrate-install.sh
+  . "$(dirname "${BASH_SOURCE[0]}")/migrate-install.sh"
+  linkagent_materialize_config_from_templates "$install_cfg"
 
   if [ "$skip_npm" = 0 ] || [ ! -d "$install/node_modules" ]; then
     echo "→ npm install --omit=dev（$install）"

@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { materializeConfigFromTemplates } from './migrate-install.mjs';
 
 const SKIP_TOP = new Set(['config', '.runtime-state']);
 
@@ -32,6 +33,7 @@ export function syncPublishToInstall(packageRoot, installRoot, { skipNpm = false
       cpSync(join(pkgCfg, name), join(installCfg, name));
     }
   }
+  materializeConfigFromTemplates(installCfg);
 
   if (!skipNpm || !existsSync(join(installRoot, 'node_modules'))) {
     console.log(`→ npm install --omit=dev（${installRoot}）`);
