@@ -1,6 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
-import { taskPublicPath, taskSaasDevShortPath } from '@linkagent/shared';
+import { taskPublicPath } from '@linkagent/shared';
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -21,7 +21,7 @@ export type SaasPathKind = 'dev' | 'code' | 'vnc';
 
 /**
  * frps 只按 Host + 最长 location 选代理，不剥路径。
- * dev：公网 `/<taskId>-web/…` 或 `/<taskId>/…`；15173 剥 `-web` 后 Vite `--base /${taskId}/`。
+ * dev：公网 `/<taskId>-web/…`；15173 剥 `-web` 前缀，upstream 为 Vite 默认 base `/`。
  * code / vnc 去掉任务前缀，本机进程仍挂在 `/`。
  */
 export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: string): string {
@@ -30,15 +30,13 @@ export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: st
   const query = queryAt >= 0 ? url.slice(queryAt) : '';
   if (kind === 'dev') {
     const web = taskPublicPath(taskId, 'web');
-    const open = taskSaasDevShortPath(taskId);
-    if (!web || !open) return url;
-    if (path === web || path === `${web}/`) return `${open}/${query}`;
-    if (path.startsWith(`${web}/`)) {
-      const rest = path.slice(web.length) || '/';
-      return `${open}${rest.startsWith('/') ? rest : `/${rest}`}${query}`;
-    }
-    if (path === open) return `${open}/${query}`;
-    if (path.startsWith(`${open}/`)) return url;
+    if (!web) return url;
+    const toRoot = (rest: string): string => {
+      const suffix = rest === '' || rest === '/' ? '/' : rest.startsWith('/') ? rest : `/${rest}`;
+      return `${suffix}${query}`;
+    };
+    if (path === web || path === `${web}/`) return toRoot('');
+    if (path.startsWith(`${web}/`)) return toRoot(path.slice(web.length));
     return url;
   }
   const prefix = taskPublicPath(taskId, kind === 'code' ? 'code' : 'vnc');
@@ -95,7 +93,7 @@ function resolveTargetPort(targetPort: TargetPort): number {
   return typeof targetPort === 'function' ? targetPort() : targetPort;
 }
 
-/** 公网入口 `/<taskId>-{web|code|vnc}` 无尾斜杠时 301 到带 `/`（与代理 base 一致）。 */
+/** 公网入口 `/<taskId>-{web|code|vnc}` 无尾斜杠时 301 到带 `/`。 */
 export function saasPublicEntryTrailingSlashRedirect(
   kind: 'dev' | 'code' | 'vnc',
   taskId: string,
@@ -128,7 +126,8 @@ function forward(kind: SaasPathKind, taskId: () => string, targetPort: TargetPor
     const port = resolveTargetPort(targetPort);
     const path = rewriteSaasLocalPath(kind, taskId(), rawUrl);
     const headers = { ...req.headers };
-    if (kind !== 'dev') headers.host = `127.0.0.1:${port}`;
+    /** 上游 Vite 只监听 127.0.0.1；保留 ide.localhost 会触发 Host 校验（Vite 5 无 CLI allowedHosts）。 */
+    headers.host = `127.0.0.1:${port}`;
     const upstream = http.request(
       { host: '127.0.0.1', port, path, method: req.method, headers },
       (up) => {
@@ -160,7 +159,7 @@ function forward(kind: SaasPathKind, taskId: () => string, targetPort: TargetPor
     const path = rewriteSaasLocalPath(kind, taskId(), req.url || '/');
     const conn = net.connect(port, '127.0.0.1', () => {
       const headers = { ...req.headers };
-      if (kind !== 'dev') headers.host = `127.0.0.1:${port}`;
+      headers.host = `127.0.0.1:${port}`;
       let raw = `${req.method} ${path} HTTP/1.1\r\n`;
       for (const [key, value] of Object.entries(headers)) {
         if (value == null) continue;

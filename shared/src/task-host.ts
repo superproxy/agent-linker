@@ -151,20 +151,18 @@ export function taskSaasDevShortPath(taskId: string): string {
   return `/${id}`;
 }
 
-/** Vite `base` / `import.meta.env.BASE_URL`（无 `-web` 后缀）。公网 dev 入口用 `taskPublicPath(id, 'web')`。 */
+/** @deprecated 路径模式下不在宿主机 dev 使用；仅聚合容器内 legacy 脚本可能仍读 `LINKAGENT_VITE_BASE`。公网入口用 `taskPublicPath(id, 'web')`。 */
 export function taskViteBasePath(taskId: string): string {
   const short = taskSaasDevShortPath(taskId);
   if (!short) return '/';
   return `${short}/`;
 }
 
-/** frps `workspace-dev` 登记的 locations（短链 + `-web`）。 */
+/** frps `workspace-dev` 登记的 locations（仅 `/<taskId>-web`；上游 Vite 用 base `/`，前缀由 15173 适配器剥掉）。 */
 export function taskSaasDevFrpcLocations(taskId: string): string[] {
   const web = taskPublicPath(taskId, 'web');
-  const short = taskSaasDevShortPath(taskId);
-  if (!web || !short) return [];
-  if (short === web) return [web];
-  return [short, web];
+  if (!web) return [];
+  return [web];
 }
 
 /** code-server `--abs-proxy-base-path`，与 frpc `taskPublicPath(id, 'code')` 一致。 */

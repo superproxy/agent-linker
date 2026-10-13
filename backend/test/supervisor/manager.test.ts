@@ -41,6 +41,7 @@ test('parseTargets：缺省/all → 三进程；单个目标；weixin:<accountId
   assert.deepEqual(parseTargets('all'), ['gateway', 'weixin', 'channels', 'node']);
   assert.deepEqual(parseTargets('weixin'), ['weixin']);
   assert.deepEqual(parseTargets('weixin:acc1'), ['weixin:acc1']);
+  assert.deepEqual(parseTargets('worker'), ['node']);
   assert.throws(() => parseTargets('nope'), /未知进程/);
   // 空账号 / 含非白名单字符的账号 id 拒绝
   assert.throws(() => parseTargets('weixin:'), /未知进程/);

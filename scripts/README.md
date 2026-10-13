@@ -33,4 +33,6 @@
 | `local-node.*` / `local-node-ctl.mjs` | **仅**原生 node 连接器 |
 | `local-node-docker.*` / `local-node-docker-ctl.mjs` | **仅** Docker `linkagent-node` |
 
-pnpm：`local:start`、`local:enhance`、`local:node`、`local:node:docker`（`local:stack:*` 仍可用）。
+pnpm：`local:start`、`local:enhance`、`local:worker` / `local:node`（等价）、`local:worker:docker` / `local:node:docker`；工作节点启停亦可用 `pnpm worker:*` / `pnpm node:*`（`local:stack:*` 仍可用）。
+
+组件运维总览（端口、日志、frpc、启停顺序）：[`docs/ops-local-components.md`](../docs/ops-local-components.md)。

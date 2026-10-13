@@ -3,6 +3,8 @@ import { TASK_PUBLIC_HOST, taskPublicHost, taskPublicPath, type TaskRouteType } 
 import { FRPS_DASHBOARD_PORT } from './assets.js';
 /** 带管理 API 的 APISIX。任务域名用 Admin API 创建和开关，不重载配置。 */
 export const APISIX_ADMIN_PORT = 9180;
+/** APISIX Dashboard UI（Compose 服务 apisix-dashboard，仅本机 127.0.0.1 映射） */
+export const APISIX_DASHBOARD_PORT = 9000;
 export const APISIX_PROJECT = 'linkagent-edge';
 
 export interface ApisixRouteSpec {
@@ -178,6 +180,43 @@ deployment:
     host:
       - http://etcd:2379
     prefix: /apisix
+`;
+}
+
+function yamlScalar(value: string): string {
+  if (/[:#\n'"\\]/.test(value) || value.trim() !== value || value.length === 0) {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+/** APISIX Dashboard `conf.yaml`（与 APISIX 共用 etcd 前缀 /apisix） */
+export function renderApisixDashboardConf(opts: {
+  jwtSecret: string;
+  username: string;
+  password: string;
+  etcdEndpoint?: string;
+  etcdPrefix?: string;
+}): string {
+  const etcdEndpoint = opts.etcdEndpoint ?? 'http://etcd:2379';
+  const etcdPrefix = opts.etcdPrefix ?? '/apisix';
+  return `conf:
+  listen:
+    host: 0.0.0.0
+    port: ${APISIX_DASHBOARD_PORT}
+  allow_list:
+    - 0.0.0.0/0
+  etcd:
+    endpoints:
+      - ${etcdEndpoint}
+    prefix: ${etcdPrefix}
+authentication:
+  secret:
+    secret: ${yamlScalar(opts.jwtSecret)}
+  expire_time: 3600
+  users:
+    - username: ${yamlScalar(opts.username)}
+      password: ${yamlScalar(opts.password)}
 `;
 }
 

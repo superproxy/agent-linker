@@ -1,0 +1,38 @@
+---
+description: frps 怎么登录、怎么按 Host/路径转发；本机与 SaaS 各改哪一层
+globs: backend/src/node/**/*.ts,backend/src/gateway/edge/**/*.ts,code-server/**/*.{mjs,sh},docs/edge-frpc*.md
+alwaysApply: false
+---
+
+# frps 原理
+
+frp 0.60。两条连接不要混。
+
+- 控制连接：frpc 连 frps `7000`。`Login` 之后，两边用各自配置里的 `auth.token` 加密这条连接。`/internal/frp/handler` 只改写 Login 的 `privilege_key`，改不了加密密钥。
+- 数据连接：浏览器到 APISIX `9080`，再到 frps `7080`（`vhostHTTPPort`），frps 再转到 frpc 登记的 `localIP:localPort`。
+
+## 控制连接
+
+frpc 的 `auth.token` 必须和 frps 的 `auth.token` 相同。`nt_` 只能过 Login，不能当 frpc 令牌。
+
+对不上时：客户端 `login to server success`、`proxy added` 后马上 `try to connect`；服务端 `client login info` 后马上 `client exit success`。没有 `start proxy success`，面板上也没有 online。`proxy added` 只是本地列表。
+
+正常：每条代理出现 `start proxy success`，面板 `online`，连接保持。
+
+## 7080 怎么选路
+
+HTTP 代理的匹配键是 Host（`customDomains`）加最长路径前缀（`locations`）。没写 `locations` 等于整站 `/`。
+
+frps 选中代理后，把浏览器的 Host 和路径原样送到本机端口。它不删任务前缀，也不改 Host。
+
+同一公网域名可以挂多条代理，但路径前缀必须能用「最长匹配」分开。`/<taskId>` 会盖住 `/<taskId>-code`，所以 `-code` / `-vnc` / `-web` 必须单独登记，它们更长，会赢。
+
+## 两种模式
+
+本机已经跑通，不要改。三台 Host：`ide.localhost`→8080、`dev.localhost`→5173、`vnc.localhost`→6080，不写 `locations`。APISIX 在进 frps 之前把公网 Host 改成这三个名字，并改写路径（code 变成 `/vibe-ide/`，web/vnc 去掉任务前缀）。frps 只按 Host 选。
+
+SaaS 才是现在要写的。用户地址是 `https://<publicHost>/<taskId>` 以及 `/<taskId>-web|code|vnc`。一个 frps 时，APISIX 只做校验，上游固定是这个 frps 的 `7080`：`pass_host: pass`，不把 Host 改成 localhost，也不在进 frps 之前删路径。frpc 三条代理的 `customDomains` 都是这个公网域名，用上面的 `locations` 分开。`switchTask` 只改当前任务的路径。多个 frps 时才用 APISIX 选择哪一个。
+
+路径要变成应用自己的根路径（code-server、noVNC 在 `/`，Vite 要用 `base: /<taskId>/` 并放行公网 Host），只能在 frps 已经选中代理之后、本机端口之前做。不要把这一步放回 APISIX。
+
+不要把 `auth.token` 写入规则、文档、提交或日志。

@@ -35,6 +35,8 @@ frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 
 
 ## frpc 登记
 
+**谁写 toml、谁 reload frpc 子进程**（`connector.ts` / `serve-web.ts` / `publishSaasFrpc`）：见 [`ops-local-components.md` §5.4](ops-local-components.md)。
+
 聚合容器里 IDE、VNC、frpc 由入口脚本拉起，node 不再 compose 第二个 code-server（`LINKAGENT_NODE_SERVE_WEB=0`）。
 
 1. node 启动后写 `/etc/linkagent/frpc.toml`。`FRPS_TOKEN` 必须和 frps 的 `auth.token` 相同。不要填 `nt_`。只从环境读 `FRPS_SERVER_ADDR`、`FRPS_SERVER_PORT`（缺省 `host.docker.internal:7000`）。
@@ -55,11 +57,19 @@ SaaS / 默认本机登记示例（`hubide.ljyd.cn` 或 `ide.localhost`）：
 
 | 代理 | frpc 本机口 | 应用端口 | location |
 |---|---|---|---|
-| dev | `15173` | `5173` | `/<taskId>`、`/<taskId>-web` |
+| dev | `15173`（frpc **固定**登记此口） | Vite **动态口**（`dev-port.json`，如 `50718`；手测 `1573` 需与之一致） | `/<taskId>-web` |
 | code | `18080` | `8080` | `/<taskId>-code` |
 | vnc | `16080` | `6080` | `/<taskId>-vnc` |
 
-`15173` / `18080` / `16080` 是节点上的适配器。dev 把 `/<taskId>-web` 收成 `/<taskId>`（Vite 的 base）。code、vnc 去掉任务前缀，进程仍挂在 `/`。APISIX 在 SaaS 下不改 Host、不剥路径，否则 `7080` 匹配不到。
+`15173` / `18080` / `16080` 是节点上的适配器。dev 把 `/<taskId>-web/…` 剥成 `/…` 再转 Vite（base `/`）。**frpc 不要**把 `workspace-dev` 的 `localPort` 写成 Vite 口（如 5173/1573），否则路径带前缀 Vite 无法服务。code、vnc 去掉任务前缀，进程仍挂在 `/`。APISIX 在 SaaS 下不改 Host、不剥路径，否则 `7080` 匹配不到。
+
+**跳过 APISIX、直连 frps 数据口**（本机 `7080`）：
+
+```powershell
+curl.exe -s -o NUL -w "7080:%{http_code}`n" -H "Host: ide.localhost" "http://127.0.0.1:7080/<taskId>-web/"
+```
+
+与走 `9080` 相同：7080 → frpc → **15173** → 动态 Vite 口。
 
 登录成功只表示控制连接建立。frps 日志里出现对应代理名，才算 HTTP 路由挂上。`proxy added` 是 frpc 本地列表，还没有完成服务端登记。
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * linkagent 单机进程管理器 CLI（仅编排拉起，不常驻守护）：
- *   tsx src/supervisor/cli.ts start   [all|gateway|channels|weixin|weixin:<id>|node]  后台拉起（默认 all）
- *   tsx src/supervisor/cli.ts stop    [all|gateway|channels|weixin|weixin:<id>|node]  停止
- *   tsx src/supervisor/cli.ts restart [all|gateway|channels|weixin|weixin:<id>|node]  重启
+ *   tsx src/supervisor/cli.ts start   [all|gateway|channels|weixin|weixin:<id>|node|worker]  后台拉起（默认 all）
+ *   tsx src/supervisor/cli.ts stop    [all|gateway|channels|weixin|weixin:<id>|node|worker]  停止
+ *   tsx src/supervisor/cli.ts restart [all|gateway|channels|weixin|weixin:<id>|node|worker]  重启
  *   tsx src/supervisor/cli.ts status                            查看进程状态
  *   tsx src/supervisor/cli.ts logs    [all|gateway|channels|weixin|weixin:<id>|node]  跟随日志（默认 all）
  *   tsx src/supervisor/cli.ts foreground [target]               前台联调（Ctrl-C 一起退出）
@@ -21,7 +21,7 @@ import {
   type ProcessInstanceId,
 } from './manager.js';
 
-const USAGE = `用法: linkagent-pm <start|stop|restart|status|logs|foreground> [all|gateway|channels|weixin|weixin:<accountId>|node]`;
+const USAGE = `用法: linkagent-pm <start|stop|restart|status|logs|foreground> [all|gateway|channels|weixin|weixin:<accountId>|node|worker]`;
 
 /** 跨平台 tail -f：先打印文件末尾，再 watch 增量（零依赖） */
 function followLogs(pm: ProcessManager, ids: ProcessInstanceId[]): void {

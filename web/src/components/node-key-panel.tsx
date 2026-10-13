@@ -188,7 +188,7 @@ export function NodeKeyPanel(props: {
     <div>
       {!props.embedded ? (
         <p className="page-desc" style={{ marginBottom: 10 }}>
-          每台远程节点一枚 <strong>nt_</strong>，填入 <code>LINKAGENT_GATEWAY_TOKEN</code>。接入步骤与环境变量见「远程 · 节点」。
+          每台远程工作节点一枚 <strong>nt_</strong>，填入 <code>LINKAGENT_GATEWAY_TOKEN</code>。接入步骤与环境变量见「远程 · 工作节点」。
         </p>
       ) : null}
 

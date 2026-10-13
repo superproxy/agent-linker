@@ -8,6 +8,18 @@ import { pickFreePort, readDevPortState, writeDevPortState } from '../../src/nod
 import { getSaasDevTargetPort, setSaasDevTargetPort } from '../../src/node/saas-path.js';
 import { buildHostDevPowerShellBody } from '../../src/node/host-dev.js';
 
+test('pickFreePort：LINKAGENT_DEV_FIXED_PORT 优先', async () => {
+  const port = await pickFreePort();
+  const prev = process.env.LINKAGENT_DEV_FIXED_PORT;
+  process.env.LINKAGENT_DEV_FIXED_PORT = String(port);
+  try {
+    assert.equal(await pickFreePort(), port);
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_DEV_FIXED_PORT;
+    else process.env.LINKAGENT_DEV_FIXED_PORT = prev;
+  }
+});
+
 test('pickFreePort：可立即 bind', async () => {
   const port = await pickFreePort();
   assert.ok(port > 0 && port <= 65535);
@@ -38,6 +50,8 @@ test('dev-port.json 读写与 setSaasDevTargetPort', () => {
 test('host dev PowerShell 脚本含动态端口与 base', () => {
   const body = buildHostDevPowerShellBody('t_abc', 52344, 'ide.localhost', true);
   assert.match(body, /52344/);
-  assert.match(body, /t_abc/);
-  assert.match(body, /--base \/t_abc-web\//);
+  assert.match(body, /--host 127\.0\.0\.1/);
+  assert.doesNotMatch(body, /strictPort/);
+  assert.doesNotMatch(body, /--base/);
+  assert.doesNotMatch(body, /allowedHosts/);
 });

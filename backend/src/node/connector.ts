@@ -5,7 +5,6 @@ import WebSocket from 'ws';
 import {
   useFrpTaskPathRouting,
   TASK_PUBLIC_HOST,
-  taskViteBasePath,
   type GatewayToNode,
   type NodeAgentInfo,
   type NodeToGateway,
@@ -189,12 +188,8 @@ class NodeConnector {
       });
       this.opts.switchIdeTask?.(id, dir);
       const pathRouting = useFrpTaskPathRouting(entryHost);
-      if (pathRouting) {
-        process.env.LINKAGENT_VITE_BASE = taskViteBasePath(id);
-        publishSaasFrpc(id);
-      } else {
-        delete process.env.LINKAGENT_VITE_BASE;
-      }
+      delete process.env.LINKAGENT_VITE_BASE;
+      if (pathRouting) publishSaasFrpc(id);
       if (processes.length > 0) {
         process.env.LINKAGENT_ACTIVE_TASK_ID = id;
         this.taskProcesses.switchTo(id, dir, processes);

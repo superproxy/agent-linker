@@ -17,6 +17,13 @@ if [[ "$CMD" == "enhance:docker" ]]; then CMD=start; ENHANCE_DOCKER=1; fi
 if [[ "$CMD" == "enhance" ]]; then CMD=start; ENHANCE=1; fi
 cd "$ROOT"
 
+local_stack_frp_env() {
+  if [[ "${ENHANCE_DOCKER:-0}" == "1" ]]; then return; fi
+  export LINKAGENT_LOCAL_STACK=1
+  export LINKAGENT_PUBLIC_HOST=ide.localhost
+  export FRPS_SERVER_ADDR="${FRPS_SERVER_ADDR:-127.0.0.1}"
+}
+
 start_node() {
   if [[ "$ENHANCE_DOCKER" == "1" ]]; then
     unset LINKAGENT_LOCAL_STACK_ENHANCE || true
@@ -60,6 +67,7 @@ case "$CMD" in
       node "$DIR/dev-server-ctl.mjs" start
     fi
     pnpm --filter @linkagent/backend pm:restart channels || true
+    local_stack_frp_env
     start_node
     ;;
   stop)

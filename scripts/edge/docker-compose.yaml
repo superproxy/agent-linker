@@ -24,3 +24,11 @@ services:
       - 127.0.0.1:9180:9180
     volumes:
       - ${LINKAGENT_EDGE_DIR}/apisix-config.yaml:/usr/local/apisix/conf/config.yaml:ro
+  apisix-dashboard:
+    image: apache/apisix-dashboard:3.0.1
+    depends_on:
+      - etcd
+    ports:
+      - 127.0.0.1:9000:9000
+    volumes:
+      - ${LINKAGENT_EDGE_DIR}/apisix-dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro

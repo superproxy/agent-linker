@@ -1,4 +1,3 @@
-import { taskViteBasePath } from '@linkagent/shared';
 import type { TaskProcessSpec } from './task-processes.js';
 import { devOwnedByNode, normalizeContainerDevProcesses } from './task-processes.js';
 import {
@@ -26,27 +25,19 @@ export function shouldAllocateHostDev(devByNodeFlag: string | undefined, pathRou
   return false;
 }
 
-/** 供 sh 嵌入：exec vite / npm run dev（路径模式用 CLI --base，避免 merge 函数式 vite.config）。 */
-export function buildHostDevShellBody(taskId: string, port: number, publicHost: string, pathRouting: boolean): string {
-  const baseArg =
-    pathRouting && publicHost.trim().length > 0 ? ` --base ${taskViteBasePath(taskId).replace(/'/g, '')}` : '';
-  const hostArg = pathRouting && publicHost.trim().length > 0 ? ' --allowedHosts true' : '';
+/** 供 sh 嵌入：只注入监听地址/端口；路径前缀由 15173 适配器剥掉，不改动项目 `dev` 脚本。 */
+export function buildHostDevShellBody(_taskId: string, port: number, _publicHost: string, _pathRouting: boolean): string {
   return [
     'if [ ! -f package.json ]; then echo "[dev] 任务目录没有 package.json，跳过"; exit 0; fi',
-    `exec npm run dev -- --host 127.0.0.1 --port ${port} --strictPort${hostArg}${baseArg}`,
+    `exec npm run dev -- --host 127.0.0.1 --port ${port}`,
   ].join('\n');
 }
 
-/** Windows：PowerShell 启动 dev（路径模式用 CLI --base）。 */
-export function buildHostDevPowerShellBody(taskId: string, port: number, publicHost: string, pathRouting: boolean): string {
-  const baseArg =
-    pathRouting && publicHost.trim().length > 0
-      ? ` --base ${taskViteBasePath(taskId).replace(/"/g, '`"')}`
-      : '';
-  const hostArg = pathRouting && publicHost.trim().length > 0 ? ' --allowedHosts true' : '';
+/** Windows：PowerShell 启动 dev。 */
+export function buildHostDevPowerShellBody(_taskId: string, port: number, _publicHost: string, _pathRouting: boolean): string {
   return `
 if (-not (Test-Path package.json)) { Write-Host '[dev] 任务目录没有 package.json，跳过'; exit 0 }
-& npm run dev -- --host 127.0.0.1 --port ${port} --strictPort${hostArg}${baseArg}
+& npm run dev -- --host 127.0.0.1 --port ${port}
 `.trim();
 }
 

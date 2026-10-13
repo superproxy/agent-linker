@@ -257,7 +257,7 @@ export function DashboardLayout(props: {
           </Tooltip>
 
           {pendingNodes > 0 ? (
-            <Tooltip title="有待审批节点，前往远程 · 节点处理">
+            <Tooltip title="有待审批工作节点，前往远程 · 工作节点处理">
               <Badge count={pendingNodes} size="small">
                 <BellOutlined
                   style={{ fontSize: 16, color: '#eab308', cursor: 'pointer' }}

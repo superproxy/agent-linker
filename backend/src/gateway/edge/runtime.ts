@@ -11,6 +11,7 @@ import {
   ApisixAdmin,
   type ComposeStyle,
   renderApisixConfig,
+  renderApisixDashboardConf,
   TASK_PUBLIC_HOST,
   taskCodeRouteId,
   taskDevRouteId,
@@ -257,13 +258,30 @@ export async function prepareGatewayEdge(opts: GatewayEdgeOptions): Promise<Prep
   }), 'utf8');
   const adminKey = readOrCreateSecret(join(opts.runtimeDir, 'apisix.admin-key'));
   writeFileSync(join(opts.runtimeDir, 'apisix-config.yaml'), renderApisixConfig(adminKey), 'utf8');
+  const dashJwt = readOrCreateSecret(join(opts.runtimeDir, 'apisix-dashboard.jwt'));
+  const dashPassword = readOrCreateSecret(join(opts.runtimeDir, 'apisix-dashboard.password'));
+  writeFileSync(
+    join(opts.runtimeDir, 'apisix-dashboard.yaml'),
+    renderApisixDashboardConf({
+      jwtSecret: dashJwt,
+      username: 'admin',
+      password: dashPassword,
+    }),
+    'utf8',
+  );
   const frp = frpAsset(platform, arch);
   let frpsBin: string | null = null;
   if (frp) {
-    const bins = await ensureFrp(opts.toolsDir, frp, fetchImpl, extractFn);
-    frpsBin = bins.frps;
-    writeFileSync(join(opts.runtimeDir, 'frpc.path'), `${bins.frpc}\n`, 'utf8');
-    writeFileSync(join(opts.runtimeDir, 'frps.path'), `${bins.frps}\n`, 'utf8');
+    try {
+      const bins = await ensureFrp(opts.toolsDir, frp, fetchImpl, extractFn);
+      frpsBin = bins.frps;
+      writeFileSync(join(opts.runtimeDir, 'frpc.path'), `${bins.frpc}\n`, 'utf8');
+      writeFileSync(join(opts.runtimeDir, 'frps.path'), `${bins.frps}\n`, 'utf8');
+    } catch (err) {
+      console.error(
+        `[edge] frp 二进制准备失败（仍尝试同步 APISIX 路由）：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
   return {
     frpsBin,
@@ -378,6 +396,35 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
   }
 
   return { ...edgeApi, stop() {} };
+}
+
+/** 网关启动时常早于 APISIX Admin；失败则退避重试。 */
+export async function syncTaskHostsWithRetry(
+  edge: GatewayEdge,
+  tasks: { id: string; name: string; enabled: boolean }[],
+  opts?: { attempts?: number; delayMs?: number },
+): Promise<void> {
+  const attempts = opts?.attempts ?? 12;
+  const delayMs = opts?.delayMs ?? 2500;
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await edge.syncTaskHosts(tasks);
+      if (i > 0) {
+        console.log(`[edge] APISIX 路由同步成功（第 ${i + 1} 次尝试）`);
+      }
+      return;
+    } catch (err) {
+      last = err;
+      if (i < attempts - 1) {
+        console.warn(
+          `[edge] APISIX 路由同步失败，${delayMs}ms 后重试：${err instanceof Error ? err.message : String(err)}`,
+        );
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw last;
 }
 
 /** 旧的静态 nginx 若还占着自己的 8088，先退出。APISIX 数据面使用 9080。 */

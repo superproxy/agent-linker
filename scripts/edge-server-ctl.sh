@@ -83,9 +83,12 @@ start_frps() {
 }
 
 start_apisix() {
-  if ! compose_cmd up -d 2>&1 | tee -a "$APISIX_LOG"; then
+  if ! compose_cmd up -d etcd apisix 2>&1 | tee -a "$APISIX_LOG"; then
     echo "APISIX 启动失败，日志 $APISIX_LOG" >&2
     return 1
+  fi
+  if ! compose_cmd up -d apisix-dashboard 2>&1 | tee -a "$APISIX_LOG"; then
+    echo "APISIX Dashboard 未启动（多为镜像拉取失败）；数据面已就绪。稍后: compose up -d apisix-dashboard" >&2
   fi
   echo "APISIX 已提交启动，日志 $APISIX_LOG"
 }
@@ -102,6 +105,8 @@ build_apisix() {
 print_frps_dashboard_hint() {
   echo "frps 面板: http://127.0.0.1:7500/ （用户 admin，密码文件 $RUNTIME/frps.dashboard）"
   echo "本机 enhance 也可: http://127.0.0.1:9080/frps/ 或 http://ide.localhost:9080/frps/（需 gateway 已 sync APISIX）"
+  echo "APISIX Dashboard: http://127.0.0.1:9000/ （用户 admin，密码文件 $RUNTIME/apisix-dashboard.password）"
+  echo "APISIX Admin API: http://127.0.0.1:9180/ （X-API-KEY 见 $RUNTIME/apisix.admin-key）"
 }
 
 stop_frps() {

@@ -83,7 +83,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'tasks', label: '任务管理', icon: <AppstoreOutlined /> },
       { id: 'keys', label: '任务 Key', icon: <KeyOutlined /> },
       { id: 'my-token', label: '用户 Key', icon: <SafetyCertificateOutlined /> },
-      { id: 'node-key', label: '节点 Key', icon: <ClusterOutlined /> },
+      { id: 'node-key', label: '工作节点 Key', icon: <ClusterOutlined /> },
       { id: 'weixin', label: '微信', icon: <MessageOutlined /> },
       { id: 'wecom', label: '企业微信', icon: <MessageOutlined /> },
       { id: 'feishu', label: '飞书', icon: <MessageOutlined /> },
@@ -94,7 +94,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'local-gateway', label: '网关', icon: <DesktopOutlined />, adminOnly: true },
       { id: 'processes', label: '进程', icon: <ControlOutlined />, adminOnly: true },
-      { id: 'local-nodes', label: '节点', icon: <ClusterOutlined />, adminOnly: true },
+      { id: 'local-nodes', label: '工作节点', icon: <ClusterOutlined />, adminOnly: true },
       { id: 'local-agents', label: 'agent', icon: <AppstoreOutlined />, adminOnly: true },
       { id: 'vibe', label: 'IDE', icon: <DesktopOutlined />, adminOnly: true },
     ],
@@ -103,7 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: '远程',
     items: [
       { id: 'remote-gateway', label: '网关', icon: <CloudServerOutlined />, adminOnly: true },
-      { id: 'remote-nodes', label: '节点', icon: <ClusterOutlined /> },
+      { id: 'remote-nodes', label: '工作节点', icon: <ClusterOutlined /> },
       { id: 'remote-agents', label: 'agent', icon: <AppstoreOutlined /> },
     ],
   },

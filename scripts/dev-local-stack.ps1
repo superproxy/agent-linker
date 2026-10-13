@@ -37,6 +37,14 @@ function Invoke-Step {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+function Set-LocalStackFrpEnv {
+  param([switch]$Skip)
+  if ($Skip) { return }
+  $env:LINKAGENT_LOCAL_STACK = '1'
+  $env:LINKAGENT_PUBLIC_HOST = 'ide.localhost'
+  if (-not $env:FRPS_SERVER_ADDR) { $env:FRPS_SERVER_ADDR = '127.0.0.1' }
+}
+
 function Start-NodeLayer {
   param(
     [ValidateSet('native', 'enhance', 'enhance-docker')]
@@ -88,6 +96,7 @@ switch ($Command.ToLowerInvariant()) {
       }
       Invoke-Step 'channels（PM channel-gateway）' { pnpm --filter @linkagent/backend pm:restart channels }
       $nodeMode = if ($EnhanceDocker) { 'enhance-docker' } elseif ($Enhance) { 'enhance' } else { 'native' }
+      Set-LocalStackFrpEnv -Skip:$EnhanceDocker
       Start-NodeLayer -NodeMode $nodeMode
     } finally {
       Pop-Location

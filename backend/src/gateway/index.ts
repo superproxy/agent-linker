@@ -29,7 +29,7 @@ import {
 } from './listen-port.js';
 import { codeServerHttpOrigin, readCodeServerUpstream } from './code-server-upstream.js';
 import { isVibeIdePath, proxyVibeIdeUpgrade, registerVibeIdeProxy, setVibeIdeCodeServerTarget } from './vibe-ide-proxy.js';
-import { startGatewayEdge, type GatewayEdge } from './edge/runtime.js';
+import { startGatewayEdge, syncTaskHostsWithRetry, type GatewayEdge } from './edge/runtime.js';
 import { registerFrpPluginRoute } from './edge/frp-auth.js';
 import { registerRemoteModule } from '../remote/index.js';
 import { IdeWorkspaceError } from '../remote/ide-workspace.js';
@@ -1282,7 +1282,7 @@ async function main(): Promise<void> {
   const hosts = taskService.listAllTasks().flatMap((user) =>
     user.tasks.map((task) => ({ id: task.id, name: task.name, enabled: task.keyEnabled !== false })),
   );
-  void edge.syncTaskHosts(hosts).catch((err: unknown) => {
+  void syncTaskHostsWithRetry(edge, hosts).catch((err: unknown) => {
     console.error(`[edge] 任务域名初始化失败：${err instanceof Error ? err.message : String(err)}`);
   });
   app.log.info(

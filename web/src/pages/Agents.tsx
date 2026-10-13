@@ -415,7 +415,7 @@ export function AgentsPage(props: {
 
       {props.scope === 'remote' && data && data.nodes.length === 0 ? (
         <PageCard title="远程机器" subtitle="自己接入的节点连接器会在此列出开通的 agent（网关侧只读）。">
-          <EmptyHint text="暂无自己的远程机器（可在「远程 · 节点」接入）" />
+          <EmptyHint text="暂无自己的远程机器（可在「远程 · 工作节点」接入）" />
         </PageCard>
       ) : null}
 

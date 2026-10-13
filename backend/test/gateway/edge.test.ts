@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { FRP_VERSION, NGINX_VERSION, frpAsset, nginxAsset } from '../../src/gateway/edge/assets.js';
 import { renderFrpsConf, renderNginxConf } from '../../src/gateway/edge/render.js';
-import { TASK_PUBLIC_HOST, frpsDashboardRouteSpec } from '../../src/gateway/edge/apisix.ts';
+import {
+  APISIX_DASHBOARD_PORT,
+  TASK_PUBLIC_HOST,
+  frpsDashboardRouteSpec,
+  renderApisixDashboardConf,
+} from '../../src/gateway/edge/apisix.ts';
 import {
   dockerComposeExecutable,
   dockerExecutable,
@@ -76,6 +81,19 @@ test('dockerExecutable：PATH 没有 docker 时用 /usr/bin/docker', () => {
   });
   assert.equal(found, '/usr/bin/docker');
   assert.equal(seen.includes('/usr/bin/docker'), true);
+});
+
+test('renderApisixDashboardConf：etcd 与登录用户', () => {
+  const yaml = renderApisixDashboardConf({
+    jwtSecret: 'jwt-secret',
+    username: 'admin',
+    password: 'dash-pass',
+  });
+  assert.match(yaml, new RegExp(`port: ${APISIX_DASHBOARD_PORT}`));
+  assert.match(yaml, /http:\/\/etcd:2379/);
+  assert.match(yaml, /prefix: \/apisix/);
+  assert.match(yaml, /username: admin/);
+  assert.match(yaml, /password: dash-pass/);
 });
 
 test('本机 enhance：frps 面板经 APISIX /frps 反代到 :7500', () => {

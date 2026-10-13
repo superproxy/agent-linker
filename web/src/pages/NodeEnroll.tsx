@@ -164,13 +164,13 @@ export function NodeEnrollPanel(props: {
             description:
               envFlavor === 'dotenv' ? (
                 <>
-                  在「我的 · 节点 Key」颁发 nt_，并在项目根目录创建 <code>{envPath}</code>。
+                  在「我的 · 工作节点 Key」颁发 nt_，并在项目根目录创建 <code>{envPath}</code>。
                 </>
               ) : (
-                <>在「我的 · 节点 Key」颁发 nt_，在节点机终端粘贴下方 {envFlavor === 'bash' ? 'Bash' : 'PowerShell'} 片段。</>
+                <>在「我的 · 工作节点 Key」颁发 nt_，在工作节点机器终端粘贴下方 {envFlavor === 'bash' ? 'Bash' : 'PowerShell'} 片段。</>
               ),
           },
-          { title: '启动节点', description: <><code>{startCmd}</code>（前台调试可用 <code>pnpm node:dev {instName}</code>）。</> },
+          { title: '启动工作节点', description: <><code>{startCmd}</code>（前台调试可用 <code>pnpm worker:dev {instName}</code>）。</> },
         ]}
       />
 

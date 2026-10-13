@@ -16,7 +16,7 @@
 | Code | `/<taskId>-code/` | `https://hubide.ljyd.cn/t_2fc1aed6-code/` |
 | VNC | `/<taskId>-vnc/` | `https://hubide.ljyd.cn/t_2fc1aed6-vnc/vnc.html` |
 
-Dev 可选短链 **`/<taskId>/`**（与 `-web` 同隧道；frps `workspace-dev` 会登记两个 location）。
+Dev 公网入口 **`/<taskId>-web/`**；frps `workspace-dev` 只登记该 location，15173 剥前缀后 Vite 仍用 base `/`。
 
 契约：`shared/src/task-host.ts` 的 `taskPublicPath(taskId, 'web'|'code'|'vnc')`。
 
@@ -28,13 +28,14 @@ Dev 可选短链 **`/<taskId>/`**（与 `-web` 同隧道；frps `workspace-dev` 
 | frps `:7080` | 按 `Host` + **最长** `locations` 选 `workspace-dev|ide|vnc`，**原样转发** |
 | 本机 **15173 / 18080 / 16080** | Dev 把 `-web` 归成 Vite base；code/vnc 剥 `/-code|vnc` 后转 8080/6080 |
 
-### Vite「上下文路径」与公网的关系
+### Vite 与公网 `-web` 路径
 
-SaaS 下 node 注入 **`base: /<taskId>/`**（无 `-web`），与公网 `-web` 入口配套：
+宿主机 worker **不**给 Vite 注入 `--base`。公网路径前缀只在 **15173 适配器**剥掉：
 
 ```text
 浏览器  /t_xxx-web/assets/x.js
-  → 15173  →  /t_xxx/assets/x.js  →  Vite（base=/t_xxx/）
+  → frps:7080 → frpc（location /t_xxx-web，localPort 15173）
+  → 15173  →  /assets/x.js  →  Vite 127.0.0.1:<动态口>（base /）
 ```
 
 前端应用应使用 `import.meta.env.BASE_URL` / 相对路径，不要写死工程目录名。Code 浏览器侧始终是 `-code`；容器内 code-server 用 `--abs-proxy-base-path /t_xxx-code`。

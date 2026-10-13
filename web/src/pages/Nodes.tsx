@@ -104,7 +104,7 @@ export function NodesPage(props: {
 
   const columns: ColumnsType<NodeInfo> = [
     {
-      title: '节点名称',
+      title: '名称',
       key: 'name',
       render: (_, n) => <code className="code-cell" style={{ fontSize: 13 }}>{n.name}</code>,
     },
@@ -325,7 +325,7 @@ export function NodesPage(props: {
 
       <Card
         bordered
-        title={<span style={{ fontSize: 14.5, fontWeight: 600 }}>{isRemote ? '远程节点' : '本机节点'}</span>}
+        title={<span style={{ fontSize: 14.5, fontWeight: 600 }}>{isRemote ? '远程工作节点' : '本机工作节点'}</span>}
         extra={
           isRemote ? (
             <Button type={showEnroll ? 'default' : 'primary'} icon={<PlusOutlined />} onClick={() => setShowEnroll((v) => !v)}>
@@ -348,7 +348,7 @@ export function NodesPage(props: {
           rowClassName={(n) => (n.status === 'pending' ? 'node-pending-row' : '')}
           locale={{
             emptyText: (
-              <EmptyHint text={isRemote ? '暂无远程节点' : '本机网关节点不可用'} />
+              <EmptyHint text={isRemote ? '暂无远程工作节点' : '本机工作节点不可用'} />
             ),
           }}
         />

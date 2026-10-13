@@ -2,7 +2,7 @@
  * 单机三进程编排（仅拉起 / 停止，不常驻守护）：
  *   gateway  —— 网关（OpenAI 兼容 API + 后台 + 节点 WS 接入）
  *   weixin   —— 个人微信 bot 独立进程（external 模式，gateway 不再内嵌）
- *   node     —— 本机 node 节点连接器（反向 WS 连入本机 gateway）
+ *   node     —— 本机工作节点连接器（反向 WS 连入本机 gateway；CLI 别名 worker）
  *
  * 两种运行形态：
  *   - dev（仓库源码）：用 backend/node_modules/.bin/tsx 直接跑 TS 入口
@@ -96,7 +96,7 @@ export const TARGETS: Record<TargetId, TargetSpec> = {
   gateway: { id: 'gateway', label: 'gateway 网关', healthUrl: (base) => `${base}/healthz` },
   weixin: { id: 'weixin', label: '微信 bot' },
   channels: { id: 'channels', label: 'channel-gateway 渠道' },
-  node: { id: 'node', label: 'node 节点' },
+  node: { id: 'node', label: '工作节点' },
 };
 
 export interface TargetStatus {
@@ -557,9 +557,17 @@ const portFree=()=>new Promise((resolve)=>{
   }
 }
 
-/** 解析目标参数：all/缺省 → 全部基目标；单个目标 → 仅该目标（weixin / weixin:<id> 为兼容别名） */
+/** CLI 别名：运维称谓 worker，PM 进程 id 仍为 node */
+function normalizeTargetArg(input: string): string {
+  return input === 'worker' ? 'node' : input;
+}
+
+/** 解析目标参数：all/缺省 → 全部基目标；单个目标 → 仅该目标（weixin / weixin:<id> / worker 为兼容别名） */
 export function parseTargets(input?: string): ProcessInstanceId[] {
   if (!input || input === 'all') return [...ALL_TARGETS];
-  if (isKnownTargetId(input)) return [input];
-  throw new Error(`未知进程 "${input}"，可选：${['all', ...ALL_TARGETS, 'weixin:<accountId>'].join(' | ')}`);
+  const normalized = normalizeTargetArg(input);
+  if (isKnownTargetId(normalized)) return [normalized];
+  throw new Error(
+    `未知进程 "${input}"，可选：${['all', ...ALL_TARGETS, 'worker', 'weixin:<accountId>'].join(' | ')}`,
+  );
 }

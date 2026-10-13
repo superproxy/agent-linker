@@ -1,0 +1,9 @@
+---
+description: 已并入 frps 选路规则
+globs: backend/src/node/**/*.ts,code-server/**/*.{mjs,sh}
+alwaysApply: false
+---
+
+# 已合并
+
+frpc / frps 的约定以 `.cursor/rules/frps-routing.mdc` 为准。本机用三个 localhost Host；SaaS 用公网域名加路径。不要按本文件旧说法把 SaaS 改回 localhost。

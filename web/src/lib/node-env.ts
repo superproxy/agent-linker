@@ -49,9 +49,9 @@ export function nodeEnvFilePath(instanceName?: string): string {
   return inst ? `.runtime-state/node-${inst}.env` : '.runtime-state/node.env';
 }
 
-/** pnpm node:* 命令行（与 scripts/node-ctl.mjs 一致） */
+/** pnpm worker:* 命令行（与 node:* 等价，见根 package.json） */
 export function formatNodePmCommand(action: NodePmAction, instanceName?: string): string {
-  const script = action === 'dev' ? 'node:dev' : action === 'restart' ? 'node:restart' : 'node:start';
+  const script = action === 'dev' ? 'worker:dev' : action === 'restart' ? 'worker:restart' : 'worker:start';
   const inst = instanceName?.trim();
   return inst ? `pnpm ${script} ${inst}` : `pnpm ${script}`;
 }
@@ -87,7 +87,7 @@ export function formatNodeLaunchSnippet(
   return `${env}\n${cmd}`;
 }
 
-/** 从已注册节点信息推测 pnpm 实例名（与接入时 node:start <name> 一致） */
+/** 从已注册节点信息推测 pnpm 实例名（与接入时 worker:start <name> 一致） */
 export function suggestNodeInstanceName(node: { name: string; nodeId: string }): string {
   const fromName = node.name
     .trim()

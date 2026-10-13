@@ -150,7 +150,7 @@ test('renderWorkspaceFrpc：legacy 三 Host', () => {
 test('task-host：SaaS 公网路径与 Vite base', () => {
   assert.equal(taskPublicPath('t_41db7238', 'web'), '/t_41db7238-web');
   assert.equal(taskViteBasePath('t_41db7238'), '/t_41db7238/');
-  assert.deepEqual(taskSaasDevFrpcLocations('t_41db7238'), ['/t_41db7238', '/t_41db7238-web']);
+  assert.deepEqual(taskSaasDevFrpcLocations('t_41db7238'), ['/t_41db7238-web']);
 });
 
 test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
@@ -162,7 +162,7 @@ test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
   });
   assert.match(text, /serverAddr = "150\.5\.140\.64"/);
   assert.equal(text.match(/customDomains = \["hubide\.ljyd\.cn"\]/g)?.length, 3);
-  assert.match(text, /locations = \["\/t_41db7238", "\/t_41db7238-web"\]/);
+  assert.match(text, /locations = \["\/t_41db7238-web"\]/);
   assert.match(text, /locations = \["\/t_41db7238-code"\]/);
   assert.match(text, /locations = \["\/t_41db7238-vnc"\]/);
   assert.match(text, /localPort = 15173/);
@@ -171,9 +171,9 @@ test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
   assert.doesNotMatch(text, /localhost/);
   assert.equal(devPublicWebTrailingSlashRedirect('t_41db7238', '/t_41db7238-web'), '/t_41db7238-web/');
   assert.equal(saasCodeProxyBasePath('t_41db7238'), '/t_41db7238-code');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web'), '/t_41db7238/');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web?foo=1'), '/t_41db7238/?foo=1');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/t_41db7238/@vite/client');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web'), '/');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web?foo=1'), '/?foo=1');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/@vite/client');
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/'), '/t_41db7238/');
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/src/main.ts'), '/t_41db7238/src/main.ts');
   assert.equal(rewriteSaasLocalPath('code', 't_41db7238', '/t_41db7238-code/?folder=/root/workspace'), '/?folder=/root/workspace');
@@ -252,6 +252,41 @@ test('publishSaasFrpc：按任务改写路径（含 ide.localhost）', () => {
   assert.match(after, /serverAddr = "150\.5\.140\.64"/);
   assert.match(after, /locations = \["\/t_41db7238-code"\]/);
   closeSaasLocalAdapters();
+});
+
+test('publishSaasFrpc：本机栈忽略旧 toml 的 hubide 与 host.docker.internal', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'local-frpc-'));
+  const file = join(dir, 'frpc.toml');
+  writeFileSync(
+    file,
+    `auth.token = "abc"
+serverAddr = "host.docker.internal"
+serverPort = 7000
+customDomains = ["hubide.ljyd.cn"]
+`,
+    'utf8',
+  );
+  const prevHost = process.env.LINKAGENT_PUBLIC_HOST;
+  const prevStack = process.env.LINKAGENT_LOCAL_STACK;
+  const prevAddr = process.env.FRPS_SERVER_ADDR;
+  process.env.LINKAGENT_PUBLIC_HOST = 'hubide.ljyd.cn';
+  process.env.LINKAGENT_LOCAL_STACK = '1';
+  delete process.env.FRPS_SERVER_ADDR;
+  try {
+    publishSaasFrpc('t_abc', file);
+  } finally {
+    closeSaasLocalAdapters();
+    if (prevHost === undefined) delete process.env.LINKAGENT_PUBLIC_HOST;
+    else process.env.LINKAGENT_PUBLIC_HOST = prevHost;
+    if (prevStack === undefined) delete process.env.LINKAGENT_LOCAL_STACK;
+    else process.env.LINKAGENT_LOCAL_STACK = prevStack;
+    if (prevAddr === undefined) delete process.env.FRPS_SERVER_ADDR;
+    else process.env.FRPS_SERVER_ADDR = prevAddr;
+  }
+  const text = readFileSync(file, 'utf8');
+  assert.match(text, /customDomains = \["ide\.localhost"\]/);
+  assert.match(text, /serverAddr = "127\.0\.0\.1"/);
+  assert.match(text, /locations = \["\/t_abc-code"\]/);
 });
 
 test('startNodeServeWeb：有 frps 令牌时挂上 frpc 配置', () => {

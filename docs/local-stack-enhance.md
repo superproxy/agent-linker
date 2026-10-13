@@ -1,5 +1,7 @@
 # Local 本机栈与 enhance 速查
 
+> **架构 / 流程 / 数据流 / 运维分层**：见 [`local-edge-stack-architecture.md`](local-edge-stack-architecture.md)。  
+> **各组件怎么启停、日志在哪、frpc 谁拉**：见 [`ops-local-components.md`](ops-local-components.md)。  
 > 路由原理见 [`edge-frpc-apisix.md`](edge-frpc-apisix.md)。APISIX / frps / node frpc 配置细节见 [`edge-apisix-node.md`](edge-apisix-node.md)（文内「形态 A/B/C」为架构术语）。  
 > 日常启停只需区分：**单机模式** 与 **Docker 模式**。
 
@@ -69,6 +71,8 @@
 ```
 
 **不要**直接打开 `http://ide.localhost:9080/`（APISIX 无 `/` 路由）。**不要**在 frps:7080 上只测 `/<taskId>-code` 却不带已登记的 Host——路径路由是 **Host + locations** 一起匹配。legacy 三 Host 仅当 `LINKAGENT_FRPC_LEGACY_HOSTS=1`。
+
+**frps 面板无 HTTP 代理时**：确认 frpc 连本机 `127.0.0.1:7000`，且 `customDomains` 为 **`ide.localhost`**（勿留远程调试用的 `LINKAGENT_PUBLIC_HOST=hubide…`）。`pnpm local:*` 会设 `LINKAGENT_LOCAL_STACK=1`；改完任务/环境后 `pnpm --filter @linkagent/backend pm:restart node`，网关需在 APISIX 起来后同步路由（日志见 `[edge] APISIX 路由同步`）。
 
 **Docker 模式**：9080 → frps → **容器内** frpc → 容器内 8080 / 5173 / 6080。
 

@@ -65,9 +65,9 @@ test('formatNodeEnv 无 token 时省略 TOKEN 行', () => {
 });
 
 test('formatNodePmCommand 与 nodeEnvFilePath', () => {
-  assert.equal(formatNodePmCommand('start', 'n1'), 'pnpm node:start n1');
-  assert.equal(formatNodePmCommand('restart', 'n1'), 'pnpm node:restart n1');
-  assert.equal(formatNodePmCommand('dev'), 'pnpm node:dev');
+  assert.equal(formatNodePmCommand('start', 'n1'), 'pnpm worker:start n1');
+  assert.equal(formatNodePmCommand('restart', 'n1'), 'pnpm worker:restart n1');
+  assert.equal(formatNodePmCommand('dev'), 'pnpm worker:dev');
   assert.equal(nodeEnvFilePath('builder'), '.runtime-state/node-builder.env');
   assert.equal(nodeEnvFilePath(), '.runtime-state/node.env');
 });
@@ -75,13 +75,13 @@ test('formatNodePmCommand 与 nodeEnvFilePath', () => {
 test('formatNodeLaunchSnippet bash：env 与 restart 同一粘贴块', () => {
   const out = formatNodeLaunchSnippet(fields, 'bash', 'restart', 'builder-01');
   assert.ok(out.includes("export LINKAGENT_GATEWAY_URL="));
-  assert.ok(out.endsWith('pnpm node:restart builder-01'));
+  assert.ok(out.endsWith('pnpm worker:restart builder-01'));
 });
 
 test('formatNodeLaunchSnippet dotenv：附 env 路径注释', () => {
   const out = formatNodeLaunchSnippet(fields, 'dotenv', 'start', 'n1');
   assert.ok(out.includes('.runtime-state/node-n1.env'));
-  assert.ok(out.includes('pnpm node:start n1'));
+  assert.ok(out.includes('pnpm worker:start n1'));
 });
 
 test('suggestNodeInstanceName', () => {

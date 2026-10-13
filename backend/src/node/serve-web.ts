@@ -148,8 +148,8 @@ ${frpcProxy('workspace-vnc', WORKSPACE_VNC_PORT, vncDomain)}
 
 /**
  * SaaS：三条代理共用公网域名，用路径分开。
- * dev 登记 `/<taskId>` 与 `/<taskId>-web`。frps 取最长路径，所以 `-code` / `-vnc` 不会被吞掉。
- * frps 不改路径。localPort 是节点适配器，由它再送到 5173 / 8080 / 6080。
+ * dev 只登记 `/<taskId>-web` → 本机 {@link SAAS_DEV_LISTEN}（15173）适配器；适配器剥前缀后转发 Vite 动态口（非 5173/15173）。
+ * frps 不改路径。code/vnc 的 localPort 为 18080/16080 适配器，再送到 8080/6080。
  * 本机模式仍走 {@link renderWorkspaceFrpc}。
  */
 export function renderSaasWorkspaceFrpc(
@@ -206,7 +206,22 @@ locations = ${loc([vncLocation])}
 }
 
 function browserEntryPublicHost(): string {
+  const localStack = (process.env.LINKAGENT_LOCAL_STACK ?? '').trim();
+  if (localStack === '1' || localStack.toLowerCase() === 'true') {
+    return frpcDomain(TASK_PUBLIC_HOST, TASK_PUBLIC_HOST);
+  }
   return frpcDomain(process.env.LINKAGENT_PUBLIC_HOST?.trim() || TASK_PUBLIC_HOST, TASK_PUBLIC_HOST);
+}
+
+function frpcServerAddrForPublish(inContainer: boolean, tomlAddr: string | undefined, envAddr: string | undefined): string {
+  const fromEnv = (envAddr ?? '').trim();
+  if (fromEnv) return fromEnv;
+  const fromToml = (tomlAddr ?? '').trim();
+  if (!inContainer) {
+    if (!fromToml || fromToml === 'host.docker.internal') return '127.0.0.1';
+    return fromToml;
+  }
+  return fromToml || 'host.docker.internal';
 }
 
 function saasAdapterPortsFromEnv(): { dev: number; code: number; vnc: number } {
@@ -259,18 +274,14 @@ export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRP
   if (!id) return;
   const token = frpcTokenFromFileOrEnv(file);
   if (!token) return;
+  const inContainer = frpcPublishInContainer(file);
   const fromToml = frpcServerFromToml(file);
-  const fromEnv = frpcEndpointForWrite(frpcPublishInContainer(file));
   const envAddr = (process.env.FRPS_SERVER_ADDR ?? '').trim();
   const envPort = Number(process.env.FRPS_SERVER_PORT ?? '');
+  const fromEnv = frpcEndpointForWrite(inContainer);
+  const serverAddr = frpcServerAddrForPublish(inContainer, fromToml.serverAddr, envAddr || undefined);
   const endpoint = {
-    ...(envAddr
-      ? { serverAddr: envAddr }
-      : fromToml.serverAddr
-        ? { serverAddr: fromToml.serverAddr }
-        : fromEnv.serverAddr
-          ? { serverAddr: fromEnv.serverAddr }
-          : {}),
+    serverAddr,
     ...(Number.isInteger(envPort) && envPort > 0
       ? { serverPort: envPort }
       : fromToml.serverPort

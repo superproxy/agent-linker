@@ -65,12 +65,12 @@ export function NodeLaunchCopyModal(props: {
               type="info"
               showIcon
               message="未绑定 nt_ Key"
-              description="片段不含 LINKAGENT_GATEWAY_TOKEN。若节点机已有 .runtime-state/node*.env 或走审批模式，可直接重启；否则请在「我的 · 节点 Key」查看完整 nt_ 并补进 env。"
+              description="片段不含 LINKAGENT_GATEWAY_TOKEN。若工作节点机已有 .runtime-state/node*.env 或走审批模式，可直接重启；否则请在「我的 · 工作节点 Key」查看完整 nt_ 并补进 env。"
             />
           ) : null}
           <div>
             <div className="sub-muted" style={{ marginBottom: 4 }}>
-              pnpm 实例名（与 <code>pnpm node:start &lt;name&gt;</code> 一致）
+              pnpm 实例名（与 <code>pnpm worker:start &lt;name&gt;</code> 一致）
             </div>
             <Input value={instanceName} onChange={(e) => setInstanceName(e.target.value)} placeholder="builder-01" />
           </div>

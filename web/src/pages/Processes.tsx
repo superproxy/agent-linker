@@ -74,7 +74,7 @@ function MountModal(props: {
   return (
     <Modal
       open={props.open}
-      title={`设置${props.id === 'weixin' ? '微信 bot' : 'node 节点'}挂载的网关`}
+      title={`设置${props.id === 'weixin' ? '微信 bot' : '工作节点'}挂载的网关`}
       okText="保存并重启"
       cancelText="取消"
       confirmLoading={busy}
@@ -161,7 +161,7 @@ function ChildGatewayMounts(props: { client: PmClient }) {
       const r = await props.client.setGatewayTarget(id, values.url, values.token);
       setTargets(r.targets);
       setMountFor(null);
-      notify.success(`已保存，${id === 'weixin' ? '微信 bot' : 'node'} 已重启`);
+      notify.success(`已保存，${id === 'weixin' ? '微信 bot' : '工作节点'} 已重启`);
     } catch (e) {
       notify.error(e instanceof Error ? e.message : String(e));
       throw e;
@@ -224,7 +224,7 @@ function ChildGatewayMounts(props: { client: PmClient }) {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="本机的微信 bot 与 node 进程可分别挂载到本机或远程网关；保存后自动重启对应进程。远程网关清单也可在「远程 · 网关」维护。"
+        message="本机的微信 bot 与工作节点进程可分别挂载到本机或远程网关；保存后自动重启对应进程。远程网关清单也可在「远程 · 网关」维护。"
       />
       <Table
         rowKey="id"
@@ -232,7 +232,7 @@ function ChildGatewayMounts(props: { client: PmClient }) {
         columns={mountColumns()}
         dataSource={[
           { id: 'weixin' as ChildGatewayId, label: '微信 bot' },
-          { id: 'node' as ChildGatewayId, label: 'node 节点' },
+          { id: 'node' as ChildGatewayId, label: '工作节点' },
         ]}
         pagination={false}
         loading={targets === null}

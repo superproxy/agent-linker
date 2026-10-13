@@ -160,8 +160,12 @@ function Start-Frps {
 
 function Write-FrpsDashboardHint {
   $dashFile = Join-Path $Runtime 'frps.dashboard'
+  $apisixDash = Join-Path $Runtime 'apisix-dashboard.password'
+  $apisixKey = Join-Path $Runtime 'apisix.admin-key'
   Write-Host "frps 面板: http://127.0.0.1:7500/ （用户 admin，密码文件 $dashFile）"
   Write-Host "本机 enhance 也可: http://127.0.0.1:9080/frps/ 或 http://ide.localhost:9080/frps/（需 gateway 已 sync APISIX）"
+  Write-Host "APISIX Dashboard: http://127.0.0.1:9000/ （用户 admin，密码文件 $apisixDash）"
+  Write-Host "APISIX Admin API: http://127.0.0.1:9180/ （X-API-KEY 见 $apisixKey）"
 }
 
 function Stop-Frps {
@@ -185,10 +189,14 @@ function Start-Apisix {
   $env:LINKAGENT_EDGE_DIR = $Runtime
   Push-Location -LiteralPath $Install
   try {
-    $code = Invoke-Compose @('up', '-d')
+    $code = Invoke-Compose @('up', '-d', 'etcd', 'apisix')
     if ($code -ne 0) {
       Write-Host "APISIX 启动失败，日志 $ApisixLogPath"
       return $code
+    }
+    $dashCode = Invoke-Compose @('up', '-d', 'apisix-dashboard')
+    if ($dashCode -ne 0) {
+      Write-Host "APISIX Dashboard 未启动（多为镜像拉取失败）；数据面已就绪。稍后重试: docker compose -p $script:ComposeProject -f $ComposeFile up -d apisix-dashboard" -ForegroundColor Yellow
     }
     "APISIX compose up $(Get-Date -Format o)" | Add-Content -LiteralPath $ApisixLogPath
     Write-Host "APISIX 已提交启动，日志 $ApisixLogPath"

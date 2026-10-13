@@ -83,6 +83,16 @@ function pidAlive(pid) {
 
 const apisix = dockerRunning("linkagent-edge-agent-linker-apisix-1") || dockerRunning("linkagent-edge-apisix-1");
 line("edge APISIX 容器", apisix, apisix ? "9080 数据面" : "pnpm edge:start");
+const apisixDash =
+  dockerRunning("linkagent-edge-agent-linker-apisix-dashboard-1") ||
+  dockerRunning("linkagent-edge-apisix-dashboard-1");
+line(
+  "edge APISIX Dashboard",
+  apisixDash,
+  apisixDash
+    ? "http://127.0.0.1:9000/ admin + apisix-dashboard.password"
+    : "pnpm edge:config && pnpm edge:restart",
+);
 
 const frpsPidPath = join(state, "edge", "frps.pid");
 const frpsPid = readPidFile(frpsPidPath);
