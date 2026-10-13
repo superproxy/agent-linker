@@ -39,7 +39,7 @@
 | 步骤 | 命令（安装根） | 作用 |
 |---|---|---|
 | 首次构建 APISIX 镜像 | `pnpm edge:build` | `scripts/edge/Dockerfile` |
-| 启停 | `pnpm edge:start` / `edge:stop` / `edge:restart` | Windows → `scripts/edge.ps1`，Unix → `scripts/edge.sh` |
+| 启停 | `pnpm edge:start` / `edge:stop` / `edge:restart` | `scripts/edge-ctl.ps1` / `edge-ctl.sh`（`edge.ps1` / `edge.sh` 转发同一实现） |
 | 状态 / 日志 | `pnpm edge:status` / `edge:log` | frps 日志 + APISIX compose 日志 |
 
 edge 一次启动包含两部分：
@@ -103,7 +103,7 @@ SaaS 网关机+远程node│  §4.1 远程裸机 / dist 包   │  §4.2 远程�
 
 **任意象限网关机侧相同顺序**：
 
-1. `bash scripts/edge.sh build`（首次）→ `bash scripts/edge.sh start`  
+1. `bash scripts/edge-ctl.sh build`（首次）→ `bash scripts/edge-ctl.sh start`  
 2. `pnpm server:start`（**APISIX 已监听 9180** 后再起或重启 gateway，以便同步路由）  
 3. 按象限起 node（下表）
 
@@ -166,7 +166,7 @@ hostCodeServerCompose:
 **命令**（安装根 = 仓库根）：
 
 ```bash
-bash scripts/edge.sh build && bash scripts/edge.sh start
+bash scripts/edge-ctl.sh build && bash scripts/edge-ctl.sh start
 pnpm image:code-server
 pnpm server:start
 pnpm node:start    # 或 pnpm restart:all（含 PM 托管 node）
@@ -201,7 +201,7 @@ LINKAGENT_NODE_USER=local
 **命令**：
 
 ```bash
-bash scripts/edge.sh start
+bash scripts/edge-ctl.sh start
 pnpm server:start
 pnpm node:docker:build
 pnpm node:docker
@@ -233,7 +233,7 @@ edge:
   publicPort: 443
 ```
 
-网关机：`edge.sh start` + `pnpm server:start`；SLB **443 → APISIX 9080**；对执行机开放 **7000**；分发 **`frps.token`**（≠ `nt_`）。
+网关机：`edge-ctl.sh start` + `pnpm server:start`；SLB **443 → APISIX 9080**；对执行机开放 **7000**；分发 **`frps.token`**（≠ `nt_`）。
 
 **远程执行机** — 环境文件（如 `.runtime-state/node.env` 或 systemd `Environment=`）：
 
@@ -298,8 +298,8 @@ docker logs -f linkagent-node
 | 组件 | 谁启动 | 作用 |
 |---|---|---|
 | gateway | `pnpm server:*` | 写 `.runtime-state/edge/`，Admin API 同步 APISIX |
-| frps | `scripts/edge.sh start` | `7000` 控制 / `7080` HTTP vhost |
-| APISIX | `edge.sh`（Docker） | `9080` 浏览器入口 / `9180` Admin |
+| frps | `scripts/edge-ctl.sh start` | `7000` 控制 / `7080` HTTP vhost |
+| APISIX | `edge-ctl`（Docker，`scripts/edge/`） | `9080` 浏览器入口 / `9180` Admin |
 | node | §3–§4 各象限 | 写 **frpc.toml**，不直接写 APISIX |
 
 | 端口 | 说明 |
@@ -319,9 +319,9 @@ docker logs -f linkagent-node
 | dist | `edge.bat start` + `start.bat start` |
 | Docker 聚合 node | `pnpm node:docker`（与 PM node 二选一） |
 
-脚本与 Linux 对齐：`scripts/edge.ps1` + `edge-ctl.mjs`（`edge.sh` 仍可在 Git Bash 使用）。需 **Docker Desktop**。
+脚本与 Linux 对齐：`scripts/edge-ctl.ps1` + `edge-ctl.mjs`（`edge.ps1` / `edge.sh` 为兼容转发）。需 **Docker Desktop**。
 
-**停止顺序**：node → `bash scripts/edge.sh stop` → `pnpm server:stop`。
+**停止顺序**：node → `bash scripts/edge-ctl.sh stop` → `pnpm server:stop`。
 
 ---
 
@@ -329,7 +329,7 @@ docker logs -f linkagent-node
 
 | 现象 | 排查 |
 |---|---|
-| `pnpm edge:build` 报 `failed to get console` | 已通过 `edge.ps1` 无控制台模式调用 docker；仍失败时在**本机 PowerShell** 执行 `pnpm edge:build` 或确认 Docker Desktop 已启动 |
+| `pnpm edge:build` 报 `failed to get console` | 已通过 `edge-ctl.ps1` 无控制台模式调用 docker；仍失败时在**本机 PowerShell** 执行 `pnpm edge:build` 或确认 Docker Desktop 已启动 |
 | frpc 断线 / 无 `new proxy` | `FRPS_TOKEN` ≠ frps.toml；误用 `nt_` |
 | APISIX 404 | 先 edge 再 gateway；或重启 gateway 触发 `syncTaskHosts` |
 | SaaS 路径 404 | node 未设 `LINKAGENT_PUBLIC_HOST` 或与 `edge.publicHost` 不一致 |

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { FRP_VERSION, NGINX_VERSION, frpAsset, nginxAsset } from '../../src/gateway/edge/assets.js';
 import { renderFrpsConf, renderNginxConf } from '../../src/gateway/edge/render.js';
-import { TASK_PUBLIC_HOST } from '../../src/gateway/edge/apisix.ts';
+import { TASK_PUBLIC_HOST, frpsDashboardRouteSpec } from '../../src/gateway/edge/apisix.ts';
 import {
   dockerComposeExecutable,
   dockerExecutable,
@@ -76,6 +76,17 @@ test('dockerExecutable：PATH 没有 docker 时用 /usr/bin/docker', () => {
   });
   assert.equal(found, '/usr/bin/docker');
   assert.equal(seen.includes('/usr/bin/docker'), true);
+});
+
+test('本机 enhance：frps 面板经 APISIX /frps 反代到 :7500', () => {
+  const spec = frpsDashboardRouteSpec('ide.localhost');
+  assert.equal(spec.id, 'frps-dashboard');
+  assert.equal(spec.host, 'ide.localhost');
+  assert.deepEqual(spec.uris, ['/frps', '/frps/', '/frps/*']);
+  assert.equal(spec.upstream, 'http://127.0.0.1:7500');
+  assert.deepEqual(spec.rewrite, ['^/frps/?(.*)', '/$1']);
+  const loop = frpsDashboardRouteSpec('127.0.0.1', 'frps-dashboard-127');
+  assert.equal(loop.id, 'frps-dashboard-127');
 });
 
 test('没有 compose 插件时退回 docker-compose', () => {
@@ -223,6 +234,10 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"pass_host":"pass"/);
   assert.doesNotMatch(put('task-vnc-t_41db7238')?.body ?? '', /upstream_host/);
   assert.match(put('task-vnc-t_41db7238')?.body ?? '', /"status":0/);
+  assert.match(put('frps-dashboard')?.body ?? '', /"host":"ide\.localhost"/);
+  assert.match(put('frps-dashboard')?.body ?? '', /\/frps/);
+  assert.match(put('frps-dashboard')?.body ?? '', /host\.docker\.internal:7500/);
+  assert.match(put('frps-dashboard-127')?.body ?? '', /"host":"127\.0\.0\.1"/);
   await edge.applyTaskHost({ taskId: 'default', enabled: false, removed: true });
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-open-default')), true);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/task-default')), true);
@@ -266,6 +281,8 @@ test('SaaS 公网域名只校验并原样转到 frps', async () => {
   assert.doesNotMatch(code, /localhost/);
   assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/code-localhost')), false);
   assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/code-localhost')), true);
+  assert.equal(calls.some((call) => call.method === 'PUT' && call.url.endsWith('/routes/frps-dashboard')), false);
+  assert.equal(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/routes/frps-dashboard')), true);
   edge.stop();
 });
 

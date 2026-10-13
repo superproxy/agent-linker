@@ -144,18 +144,25 @@ function copyConfigTemplatesToDist(destConfigDir) {
 
 /**
  * 仓库 scripts/ops-* → 独立包 scripts/（去 ops- 前缀，与 package.json 一致）
- * edge-ctl.mjs 仓库与 dist 同名
+ * 边缘：edge-server-ctl（进程）、edge-config-ctl（配置）；edge-ctl 为兼容转发
  */
 const DIST_RUNTIME_SCRIPT_COPY = [
   ['ops-config-init.mjs', 'config-init.mjs'],
   ['ops-config-init.sh', 'config-init.sh'],
   ['ops-setup-pi.mjs', 'setup-pi.mjs'],
   ['ops-setup-channels.mjs', 'setup-channels.mjs'],
-  ['ops-edge-ctl.sh', 'edge-ctl.sh'],
-  ['ops-edge-ctl.ps1', 'edge-ctl.ps1'],
-  ['ops-edge-ctl.bat', 'edge-ctl.bat'],
+  ['edge-server-ctl.sh', 'edge-server-ctl.sh'],
+  ['edge-server-ctl.ps1', 'edge-server-ctl.ps1'],
+  ['edge-server-ctl.bat', 'edge-server-ctl.bat'],
+  ['edge-server-ctl.mjs', 'edge-server-ctl.mjs'],
+  ['edge-config-ctl.mjs', 'edge-config-ctl.mjs'],
+  ['edge-ctl.sh', 'edge-ctl.sh'],
+  ['edge-ctl.ps1', 'edge-ctl.ps1'],
+  ['edge-ctl.bat', 'edge-ctl.bat'],
   ['edge-ctl.mjs', 'edge-ctl.mjs'],
-  ['ops-edge-prepare.mjs', 'edge-prepare.mjs'],
+  ['edge-prepare.mjs', 'edge-prepare.mjs'],
+  ['edge.sh', 'edge.sh'],
+  ['edge.ps1', 'edge.ps1'],
   ['ops-server-ctl.sh', 'server-ctl.sh'],
   ['ops-server-ctl.ps1', 'server-ctl.ps1'],
   ['server-ctl.mjs', 'server-ctl.mjs'],
@@ -180,7 +187,7 @@ function copyDistRuntimeScripts(destRoot) {
     mkdirSync(dirname(dest), { recursive: true });
     cpSync(src, dest);
   }
-  const edgeDir = join(REPO, 'scripts', 'ops-edge');
+  const edgeDir = join(REPO, 'scripts', 'edge');
   if (existsSync(edgeDir)) {
     mkdirSync(join(destRoot, 'scripts', 'edge'), { recursive: true });
     for (const rel of ['docker-compose.yaml', 'Dockerfile']) {
@@ -494,12 +501,13 @@ async function buildFull(dist, skipInstall) {
             'server:restart': 'node scripts/server-ctl.mjs restart',
             'server:status': 'node scripts/server-ctl.mjs status',
             'server:logs': 'node scripts/server-ctl.mjs logs',
-            'edge:start': 'node scripts/edge-ctl.mjs start',
-            'edge:stop': 'node scripts/edge-ctl.mjs stop',
-            'edge:restart': 'node scripts/edge-ctl.mjs restart',
-            'edge:status': 'node scripts/edge-ctl.mjs status',
-            'edge:log': 'node scripts/edge-ctl.mjs log',
-            'edge:build': 'node scripts/edge-ctl.mjs build',
+            'edge:config': 'node scripts/edge-config-ctl.mjs',
+            'edge:start': 'node scripts/edge-server-ctl.mjs start',
+            'edge:stop': 'node scripts/edge-server-ctl.mjs stop',
+            'edge:restart': 'node scripts/edge-server-ctl.mjs restart',
+            'edge:status': 'node scripts/edge-server-ctl.mjs status',
+            'edge:log': 'node scripts/edge-server-ctl.mjs log',
+            'edge:build': 'node scripts/edge-server-ctl.mjs build',
             'config:init': 'node scripts/config-init.mjs',
           },
           dependencies: runtimeDependenciesFull(),
@@ -510,6 +518,7 @@ async function buildFull(dist, skipInstall) {
     );
 
     writeRootExecSh(dist, 'server-ctl.sh', 'scripts/server-ctl.sh');
+    writeRootExecSh(dist, 'edge-server-ctl.sh', 'scripts/edge-server-ctl.sh');
     writeRootExecSh(dist, 'edge-ctl.sh', 'scripts/edge-ctl.sh');
     writeRootExecSh(dist, 'start.sh', 'scripts/server-ctl.sh');
 
@@ -528,10 +537,17 @@ node scripts\\server-ctl.mjs %*
 `,
     );
     writeFileSync(
+      join(dist, 'edge-server-ctl.bat'),
+      `@echo off
+cd /d "%~dp0"
+node scripts\\edge-server-ctl.mjs %*
+`,
+    );
+    writeFileSync(
       join(dist, 'edge-ctl.bat'),
       `@echo off
 cd /d "%~dp0"
-node scripts\\edge-ctl.mjs %*
+node scripts\\edge-server-ctl.mjs %*
 `,
     );
 
@@ -545,7 +561,7 @@ node scripts\\edge-ctl.mjs %*
   }
 
   console.log(`\n✅ 独立部署包已生成：${dist}`);
-  console.log('   启动：cd 该目录 && ./edge-ctl.sh start && ./server-ctl.sh start');
+  console.log('   启动：cd 该目录 && ./edge-server-ctl.sh start && ./server-ctl.sh start');
 }
 
 const FULL_README = `# linkagent 独立部署包
@@ -561,10 +577,11 @@ OpenAI 兼容网关：Chatbox / Open WebUI → \`/v1\` → ACP(acpx) → 本地 
 linkagent/
 ├── bin/                  进程入口（gateway / pm / node / edge 等 .mjs）
 ├── config/               gateway.yaml / weixin.yaml / node.yaml
-├── scripts/              装好后运维：edge-ctl、server-ctl、setup-pi 等
+├── scripts/              装好后运维：edge-server-ctl、edge-config-ctl、server-ctl 等
 ├── install.sh            发布包 → 运行目录（如 /opt/agent-linker）
 ├── server-ctl.sh         网关/渠道/节点启停（内部 node bin/pm.mjs）
-├── edge-ctl.sh           frps + APISIX
+├── edge-server-ctl.sh    frps + APISIX 启停；配置见 bin/edge.mjs 或 edge-config-ctl
+├── edge-ctl.sh           兼容别名 → edge-server-ctl
 ├── dev/                  内置聊天页
 ├── web/                  后台管理端
 ├── node_modules/
@@ -573,8 +590,8 @@ linkagent/
 
 ## 启动（单机三进程：gateway + 微信 + node）
 \`\`\`bash
-./edge-ctl.sh build     # 首次构建 APISIX 镜像（需 Docker）
-./edge-ctl.sh start     # frps + APISIX
+./edge-server-ctl.sh build     # 首次构建 APISIX 镜像（需 Docker）
+./edge-server-ctl.sh start     # frps + APISIX
 ./server-ctl.sh start   # 后台启动 gateway/channels/node
 ./server-ctl.sh status
 ./server-ctl.sh logs

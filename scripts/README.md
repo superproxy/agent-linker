@@ -17,7 +17,7 @@
 
 **ctl 格式**（仓库与 dist 对齐）：
 
-- 边缘：`pnpm edge:*` → `edge-ctl.mjs` → `ops-edge-ctl.sh`（dist：`scripts/edge-ctl.sh`）
+- 边缘：`edge-server-ctl`（`pnpm edge:*` 启停 frps+APISIX）· `edge-config-ctl`（`pnpm edge:config` 只写配置）· `scripts/edge/` 为 Compose · `edge-ctl` / `edge.sh` 兼容转发
 - 网关三进程：dist 内 `server-ctl.mjs` / `scripts/server-ctl.sh`；源码开发仍用 `dev-server-ctl.mjs`
 
 **薄封装（兼容）**：包根 `start.sh` / `start.bat` 转发到 `server-ctl`；无 `deploy-`/`ops-`/`dev-` 前缀的旧文件名仍可能转发到正式脚本。

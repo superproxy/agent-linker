@@ -19,9 +19,12 @@ import {
   taskOpenRouteUris,
   taskRouteUris,
   taskVncRouteId,
+  FRPS_DASHBOARD_ROUTE_ID,
+  FRPS_DASHBOARD_ROUTE_ID_LOOPBACK,
+  frpsDashboardRouteSpec,
   gatewayNodeWsRouteSpec,
 } from './apisix.js';
-import { useFrpTaskPathRouting } from '@linkagent/shared';
+import { isSaasPublicHost, useFrpTaskPathRouting } from '@linkagent/shared';
 import { renderFrpsConf } from './render.js';
 
 /** Docker Compose 项目名：同机多安装时避免容器栈互相覆盖（可用 LINKAGENT_EDGE_PROJECT 覆盖） */
@@ -236,7 +239,7 @@ function dockerComposePluginAvailable(dockerBin: string): boolean {
 }
 
 /**
- * 只写 frps / APISIX 配置并准备二进制。进程由 scripts/edge.sh 启动，网关不 spawn。
+ * 只写 frps / APISIX 配置并准备二进制。进程由 edge-server-ctl 启动，网关不 spawn。
  */
 export async function prepareGatewayEdge(opts: GatewayEdgeOptions): Promise<PreparedEdge> {
   const platform = opts.platform ?? process.platform;
@@ -352,6 +355,13 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         if (useFrpTaskPathRouting(platformHost)) {
           await admin.upsert(gatewayNodeWsRouteSpec(platformHost, opts.gatewayUpstream));
         }
+        if (isSaasPublicHost(platformHost)) {
+          await admin.remove(FRPS_DASHBOARD_ROUTE_ID);
+          await admin.remove(FRPS_DASHBOARD_ROUTE_ID_LOOPBACK);
+        } else {
+          await admin.upsert(frpsDashboardRouteSpec(platformHost));
+          await admin.upsert(frpsDashboardRouteSpec('127.0.0.1', FRPS_DASHBOARD_ROUTE_ID_LOOPBACK));
+        }
         for (const task of tasks) {
           await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });
         }
@@ -361,7 +371,7 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
     if (!prepared.frpsBin) {
       console.error(`[edge] 当前平台没有 frp 安装包，跳过 frps 路径`);
     }
-    console.log('[edge] 配置已写入。frps 与 APISIX 由 scripts/edge.sh 启动，网关进程不拉起它们。');
+    console.log('[edge] 配置已写入。frps 与 APISIX 由 edge-server-ctl 启动，网关进程不拉起它们。');
   } catch (err) {
     console.error(`[edge] 配置写入失败：${err instanceof Error ? err.message : String(err)}`);
     edgeApi = noopEdge;

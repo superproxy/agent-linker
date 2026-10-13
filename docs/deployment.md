@@ -361,7 +361,7 @@ WantedBy=multi-user.target
 <安装根>/
 ├── bin/           # gateway.mjs、pm.mjs、node.mjs…（仅 dist / build 产出；dev 用 tsx 跑 backend/src）
 ├── config/        # gateway.yaml、weixin.yaml、node.yaml（运维改这里）
-├── scripts/       # edge.sh、setup-pi.mjs（仓库根 scripts/ 与 dist 内拷贝同源）
+├── scripts/       # edge-ctl、edge/（APISIX compose）、setup-pi.mjs（与 dist 内拷贝同源）
 ├── web/           # 管理后台静态（dist）
 └── .runtime-state/
 ```
@@ -442,7 +442,7 @@ bash scripts/server-install-update.sh --restart
 
 日常升级（模式 B）：`server-install-update` 只同步程序，**不覆盖** 安装目录 yaml 与运行态。
 
-重启边缘：`bash scripts/edge.sh restart`（安装根由 `.linkagent-install` 或仓库根解析）。
+重启边缘：`bash scripts/edge-ctl.sh restart`（安装根由 `.linkagent-install` 或仓库根解析）。
 
 | 路径 | 说明 |
 |---|---|

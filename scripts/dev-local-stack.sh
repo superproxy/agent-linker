@@ -56,7 +56,7 @@ case "$CMD" in
       node "$DIR/dev-local-stack-edge-enhance.mjs"
     else
       unset LINKAGENT_STACK_VERIFY_MODE || true
-      node "$DIR/edge-ctl.mjs" start
+      node "$DIR/edge-server-ctl.mjs" start
       node "$DIR/dev-server-ctl.mjs" start
     fi
     pnpm --filter @linkagent/backend pm:restart channels || true
@@ -69,7 +69,7 @@ case "$CMD" in
     pnpm --filter @linkagent/backend pm:stop node || true
     pnpm --filter @linkagent/backend pm:stop channels || true
     node "$DIR/dev-server-ctl.mjs" stop
-    node "$DIR/edge-ctl.mjs" stop
+    node "$DIR/edge-server-ctl.mjs" stop
     ;;
   restart)
     bash "$0" stop
@@ -79,7 +79,7 @@ case "$CMD" in
     ;;
   status)
     echo "--- edge ---"
-    node "$DIR/edge-ctl.mjs" status
+    node "$DIR/edge-server-ctl.mjs" status
     echo "--- gateway ---"
     node "$DIR/dev-server-ctl.mjs" status
     echo "--- pm ---"

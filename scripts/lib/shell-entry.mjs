@@ -10,20 +10,12 @@ export function scriptSibling(dir, base, ext) {
   return prefixed;
 }
 
-/** base 不含扩展名，如 edge-ctl → ops-edge-ctl.sh / edge-ctl.sh / 旧 edge.sh */
+/** base 不含扩展名，如 edge-ctl → edge-ctl.sh（兼容 ops-edge-ctl.sh） */
 export function shellScriptPath(dir, name) {
   const plain = path.join(dir, `${name}.sh`);
   if (existsSync(plain)) return plain;
   const ops = path.join(dir, `ops-${name}.sh`);
   if (existsSync(ops)) return ops;
-  if (name === 'edge-ctl') {
-    const legacy = path.join(dir, 'edge.sh');
-    if (existsSync(legacy)) return legacy;
-    const legacyOps = path.join(dir, 'ops-edge-ctl.sh');
-    if (existsSync(legacyOps)) return legacyOps;
-    const legacyOps2 = path.join(dir, 'ops-edge.sh');
-    if (existsSync(legacyOps2)) return legacyOps2;
-  }
   return plain;
 }
 
@@ -32,10 +24,6 @@ export function psScriptPath(dir, name) {
   if (existsSync(plain)) return plain;
   const ops = path.join(dir, `ops-${name}.ps1`);
   if (existsSync(ops)) return ops;
-  if (name === 'edge-ctl') {
-    const legacy = path.join(dir, 'edge.ps1');
-    if (existsSync(legacy)) return legacy;
-  }
   return plain;
 }
 

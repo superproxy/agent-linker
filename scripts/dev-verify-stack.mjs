@@ -17,10 +17,20 @@ function run(cmd, args, opts = {}) {
   return { ok: r.status === 0, out: (r.stdout || "").trim(), err: (r.stderr || "").trim(), status: r.status ?? 1 };
 }
 
-function curlOk(url) {
+function curlHttpCode(url) {
   const r = run("curl", ["-sS", "-m", "3", "-o", "NUL", "-w", "%{http_code}", url], { shell: process.platform === "win32" });
-  const code = parseInt(r.out, 10);
+  return parseInt(r.out, 10);
+}
+
+function curlOk(url) {
+  const code = curlHttpCode(url);
   return Number.isFinite(code) && code >= 200 && code < 400;
+}
+
+/** frps 面板未登录时返回 401，仍表示服务在监听。 */
+function frpsDashboardReachable() {
+  const code = curlHttpCode("http://127.0.0.1:7500/");
+  return Number.isFinite(code) && (code === 401 || (code >= 200 && code < 400));
 }
 
 function dockerRunning(name) {
@@ -74,9 +84,17 @@ function pidAlive(pid) {
 const apisix = dockerRunning("linkagent-edge-agent-linker-apisix-1") || dockerRunning("linkagent-edge-apisix-1");
 line("edge APISIX 容器", apisix, apisix ? "9080 数据面" : "pnpm edge:start");
 
-const frpsPid = join(state, "edge", "frps.pid");
-const frpsUp = existsSync(frpsPid);
-line("edge frps（宿主机）", frpsUp, frpsUp ? `pid 文件 ${frpsPid}` : "随 edge start 拉起");
+const frpsPidPath = join(state, "edge", "frps.pid");
+const frpsPid = readPidFile(frpsPidPath);
+const frpsProc = frpsPid != null && pidAlive(frpsPid);
+const frpsDash = frpsDashboardReachable();
+line(
+  "edge frps（宿主机 :7500 面板）",
+  frpsProc && frpsDash,
+  frpsProc
+    ? `pid=${frpsPid}；http://127.0.0.1:7500/ 或 http://127.0.0.1:9080/frps/`
+    : "pnpm edge:restart；密码 .runtime-state/edge/frps.dashboard",
+);
 
 const gwHealth = curlOk(`http://127.0.0.1:${gwPort}/healthz`);
 line("gateway（宿主机 Node）", gwHealth, `http://127.0.0.1:${gwPort}/ （resolve-gateway-port）`);

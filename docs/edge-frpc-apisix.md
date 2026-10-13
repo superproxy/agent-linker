@@ -1,6 +1,6 @@
 # frpc / frps 与 APISIX 路由
 
-> **启停与配置**：本机 / 远程两套方案（gateway.yaml、node 环境变量、`scripts/edge.sh` 顺序）见 [`edge-apisix-node.md`](edge-apisix-node.md)。本文只讲路由与 frpc 登记原理。
+> **启停与配置**：本机 / 远程两套方案（gateway.yaml、node 环境变量、`scripts/edge-ctl.sh` 顺序）见 [`edge-apisix-node.md`](edge-apisix-node.md)。本文只讲路由与 frpc 登记原理。
 
 浏览器访问任务页面时，经过公网入口、APISIX、frps，再到节点容器里的端口。节点上的 agent 不走这条链路：agent 由节点出站 WebSocket 连网关，ACP 是 stdin/stdout。
 

@@ -1,6 +1,6 @@
 # 网关 nginx / frps 与 NAT 隧道启动手册
 
-> **边缘入口（浏览器 9080）以 [`edge-apisix-node.md`](edge-apisix-node.md) 为准。** 当前仓库 **仅** 通过 `pnpm edge:*` / `scripts/edge.sh|edge.ps1` 启动 edge：**APISIX + etcd 在 Docker**，**frps 在宿主机**；网关进程 **不** 内嵌拉起 edge，只同步 APISIX 路由。下文 nginx 8088 为旧方案，仅作遗留参考。
+> **边缘入口（浏览器 9080）以 [`edge-apisix-node.md`](edge-apisix-node.md) 为准。** 当前仓库 **仅** 通过 `pnpm edge:*` / `scripts/edge-server-ctl.sh|edge-server-ctl.ps1`（`edge-ctl` / `edge.sh` 为兼容转发）启动 edge：**APISIX + etcd 在 Docker**，**frps 在宿主机**；网关进程 **不** 内嵌拉起 edge，只同步 APISIX 路由。下文 nginx 8088 为旧方案，仅作遗留参考。
 
 ```
 浏览器 ──▶ APISIX :9080 ──▶ frps :7080 ──▶ 节点 frpc ──▶ code / dev / VNC
@@ -87,7 +87,7 @@ pnpm dev
 | frps | `0.0.0.0:7000` | 接收 frpc |
 | frps 面板 | `127.0.0.1:7500` | 只在本机看隧道状态 |
 
-面板：浏览器打开 `http://127.0.0.1:7500`，用户 `admin`，密码读 `.runtime-state/edge/frps.dashboard`。
+面板：浏览器打开 `http://127.0.0.1:7500`，用户 `admin`，密码读 `.runtime-state/edge/frps.dashboard`。本机 **enhance（APISIX 9080）** 也可访问 `http://127.0.0.1:9080/frps/` 或 `http://ide.localhost:9080/frps/`（需 **gateway 已启动** 并完成 APISIX 路由同步）。
 
 `Ctrl+C` 停网关时，会一并停掉它拉起的 nginx 和 frps。
 

@@ -39,7 +39,7 @@
 │   ├── node.mjs
 │   ├── weixin.mjs            # 遗留单进程微信；常归 channels
 │   ├── pm.mjs                # 编排启停
-│   └── edge.mjs              # 写 frps/APISIX 配置（不常驻）
+│   └── edge.mjs              # 边缘配置（同 scripts/edge-config-ctl，不常驻）
 ├── config/                   # 共享目录；一文件对应一配置段（非 config/gateway/ 子树）
 │   ├── gateway.yaml          # 网关：server、auth、agents、tasks…
 │   ├── channels.yaml         # channel-gateway：企微/飞书/微信插件
@@ -47,9 +47,9 @@
 │   ├── node.yaml             # 本机 node 连接器 / hostCodeServerCompose 等
 │   ├── *.template            # dist 构建附带，供 config-init 重置
 │   └── pi-agent/             # setup:pi 模板（非进程 yaml）
-├── scripts/                  # 装好后运维：edge-ctl、server-ctl、config-init…
+├── scripts/                  # edge-server-ctl、edge-config-ctl、server-ctl…
 ├── install.sh                # 发布包 → 运行目录（逻辑内联，无 lib/）
-├── edge-ctl.sh、server-ctl.sh # 边缘 / 网关三进程启停
+├── edge-server-ctl.sh、server-ctl.sh # 边缘进程 / 网关 PM
 ├── web/、dev/                # dist 静态资源
 └── .runtime-state/           # 运行态；按模块分子目录 gateway/ nodes/ pm/ edge/
 ```

@@ -1,6 +1,6 @@
 /**
  * 边缘配置准备。只写文件并打印路径，不启动 frps / APISIX。
- * scripts/edge.sh 读取这些行后再拉起进程。
+ * edge-server-ctl 经 edge-config-ctl / bin/edge.mjs 读取这些行后再拉起进程。
  *
  *   tsx src/gateway/edge/cli.ts
  */

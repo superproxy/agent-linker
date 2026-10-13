@@ -83,7 +83,7 @@ switch ($Command.ToLowerInvariant()) {
         Invoke-Step 'edge + gateway enhance' { node (Join-Path $Scripts 'dev-local-stack-edge-enhance.mjs') }
       } else {
         Remove-Item Env:LINKAGENT_STACK_VERIFY_MODE -ErrorAction SilentlyContinue
-        Invoke-Step 'edge (frps + APISIX)' { node (Join-Path $Scripts 'edge-ctl.mjs') start }
+        Invoke-Step 'edge (frps + APISIX)' { node (Join-Path $Scripts 'edge-server-ctl.mjs') start }
         Invoke-Step 'gateway' { node (Join-Path $Scripts 'dev-server-ctl.mjs') start }
       }
       Invoke-Step 'channels（PM channel-gateway）' { pnpm --filter @linkagent/backend pm:restart channels }
@@ -105,7 +105,7 @@ switch ($Command.ToLowerInvariant()) {
       Invoke-Step 'PM node' { pnpm --filter @linkagent/backend pm:stop node }
       Invoke-Step 'channels' { pnpm --filter @linkagent/backend pm:stop channels }
       Invoke-Step 'gateway' { node (Join-Path $Scripts 'dev-server-ctl.mjs') stop }
-      Invoke-Step 'edge' { node (Join-Path $Scripts 'edge-ctl.mjs') stop }
+      Invoke-Step 'edge' { node (Join-Path $Scripts 'edge-server-ctl.mjs') stop }
     } finally {
       Pop-Location
     }
@@ -127,7 +127,7 @@ switch ($Command.ToLowerInvariant()) {
     Push-Location -LiteralPath $Repo
     try {
       Write-Host '--- edge ---'
-      node (Join-Path $Scripts 'edge-ctl.mjs') status
+      node (Join-Path $Scripts 'edge-server-ctl.mjs') status
       Write-Host '--- gateway ---'
       node (Join-Path $Scripts 'dev-server-ctl.mjs') status
       Write-Host '--- pm（gateway / channels / node）---'

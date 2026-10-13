@@ -1,5 +1,6 @@
 import { domainToASCII } from 'node:url';
 import { TASK_PUBLIC_HOST, taskPublicHost, taskPublicPath, type TaskRouteType } from '@linkagent/shared';
+import { FRPS_DASHBOARD_PORT } from './assets.js';
 /** 带管理 API 的 APISIX。任务域名用 Admin API 创建和开关，不重载配置。 */
 export const APISIX_ADMIN_PORT = 9180;
 export const APISIX_PROJECT = 'linkagent-edge';
@@ -92,6 +93,22 @@ export function taskVncRouteId(taskId: string): string {
 
 /** 远程 node 经公网 Host 升级 WebSocket 到网关进程（SaaS 路径模式）。 */
 export const GATEWAY_NODE_WS_ROUTE_ID = 'gateway-node-ws';
+
+/** 本机 enhance：经 APISIX 9080 访问 frps 面板（上游宿主机 :7500）。 */
+export const FRPS_DASHBOARD_ROUTE_ID = 'frps-dashboard';
+export const FRPS_DASHBOARD_ROUTE_ID_LOOPBACK = 'frps-dashboard-127';
+
+export function frpsDashboardRouteSpec(host: string, id = FRPS_DASHBOARD_ROUTE_ID): ApisixRouteSpec {
+  return {
+    id,
+    host,
+    uris: ['/frps', '/frps/', '/frps/*'],
+    upstream: `http://127.0.0.1:${FRPS_DASHBOARD_PORT}`,
+    enabled: true,
+    priority: 500,
+    rewrite: ['^/frps/?(.*)', '/$1'],
+  };
+}
 
 export function gatewayNodeWsRouteSpec(host: string, gatewayUpstream: string): ApisixRouteSpec {
   return {

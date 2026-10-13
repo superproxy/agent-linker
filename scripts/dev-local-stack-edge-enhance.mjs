@@ -21,6 +21,6 @@ function run(label, script, args = []) {
   }
 }
 
-run("edge enhance：构建 APISIX 镜像", "edge-ctl.mjs", ["build"]);
-run("edge enhance：重启 frps + APISIX", "edge-ctl.mjs", ["restart"]);
+run("edge enhance：构建 APISIX 镜像", "edge-server-ctl.mjs", ["build"]);
+run("edge enhance：重启 frps + APISIX", "edge-server-ctl.mjs", ["restart"]);
 run("edge enhance：重启 gateway（同步 APISIX 任务路由）", "dev-server-ctl.mjs", ["restart"]);

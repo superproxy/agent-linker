@@ -99,7 +99,8 @@ edge:
 | gateway `server.port`（或 `listen-port.json`） | `/v1`、`/ui`、节点 WS |
 | **9080** | APISIX，浏览器任务入口 |
 | **9180** | APISIX Admin |
-| **7000** / **7080** / **7500** | frps 控制 / HTTP / 面板 |
+| **7000** / **7080** / **7500** | frps 控制 / HTTP / 面板（`admin`，密码 `.runtime-state/edge/frps.dashboard`） |
+| **9080 `/frps/`** | 经 APISIX 访问 frps 面板（`http://127.0.0.1:9080/frps/` 或 `http://ide.localhost:9080/frps/`，gateway 启动后会 sync 路由） |
 | **8010** / **5173** / **6080** | **单机模式**本机调试（映射 IDE 容器） |
 
 ---
