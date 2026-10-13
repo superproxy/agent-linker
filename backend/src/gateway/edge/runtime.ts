@@ -23,6 +23,8 @@ import {
   FRPS_DASHBOARD_ROUTE_ID,
   FRPS_DASHBOARD_ROUTE_ID_LOOPBACK,
   frpsDashboardRouteSpec,
+  gatewayPublicRouteSpec,
+  GATEWAY_PUBLIC_ROUTE_ID,
   gatewayNodeWsRouteSpec,
   TASK_WILDCARD_SUBDOMAIN_ROUTE_ID,
   wildcardTaskSubdomainRouteSpec,
@@ -404,7 +406,10 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         const frpsHttp = opts.vncUpstream ?? `http://127.0.0.1:${FRPS_VHOST_HTTP_PORT}`;
         const subdomain = useTaskSubdomainRouting(platformHost);
         if (useFrpTaskPathRouting(platformHost)) {
+          await admin.upsert(gatewayPublicRouteSpec(platformHost, opts.gatewayUpstream));
           await admin.upsert(gatewayNodeWsRouteSpec(platformHost, opts.gatewayUpstream));
+        } else {
+          await admin.remove(GATEWAY_PUBLIC_ROUTE_ID);
         }
         if (isSaasPublicHost(platformHost)) {
           await admin.remove(FRPS_DASHBOARD_ROUTE_ID);

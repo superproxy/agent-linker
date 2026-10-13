@@ -291,6 +291,7 @@ test('子域模式：APISIX 登记 *.apex 并去掉 task-* 路径路由', async 
     });
     await edge.syncTaskHosts([{ id: 't_41db7238', name: 'test', enabled: true }]);
     const put = (id: string) => calls.find((call) => call.method === 'PUT' && call.url.endsWith(`/routes/${id}`));
+    assert.match(put('gateway-public')?.body ?? '', /"host":"hubide\.ljyd\.cn"/);
     assert.match(put('task-wildcard-subdomain')?.body ?? '', /"host":"\*\.hubide\.ljyd\.cn"/);
     assert.match(put('task-wildcard-subdomain')?.body ?? '', /host\.docker\.internal:7080/);
     assert.equal(put('task-t_41db7238'), undefined);

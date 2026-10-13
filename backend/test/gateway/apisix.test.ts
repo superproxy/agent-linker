@@ -15,8 +15,19 @@ import {
   taskRouteId,
   taskRouteUris,
   gatewayNodeWsRouteSpec,
+  gatewayPublicRouteSpec,
   GATEWAY_NODE_WS_ROUTE_ID,
+  GATEWAY_PUBLIC_ROUTE_ID,
 } from '../../src/gateway/edge/apisix.ts';
+
+test('apex Host 登记 gateway-public（/api、/ui、/v1）', () => {
+  const spec = gatewayPublicRouteSpec('ide.localhost', 'http://127.0.0.1:8787');
+  assert.equal(spec.id, GATEWAY_PUBLIC_ROUTE_ID);
+  const route = renderApisixRoute(spec);
+  assert.equal(route.host, 'ide.localhost');
+  assert.ok(Array.isArray(route.uris) && route.uris.includes('/api/*'));
+  assert.equal((route as { priority?: number }).priority, 400);
+});
 
 test('SaaS 公网 Host 登记 node WebSocket 到网关 upstream', () => {
   const spec = gatewayNodeWsRouteSpec('hubide.ljyd.cn', 'http://127.0.0.1:8787');
@@ -30,10 +41,10 @@ test('SaaS 公网 Host 登记 node WebSocket 到网关 upstream', () => {
 
 test('任务路由按任务号生成主机名，回环改写到宿主机', () => {
   assert.equal(taskRouteId('t_41db7238'), 'task-t_41db7238');
-  assert.equal(taskRouteHost('默认', 'default'), domainToASCII('默认-default-web.localhost'));
-  assert.equal(taskRouteHost('test', 't_41db7238'), 'test-t-41db7238-web.localhost');
+  assert.equal(taskRouteHost('默认', 'default'), domainToASCII('默认-default-web.ide.localhost'));
+  assert.equal(taskRouteHost('test', 't_41db7238'), 'test-t-41db7238-web.ide.localhost');
   assert.equal(taskCodeRouteId('t_41db7238'), 'task-code-t_41db7238');
-  assert.equal(taskCodeServerHost('test', 't_41db7238'), 'test-t-41db7238-ide.localhost');
+  assert.equal(taskCodeServerHost('test', 't_41db7238'), 'test-t-41db7238-ide.ide.localhost');
   assert.equal(apisixUpstreamNode('http://127.0.0.1:8787'), 'host.docker.internal:8787');
   assert.deepEqual(taskRouteUris('t_6795b0f8', 'web'), [
     '/t_6795b0f8-web',

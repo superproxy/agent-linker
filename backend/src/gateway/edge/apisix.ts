@@ -95,6 +95,8 @@ export function taskVncRouteId(taskId: string): string {
 
 /** 远程 node 经公网 Host 升级 WebSocket 到网关进程（SaaS 路径模式）。 */
 export const GATEWAY_NODE_WS_ROUTE_ID = 'gateway-node-ws';
+/** apex Host（如 ide.localhost / hubide.ljyd.cn）上的管理 API 与 /ui、/v1（子域模式任务走 *.apex）。 */
+export const GATEWAY_PUBLIC_ROUTE_ID = 'gateway-public';
 
 /** 本机 enhance：经 APISIX 9080 访问 frps 面板（上游宿主机 :7500）。 */
 export const FRPS_DASHBOARD_ROUTE_ID = 'frps-dashboard';
@@ -134,6 +136,18 @@ export function gatewayNodeWsRouteSpec(host: string, gatewayUpstream: string): A
     upstream: gatewayUpstream,
     enabled: true,
     priority: 200,
+  };
+}
+
+/** 9080 apex：后台 /ui、/api/*、OpenAI /v1（priority 低于 /frps）。 */
+export function gatewayPublicRouteSpec(host: string, gatewayUpstream: string): ApisixRouteSpec {
+  return {
+    id: GATEWAY_PUBLIC_ROUTE_ID,
+    host,
+    uris: ['/', '/ui', '/ui/*', '/api/*', '/v1', '/v1/*', '/healthz'],
+    upstream: gatewayUpstream,
+    enabled: true,
+    priority: 400,
   };
 }
 
