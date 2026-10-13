@@ -1,62 +1,11 @@
 #!/usr/bin/env bash
-# 解析 linkagent 运行安装根：
-#   LINKAGENT_HOME / LINKAGENT_INSTALL  >  .linkagent-install  >  /opt/agent-linker
-# shellcheck source=sync-install.sh
-linkagent_repo_root() {
-  local here="$1"
-  cd "$here" || exit 1
-  while [ ! -f pnpm-workspace.yaml ]; do
-    local parent
-    parent="$(dirname "$(pwd)")"
-    if [ "$parent" = "$(pwd)" ]; then
-      pwd
-      return
-    fi
-    cd "$parent" || exit 1
-  done
-  pwd
-}
-
-linkagent_read_install_path() {
-  local repo="$1"
-  if [ -n "${LINKAGENT_INSTALL:-}" ]; then
-    echo "$(cd "$LINKAGENT_INSTALL" && pwd)"
-    return
-  fi
-  if [ -f "$repo/.linkagent-install" ]; then
-    local line
-    line="$(head -n1 "$repo/.linkagent-install" | tr -d '\r')"
-    if [ -n "$line" ]; then
-      echo "$(cd "$line" && pwd)"
-      return
-    fi
-  fi
-  # 无 .linkagent-install 时运行根=仓库（与 layout.ts resolveRepoInstallRoot 一致）
-  echo "$repo"
-}
+# 运行安装根：在含 bin/、config/ 的目录执行运维脚本即可（*-ctl.sh 用 scripts/ 的上级，不查 env/标记文件）。
+# 本文件仅保留给仍 source 它的旧脚本；新逻辑请勿再扩展「查找安装根」。
 
 linkagent_install_root() {
-  local repo="${1:-}"
-  if [ -z "$repo" ]; then
-    local lib_dir
-    lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    repo="$(linkagent_repo_root "$(cd "$lib_dir/../.." && pwd)")"
-  fi
-  if [ -n "${LINKAGENT_HOME:-}" ]; then
-    cd "$LINKAGENT_HOME" && pwd
+  if [ -n "${1:-}" ]; then
+    cd "$1" && pwd
     return
   fi
-  if [ -f "$(pwd)/.linkagent-root" ] || [ -f "$(pwd)/pnpm-workspace.yaml" ] || [ -f "$(pwd)/config/gateway.yaml" ] || [ -f "$(pwd)/bin/gateway.mjs" ]; then
-    pwd
-    return
-  fi
-  if [ "${LINKAGENT_DEV:-}" = "1" ]; then
-    echo "$repo"
-    return
-  fi
-  if [ -f "$repo/.linkagent-server" ]; then
-    linkagent_read_install_path "$repo"
-    return
-  fi
-  echo "$repo"
+  pwd
 }

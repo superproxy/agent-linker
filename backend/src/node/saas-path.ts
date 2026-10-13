@@ -1,5 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
+import { taskPublicPath, taskSaasDevShortPath } from '@linkagent/shared';
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -20,7 +21,7 @@ export type SaasPathKind = 'dev' | 'code' | 'vnc';
 
 /**
  * frps 只按 Host + 最长 location 选代理，不剥路径。
- * dev：Vite `--base /${taskId}-web/`，路径原样或把 `/<taskId>/` 入口归到 `-web`。
+ * dev：公网 `/<taskId>-web/…` 或 `/<taskId>/…`；15173 剥 `-web` 后 Vite `--base /${taskId}/`。
  * code / vnc 去掉任务前缀，本机进程仍挂在 `/`。
  */
 export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: string): string {
@@ -28,15 +29,20 @@ export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: st
   const path = queryAt >= 0 ? url.slice(0, queryAt) : url;
   const query = queryAt >= 0 ? url.slice(queryAt) : '';
   if (kind === 'dev') {
-    const web = `/${taskId}-web`;
-    const open = `/${taskId}`;
-    if (path === web) return `${web}/${query}`;
-    if (path.startsWith(`${web}/`)) return url;
-    if (path === open) return `${web}/${query}`;
-    if (path.startsWith(`${open}/`)) return `${web}${path.slice(open.length)}${query}`;
+    const web = taskPublicPath(taskId, 'web');
+    const open = taskSaasDevShortPath(taskId);
+    if (!web || !open) return url;
+    if (path === web || path === `${web}/`) return `${open}/${query}`;
+    if (path.startsWith(`${web}/`)) {
+      const rest = path.slice(web.length) || '/';
+      return `${open}${rest.startsWith('/') ? rest : `/${rest}`}${query}`;
+    }
+    if (path === open) return `${open}/${query}`;
+    if (path.startsWith(`${open}/`)) return url;
     return url;
   }
-  const prefix = `/${taskId}-${kind === 'code' ? 'code' : 'vnc'}`;
+  const prefix = taskPublicPath(taskId, kind === 'code' ? 'code' : 'vnc');
+  if (!prefix) return url;
   if (path !== prefix && !path.startsWith(`${prefix}/`)) return url;
   const rest = path.slice(prefix.length) || '/';
   return `${rest.startsWith('/') ? rest : `/${rest}`}${query}`;
@@ -53,7 +59,8 @@ export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: st
  */
 export function rewriteSaasRedirect(kind: 'code' | 'vnc', taskId: string, requestUrl: string, location: string): string {
   if (/^https?:\/\//i.test(location)) return location;
-  const prefix = `/${taskId}-${kind}`;
+  const prefix = taskPublicPath(taskId, kind);
+  if (!prefix) return location;
   if (location.startsWith('/')) return location.startsWith(prefix) ? location : `${prefix}${location}`;
   const queryAt = requestUrl.indexOf('?');
   const path = queryAt >= 0 ? requestUrl.slice(0, queryAt) : requestUrl;
@@ -88,26 +95,35 @@ function resolveTargetPort(targetPort: TargetPort): number {
   return typeof targetPort === 'function' ? targetPort() : targetPort;
 }
 
-/** 公网入口 `/<taskId>-web` 无尾斜杠时，浏览器应 301 到 `/<taskId>-web/`（与 Vite base 尾斜杠一致）。 */
-export function devPublicWebTrailingSlashRedirect(taskId: string, url: string): string | null {
+/** 公网入口 `/<taskId>-{web|code|vnc}` 无尾斜杠时 301 到带 `/`（与代理 base 一致）。 */
+export function saasPublicEntryTrailingSlashRedirect(
+  kind: 'dev' | 'code' | 'vnc',
+  taskId: string,
+  url: string,
+): string | null {
   const queryAt = url.indexOf('?');
   const path = queryAt >= 0 ? url.slice(0, queryAt) : url;
   const query = queryAt >= 0 ? url.slice(queryAt) : '';
-  const web = `/${taskId}-web`;
-  if (path === web) return `${web}/${query}`;
+  const routeType = kind === 'dev' ? 'web' : kind;
+  const entry = taskPublicPath(taskId, routeType);
+  if (!entry) return null;
+  if (path === entry) return `${entry}/${query}`;
   return null;
+}
+
+/** @deprecated 使用 {@link saasPublicEntryTrailingSlashRedirect} */
+export function devPublicWebTrailingSlashRedirect(taskId: string, url: string): string | null {
+  return saasPublicEntryTrailingSlashRedirect('dev', taskId, url);
 }
 
 function forward(kind: SaasPathKind, taskId: () => string, targetPort: TargetPort, listenPort: number): http.Server {
   const server = http.createServer((req, res) => {
     const rawUrl = req.url || '/';
-    if (kind === 'dev') {
-      const location = devPublicWebTrailingSlashRedirect(taskId(), rawUrl);
-      if (location) {
-        res.writeHead(301, { Location: location });
-        res.end();
-        return;
-      }
+    const slashRedirect = saasPublicEntryTrailingSlashRedirect(kind, taskId(), rawUrl);
+    if (slashRedirect) {
+      res.writeHead(301, { Location: slashRedirect });
+      res.end();
+      return;
     }
     const port = resolveTargetPort(targetPort);
     const path = rewriteSaasLocalPath(kind, taskId(), rawUrl);

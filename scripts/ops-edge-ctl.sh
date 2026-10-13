@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # frps 与 APISIX 启停。网关进程不拉起这两个进程。
-#   scripts/edge.sh start|stop|restart|status|log|build
+#   scripts/edge-ctl.sh start|stop|restart|status|log|build（dist；仓库源 ops-edge-ctl.sh）
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=lib/install-root.sh
-. "$REPO/scripts/lib/install-root.sh"
-ROOT="$(linkagent_install_root "$REPO")"
+# 运行安装根 = 本脚本所在 scripts/ 的上级
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 export LINKAGENT_HOME="${LINKAGENT_HOME:-$ROOT}"
 RUNTIME="$ROOT/.runtime-state/edge"
 if [ -d "$SCRIPT_DIR/ops-edge" ]; then

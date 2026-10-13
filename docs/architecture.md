@@ -44,12 +44,12 @@
 │   ├── gateway.yaml          # 网关：server、auth、agents、tasks…
 │   ├── channels.yaml         # channel-gateway：企微/飞书/微信插件
 │   ├── weixin.yaml           # 个人微信 external 模式
-│   ├── node.yaml             # 本机 node 连接器 / serveWeb 等
+│   ├── node.yaml             # 本机 node 连接器 / hostCodeServerCompose 等
 │   ├── *.template            # dist 构建附带，供 config-init 重置
 │   └── pi-agent/             # setup:pi 模板（非进程 yaml）
-├── scripts/                  # 装好后运维：edge.sh、config-init、setup-pi…（不含 install）
-├── lib/                      # 仅发布包内 ./install.sh 依赖；同步到运行目录时跳过
-├── install.sh、start.sh      # 安装 / 启停（启停走 bin/pm.mjs）
+├── scripts/                  # 装好后运维：edge-ctl、server-ctl、config-init…
+├── install.sh                # 发布包 → 运行目录（逻辑内联，无 lib/）
+├── edge-ctl.sh、server-ctl.sh # 边缘 / 网关三进程启停
 ├── web/、dev/                # dist 静态资源
 └── .runtime-state/           # 运行态；按模块分子目录 gateway/ nodes/ pm/ edge/
 ```

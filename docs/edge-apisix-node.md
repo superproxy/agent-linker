@@ -16,7 +16,7 @@
 | gateway、channels、node 连接器 | `pnpm server:*`、`pm:restart channels/node`（或 `local:stack:start`） | **否**（宿主机 Node） |
 | frps | `pnpm edge:start` | **否**（宿主机） |
 | APISIX + etcd | `pnpm edge:start` | **是**（edge 数据面，与业务进程分开 compose） |
-| 浏览器 code-server | 仅 **`start:enhance`** 或 `serveWeb.enabled: true` | **是**（`linkagent-code-serve-web`，8010→8080；**镜像是为免本机安装 code-server**） |
+| 浏览器 code-server | 仅 **`start:enhance`** 或 `hostCodeServerCompose.enabled: true` | **是**（`linkagent-code-serve-web`，8010→8080；**镜像是为免本机安装 code-server**） |
 | **frpc** | PM node 写 `.runtime-state/ide-proxy/frpc.toml`，**宿主机单进程** | **否**（与 gateway/node 一样外部管理；**不进 code-server 容器**） |
 | dev / VNC | enhance 时由同一 IDE 容器映射 5173/6080 到回环；frpc 仍指宿主机这些口 | enhance 时进程在容器内，隧道在宿主机 frpc |
 
@@ -59,7 +59,7 @@ edge 一次启动包含两部分：
 | 浏览器 IDE | 无（仅 dev/vnc 隧道若本机有进程） | **仅** Docker **code-server:8010**；**frpc 宿主机共享**，**9080 仅** `/<taskId>-code`（`/vibe-ide` 只在网关 `/ui` 同源） |
 | 桌面 VS Code | 直接打开任务 `cwd` | 同左；enhance 不负责桌面版 |
 
-**桌面 VS Code / Cursor**：不经过本仓库隧道；浏览器入口才依赖 enhance 或 `serveWeb.enabled: true`。  
+**桌面 VS Code / Cursor**：不经过本仓库隧道；浏览器入口才依赖 enhance 或 `hostCodeServerCompose.enabled: true`。  
 验证：`pnpm local:stack:verify` / `local:stack:status`。
 
 ### 其它进程
@@ -74,8 +74,8 @@ edge 一次启动包含两部分：
 
 | 形态 | 命令 / 条件 | IDE + VNC + frpc |
 |---|---|---|
-| **A. 全原生** | `pnpm node:start`，`serveWeb.enabled: false` | 无浏览器 IDE 隧道（仅 WS 回连网关跑 agent） |
-| **B. 原生 node + Docker IDE** | `pnpm node:start`，`serveWeb.enabled: true` | node 写 `frpc.toml`，**docker compose** 只起 `linkagent-code-serve-web` |
+| **A. 全原生** | `pnpm node:start`，`hostCodeServerCompose.enabled: false` | 无浏览器 IDE 隧道（仅 WS 回连网关跑 agent） |
+| **B. 原生 node + Docker IDE** | `pnpm node:start`，`hostCodeServerCompose.enabled: true` | node 写 `frpc.toml`，**docker compose** 只起 `linkagent-code-serve-web` |
 | **C. Docker 聚合节点** | `pnpm node:docker` / `LINKAGENT_NODE_RUNTIME=docker` | 镜像 `linkagent-node:local` 内 IDE+VNC+frpc；`LINKAGENT_NODE_SERVE_WEB=0`，node 只写 `/etc/linkagent/frpc.toml` |
 
 **单机 vs SaaS**（由 **网关机** `config/gateway.yaml` → `edge.publicHost` 决定；**执行机仍是宿主机**，见 §1）：
@@ -129,7 +129,7 @@ pnpm node:docker         # 或 pnpm local:stack:start（edge → gateway → nod
 
 配置 `code-server/node-docker/node.env`（从 `node.env.example` 复制）：`LINKAGENT_GATEWAY_URL=ws://host.docker.internal:8787`、`FRPS_*` 指向本机 edge、`LINKAGENT_WORKSPACE` 指向安装根下 `.runtime-state/tasks-workspace`。**不要**设 SaaS 的 `LINKAGENT_PUBLIC_HOST`（保持 `ide.localhost` 三 Host）。
 
-`config/node.yaml` 中 **`serveWeb.enabled: false`**，避免 PM 再起第二个 IDE 容器。任务 dev / code / VNC 与 frpc 均在 **`linkagent-node`** 容器内，由 node 收 **`switchTask`**（`LINKAGENT_DEV_BY_NODE=1`，入口已设）。
+`config/node.yaml` 中 **`hostCodeServerCompose.enabled: false`**，避免 PM 再起第二个 IDE 容器。任务 dev / code / VNC 与 frpc 均在 **`linkagent-node`** 容器内，由 node 收 **`switchTask`**（`LINKAGENT_DEV_BY_NODE=1`，入口已设）。
 
 浏览器仍走 `http://ide.localhost:9080/<taskId>-web|code|vnc`；**不**依赖宿主机映射 8010/5173（隧道经 frps）。
 
@@ -152,7 +152,7 @@ edge:
 
 ```yaml
 enabled: true
-serveWeb:
+hostCodeServerCompose:
   enabled: true
   image: linkagent-code-server:local
   host: 127.0.0.1
@@ -176,7 +176,7 @@ pnpm node:start    # 或 pnpm restart:all（含 PM 托管 node）
 
 **浏览器（9080）**：`http://ide.localhost:9080/<taskId>-code`（本机路由见 [`edge-frpc-apisix.md`](edge-frpc-apisix.md)）。
 
-**形态 A**（不要 IDE 隧道）：`serveWeb.enabled: false`，仅 `pnpm node:start` 回连网关；**不**写 frpc、**不**起 code-server 容器。
+**形态 A**（不要 IDE 隧道）：`hostCodeServerCompose.enabled: false`，仅 `pnpm node:start` 回连网关；**不**写 frpc、**不**起 code-server 容器。
 
 ---
 
@@ -250,7 +250,7 @@ LINKAGENT_PUBLIC_HOST=hubide.example.com
 
 ```yaml
 # 执行机 config/node.yaml
-serveWeb:
+hostCodeServerCompose:
   enabled: true
   host: 127.0.0.1
   port: 8010
@@ -314,7 +314,7 @@ docker logs -f linkagent-node
 
 | 步骤 | 命令（安装根 = 独立包目录或仓库根） |
 |---|---|
-| 一键本机 | `pnpm local:stack:start`（edge → gateway → **pm 重启 node**，含 serveWeb + frpc） |
+| 一键本机 | `pnpm local:stack:start`（edge → gateway → **pm 重启 node**，含 hostCodeServerCompose + frpc） |
 | 分步 | `pnpm edge:build`（首次）→ `pnpm edge:start` → `pnpm server:start` → `pnpm restart:all` 或 `pnpm --filter @linkagent/backend pm:restart node` |
 | dist | `edge.bat start` + `start.bat start` |
 | Docker 聚合 node | `pnpm node:docker`（与 PM node 二选一） |

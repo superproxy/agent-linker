@@ -144,6 +144,34 @@ export function taskPublicPath(taskId: string, type: TaskRouteType): string {
   return `/${id}-${type}`;
 }
 
+/** Dev 短链前缀（无 `-web`），与 {@link taskViteBasePath} 对应。 */
+export function taskSaasDevShortPath(taskId: string): string {
+  const id = taskId.trim();
+  if (!id) return '';
+  return `/${id}`;
+}
+
+/** Vite `base` / `import.meta.env.BASE_URL`（无 `-web` 后缀）。公网 dev 入口用 `taskPublicPath(id, 'web')`。 */
+export function taskViteBasePath(taskId: string): string {
+  const short = taskSaasDevShortPath(taskId);
+  if (!short) return '/';
+  return `${short}/`;
+}
+
+/** frps `workspace-dev` 登记的 locations（短链 + `-web`）。 */
+export function taskSaasDevFrpcLocations(taskId: string): string[] {
+  const web = taskPublicPath(taskId, 'web');
+  const short = taskSaasDevShortPath(taskId);
+  if (!web || !short) return [];
+  if (short === web) return [web];
+  return [short, web];
+}
+
+/** code-server `--abs-proxy-base-path`，与 frpc `taskPublicPath(id, 'code')` 一致。 */
+export function taskSaasCodeProxyBasePath(taskId: string): string {
+  return taskPublicPath(taskId, 'code') || '/vibe-ide';
+}
+
 /** 从 `/<taskId>-web|code|vnc` 取出任务号。后面还可以带 `/vnc.html` 这类子路径。 */
 export function taskIdFromPublicPath(pathname: string): string | null {
   const path = pathname.split('?')[0] ?? '';

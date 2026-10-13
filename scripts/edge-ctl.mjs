@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 跨平台边缘启停：Unix → scripts/edge.sh，Windows → scripts/edge.ps1
+ * 跨平台边缘启停：Unix → scripts/edge-ctl.sh，Windows → scripts/edge-ctl.ps1
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -35,10 +35,10 @@ const isWin = process.platform === "win32";
 const child = isWin
   ? spawn(
       "powershell.exe",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScriptPath(dir, "edge"), ...args],
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScriptPath(dir, "edge-ctl"), ...args],
       { stdio: "inherit", windowsHide: false },
     )
-  : spawn("bash", [shellScriptPath(dir, "edge"), ...args], { stdio: "inherit" });
+  : spawn("bash", [shellScriptPath(dir, "edge-ctl"), ...args], { stdio: "inherit" });
 
 child.on("error", (err) => {
   console.error(err.message);

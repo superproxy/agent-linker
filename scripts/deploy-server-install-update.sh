@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 源码网关机：在 git clone 的仓库根执行 — 同步源码 → 构建 dist → 部署到运行安装目录。
-# 与 Release 包 ./install.sh 不同：本脚本需要 pnpm monorepo，不负责迁入（见 migrate-config / migrate-install-config）。
+# 与 Release 包 ./install.sh 不同：本脚本需要 pnpm monorepo（源码机构建后同步 dist）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,11 +46,9 @@ while [ $# -gt 0 ]; do
   --install-dir <path>  部署目标（优先于 LINKAGENT_INSTALL）
   LINKAGENT_INSTALL     缺省 /opt/agent-linker（Linux）或 %%USERPROFILE%%\\agent-linker（Windows）
 
-  首次从旧布局：bash scripts/migrate-server-from-legacy.sh（先 repo 再安装目录）
-
   --skip-build       仅部署（假定 dist/linkagent 已构建）
   --skip-deploy-npm  部署时不于安装目录执行 npm install
-  --restart          部署后于安装目录 ./start.sh restart gateway
+  --restart          部署后于安装目录 ./server-ctl.sh restart gateway
 EOF
       exit 0
       ;;
@@ -63,8 +61,6 @@ EOF
 done
 
 cd "$ROOT"
-# shellcheck source=lib/install-root.sh
-. "$ROOT/scripts/lib/install-root.sh"
 # shellcheck source=lib/sync-install.sh
 . "$ROOT/scripts/lib/sync-install.sh"
 
@@ -81,10 +77,6 @@ mkdir -p "$INSTALL" "$INSTALL_CFG" "$INSTALL_STATE"
 echo "==> 源码仓库：$ROOT"
 echo "==> 构建产物：$BUILD"
 echo "==> 部署目标：$INSTALL"
-
-if [ ! -f "$INSTALL_CFG/gateway.yaml" ] && [ ! -d "$INSTALL_STATE/users" ]; then
-  echo "提示：请先：bash scripts/migrate-server-from-legacy.sh" >&2
-fi
 
 PNPM="${PNPM:-pnpm}"
 if ! command -v "$PNPM" >/dev/null 2>&1; then
@@ -140,5 +132,5 @@ echo "✅ 构建：$BUILD"
 echo "✅ 部署：$INSTALL"
 
 if [ "$RESTART" = 1 ]; then
-  (cd "$INSTALL" && ./start.sh restart gateway)
+  (cd "$INSTALL" && ./server-ctl.sh restart gateway)
 fi

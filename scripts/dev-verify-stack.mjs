@@ -113,7 +113,7 @@ if (dockerMode) {
   line("PM 原生 node", pmNodeUp, pmNodeUp ? `pid ${pmNodePid}` : "pnpm --filter @linkagent/backend pm:restart node");
   line("Docker 模式节点应关闭", !nodeC, nodeC ? "pnpm node:docker:stop" : "OK");
   if (codeWeb) {
-    line("Docker code-server（可选 enhance）", true, "enhance 模式或 serveWeb.enabled 时预期运行");
+    line("Docker code-server（可选 enhance）", true, "enhance 模式或 hostCodeServerCompose.enabled 时预期运行");
   }
 }
 

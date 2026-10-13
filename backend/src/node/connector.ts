@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import {
   useFrpTaskPathRouting,
   TASK_PUBLIC_HOST,
+  taskViteBasePath,
   type GatewayToNode,
   type NodeAgentInfo,
   type NodeToGateway,
@@ -21,8 +22,16 @@ import {
 import type { NodeAgentListItem } from '@linkagent/shared';
 import { getLayout } from '../install/layout.js';
 import { loadSharedConfig, resolveChildRuntime } from '../gateway/config.js';
+import { parseNodeEnvFileArgs } from './env-args.js';
 import { loadNodeConnectorEnvFiles } from './env-load.js';
-import { publishSaasFrpc, stackEnhanceIdeEnabled, startNodeServeWeb } from './serve-web.js';
+import {
+  EMBEDDED_FRPC_PATH,
+  publishSaasFrpc,
+  restartBundledCodeServer,
+  stackEnhanceIdeEnabled,
+  startNodeServeWeb,
+} from './serve-web.js';
+import { nodeRunsInsideIdeContainer } from './dev-port.js';
 import {
   resolveNodeTaskCwd,
   taskProcessesFromConfig,
@@ -179,11 +188,19 @@ class NodeConnector {
         pathRouting: useFrpTaskPathRouting(entryHost),
       });
       this.opts.switchIdeTask?.(id, dir);
+      const pathRouting = useFrpTaskPathRouting(entryHost);
+      if (pathRouting) {
+        process.env.LINKAGENT_VITE_BASE = taskViteBasePath(id);
+        publishSaasFrpc(id);
+      } else {
+        delete process.env.LINKAGENT_VITE_BASE;
+      }
       if (processes.length > 0) {
+        process.env.LINKAGENT_ACTIVE_TASK_ID = id;
         this.taskProcesses.switchTo(id, dir, processes);
       }
       if (useFrpTaskPathRouting(entryHost)) {
-        publishSaasFrpc(id);
+        restartBundledCodeServer(id, dir);
       }
       console.log(
         `[node] 切换任务 taskId=${id} cwd=${dir} processes=${processes.map((p) => p.id).join(',') || '-'}`,
@@ -430,9 +447,15 @@ function resolveAgentIdsFromEnv(raw: string | undefined): string[] | undefined {
 }
 
 function main(): void {
-  loadNodeConnectorEnvFiles();
+  const rawArgv = process.argv.slice(2);
+  const envArgParse = parseNodeEnvFileArgs(rawArgv);
+  if (envArgParse.error) {
+    console.error(`[node] ${envArgParse.error}`);
+    process.exit(1);
+  }
+  loadNodeConnectorEnvFiles(envArgParse.envFiles);
 
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(envArgParse.rest);
   const stateDir = process.env.LINKAGENT_NODE_STATE_DIR?.trim() || nodeStateDir();
   const envNodeId = process.env.LINKAGENT_NODE_ID?.trim();
 
@@ -482,18 +505,20 @@ function main(): void {
   }
   const claimToken = process.env.LINKAGENT_NODE_CLAIM?.trim() || undefined;
   const ideProxyDir = layout.state('ide-proxy');
-  const hostFrpcFile = join(ideProxyDir, 'frpc.toml');
+  mkdirSync(ideProxyDir, { recursive: true });
+  /** 聚合容器内 entrypoint 只读 /etc/linkagent/frpc.toml；与 ide-proxy 分文件会导致 switchTask 改写不生效。 */
+  const hostFrpcFile = nodeRunsInsideIdeContainer() ? EMBEDDED_FRPC_PATH : join(ideProxyDir, 'frpc.toml');
   if (!process.env.LINKAGENT_FRPC_PATH?.trim()) {
     process.env.LINKAGENT_FRPC_PATH = hostFrpcFile;
   }
-  const serveWebWorkspace = config.node.serveWeb.workspace?.trim();
+  const serveWebWorkspace = config.node.hostCodeServerCompose.workspace?.trim();
   const enhanceIde = stackEnhanceIdeEnabled();
   if (enhanceIde && !process.env.LINKAGENT_DEV_BY_NODE?.trim()) {
     process.env.LINKAGENT_DEV_BY_NODE = '1';
   }
   restoreDevPortFromRuntime(ideProxyDir);
   const serveWeb = startNodeServeWeb({
-    serveWeb: config.node.serveWeb,
+    hostCodeServerCompose: config.node.hostCodeServerCompose,
     workspaceDir: serveWebWorkspace || (enhanceIde ? '' : layout.root),
     runtimeDir: ideProxyDir,
     frpsTokenFile: layout.state('edge', 'frps.token'),

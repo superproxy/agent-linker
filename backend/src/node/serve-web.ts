@@ -1,8 +1,15 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { stringify } from 'yaml';
-import { TASK_PUBLIC_HOST, useFrpTaskPathRouting, type NodeSection } from '@linkagent/shared';
+import {
+  TASK_PUBLIC_HOST,
+  taskPublicPath,
+  taskSaasCodeProxyBasePath,
+  taskSaasDevFrpcLocations,
+  useFrpTaskPathRouting,
+  type NodeSection,
+} from '@linkagent/shared';
 import { dockerExecutable } from '../gateway/edge/runtime.js';
 import {
   closeSaasLocalAdapters,
@@ -12,11 +19,14 @@ import {
   SAAS_IDE_LISTEN,
   SAAS_VNC_LISTEN,
 } from './saas-path.js';
+import { nodeRunsInsideIdeContainer } from './dev-port.js';
 
-export type ServeWebConfig = NodeSection['serveWeb'];
+export type HostCodeServerComposeConfig = NodeSection['hostCodeServerCompose'];
+/** @deprecated 使用 {@link HostCodeServerComposeConfig} */
+export type ServeWebConfig = HostCodeServerComposeConfig;
 
 export interface ServeWebLaunch {
-  serveWeb: ServeWebConfig;
+  hostCodeServerCompose: HostCodeServerComposeConfig;
   /** 挂进 IDE 容器的目录 */
   workspaceDir: string;
   /** compose 落盘目录 */
@@ -160,6 +170,10 @@ export function renderSaasWorkspaceFrpc(
   const serverAddr = (endpoint.serverAddr ?? '').trim() || 'host.docker.internal';
   const serverPort = endpoint.serverPort && endpoint.serverPort > 0 ? endpoint.serverPort : 7000;
   const domain = publicHost;
+  const devLocations = taskSaasDevFrpcLocations(taskId);
+  const codeLocation = taskPublicPath(taskId, 'code');
+  const vncLocation = taskPublicPath(taskId, 'vnc');
+  const loc = (items: string[]) => `[${items.map((item) => `"${item}"`).join(', ')}]`;
   return `serverAddr = "${serverAddr}"
 serverPort = ${serverPort}
 auth.method = "token"
@@ -171,7 +185,7 @@ type = "http"
 localIP = "127.0.0.1"
 localPort = ${SAAS_IDE_LISTEN}
 customDomains = ["${domain}"]
-locations = ["/${taskId}-code"]
+locations = ${loc([codeLocation])}
 
 [[proxies]]
 name = "workspace-dev"
@@ -179,7 +193,7 @@ type = "http"
 localIP = "127.0.0.1"
 localPort = ${SAAS_DEV_LISTEN}
 customDomains = ["${domain}"]
-locations = ["/${taskId}", "/${taskId}-web"]
+locations = ${loc(devLocations)}
 
 [[proxies]]
 name = "workspace-vnc"
@@ -187,7 +201,7 @@ type = "http"
 localIP = "127.0.0.1"
 localPort = ${SAAS_VNC_LISTEN}
 customDomains = ["${domain}"]
-locations = ["/${taskId}-vnc"]
+locations = ${loc([vncLocation])}
 `;
 }
 
@@ -245,17 +259,36 @@ export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRP
   if (!id) return;
   const token = frpcTokenFromFileOrEnv(file);
   if (!token) return;
-  const endpoint = { ...frpcEndpointForWrite(frpcPublishInContainer(file)), ...frpcServerFromToml(file) };
+  const fromToml = frpcServerFromToml(file);
+  const fromEnv = frpcEndpointForWrite(frpcPublishInContainer(file));
+  const envAddr = (process.env.FRPS_SERVER_ADDR ?? '').trim();
+  const envPort = Number(process.env.FRPS_SERVER_PORT ?? '');
+  const endpoint = {
+    ...(envAddr
+      ? { serverAddr: envAddr }
+      : fromToml.serverAddr
+        ? { serverAddr: fromToml.serverAddr }
+        : fromEnv.serverAddr
+          ? { serverAddr: fromEnv.serverAddr }
+          : {}),
+    ...(Number.isInteger(envPort) && envPort > 0
+      ? { serverPort: envPort }
+      : fromToml.serverPort
+        ? { serverPort: fromToml.serverPort }
+        : fromEnv.serverPort
+          ? { serverPort: fromEnv.serverPort }
+          : {}),
+  };
   const body = renderSaasWorkspaceFrpc(token, {
     publicHost,
     taskId: id,
     ...(endpoint.serverAddr ? { serverAddr: endpoint.serverAddr } : {}),
     ...(endpoint.serverPort ? { serverPort: endpoint.serverPort } : {}),
   });
-  if (existsSync(dirname(file))) {
-    writeFileSync(file, body, { encoding: 'utf8', mode: 0o600 });
-  }
-  writeFileSync(join(dirname(file), 'current-task'), `${id}\n`, 'utf8');
+  const frpcDir = dirname(file);
+  mkdirSync(frpcDir, { recursive: true });
+  writeFileSync(file, body, { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(join(frpcDir, 'current-task'), `${id}\n`, 'utf8');
   ensureSaasLocalAdapter(id, saasAdapterPortsFromEnv());
   if (hostFrpcReload && existsSync(file)) {
     hostFrpcReload(file);
@@ -264,6 +297,70 @@ export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRP
   if (file !== EMBEDDED_FRPC_PATH) return;
   const child = spawn('pkill', ['-x', 'frpc'], { stdio: 'ignore', windowsHide: true });
   child.on('error', () => {});
+}
+
+/** SaaS 路径下 code-server 静态资源前缀，须与 frpc `taskPublicPath(id, 'code')` 一致。 */
+export function saasCodeProxyBasePath(taskId: string): string {
+  return taskSaasCodeProxyBasePath(taskId);
+}
+
+/** 聚合容器：按任务重启 code-server（--abs-proxy-base-path / trusted-origins 与公网路径对齐）。 */
+export function restartBundledCodeServer(taskId: string, workspaceDir: string): void {
+  if (!nodeRunsInsideIdeContainer()) return;
+  const publicHost = browserEntryPublicHost();
+  if (!useFrpTaskPathRouting(publicHost)) return;
+  const id = taskId.trim();
+  const dir = workspaceDir.trim();
+  if (!id || !dir) return;
+  const base = saasCodeProxyBasePath(id);
+  const origins = `https://${publicHost},http://${publicHost},*.localhost:9080,*.localhost:8088`;
+  const logFile = '/tmp/linkagent-code-server.log';
+  const start = () => {
+    let out = 2;
+    let err = 2;
+    try {
+      out = openSync(logFile, 'a');
+      err = out;
+    } catch {
+      /* 忽略 */
+    }
+    const child = spawn(
+      '/usr/bin/dumb-init',
+      [
+        '/usr/bin/code-server',
+        '--auth',
+        'none',
+        '--bind-addr',
+        '0.0.0.0:8080',
+        '--trusted-origins',
+        origins,
+        '--abs-proxy-base-path',
+        base,
+        dir,
+      ],
+      { detached: true, stdio: ['ignore', out, err], windowsHide: true },
+    );
+    child.unref();
+    child.on('error', (e) => {
+      try {
+        appendFileSync(logFile, `[node] code-server 启动失败：${e instanceof Error ? e.message : String(e)}\n`);
+      } catch {
+        /* 忽略 */
+      }
+    });
+    console.log(`[node] code-server 已按 SaaS 路径重启 base=${base} cwd=${dir}`);
+  };
+  const killer = spawn(
+    'sh',
+    ['-c', 'pkill -f "lib/code-server/out/node/entry" 2>/dev/null; pkill -f "dumb-init /usr/bin/code-server" 2>/dev/null; exit 0'],
+    { stdio: 'ignore', windowsHide: true },
+  );
+  killer.on('exit', () => {
+    setTimeout(start, 450);
+  });
+  killer.on('error', () => {
+    start();
+  });
 }
 
 /**
@@ -409,7 +506,7 @@ export function nodeServeWebSuppressed(flag: string | undefined): boolean {
   return raw === '0' || raw === 'false' || raw === 'off';
 }
 
-/** `pnpm local:stack:start:enhance`：临时拉起 Docker code-server（8010），不要求 node.yaml serveWeb.enabled。 */
+/** `pnpm local:stack:start:enhance`：临时拉起 Docker code-server（8010），不要求 node.yaml hostCodeServerCompose.enabled。 */
 export function stackEnhanceIdeEnabled(): boolean {
   const raw = (process.env.LINKAGENT_LOCAL_STACK_ENHANCE ?? process.env.LINKAGENT_SERVE_WEB_ENHANCE ?? '')
     .trim()
@@ -422,9 +519,9 @@ export function startNodeServeWeb(
   launch: ServeWebLaunch,
   spawnFn: ServeWebSpawn = spawn as ServeWebSpawn,
 ): ServeWebHandle {
-  const { serveWeb } = launch;
+  const compose = launch.hostCodeServerCompose;
   const enhanceIde = stackEnhanceIdeEnabled();
-  const useDockerIde = serveWeb.enabled || enhanceIde;
+  const useDockerIde = compose.enabled || enhanceIde;
   const suppressed = nodeServeWebSuppressed(process.env.LINKAGENT_NODE_SERVE_WEB);
   if (suppressed && !enhanceIde) {
     console.log('[node] LINKAGENT_NODE_SERVE_WEB 已关闭 compose，IDE 由容器入口拉起');
@@ -432,17 +529,18 @@ export function startNodeServeWeb(
     const out = launch.frpcPath ?? EMBEDDED_FRPC_PATH;
     if (!token) {
       console.error('[node] 未写 frpc：需要与 frps 相同的 FRPS_TOKEN。nt_ 不能当作这条加密连接的令牌');
-    } else if (existsSync(dirname(out))) {
+    } else {
+      mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, renderWorkspaceFrpc(token, frpcEndpointForWrite(true)), { encoding: 'utf8', mode: 0o600 });
       console.log(`[node] 已写入 ${out}，由容器入口启动 frpc`);
     }
     return { stop() {}, switchTask() {} };
   }
   if (!useDockerIde) {
-    const frpcOnly = startNativeHostFrpc(launch, serveWeb);
+    const frpcOnly = startNativeHostFrpc(launch, compose);
     return { ...frpcOnly, switchTask() {} };
   }
-  if (enhanceIde && !serveWeb.enabled) {
+  if (enhanceIde && !compose.enabled) {
     console.log('[node] LINKAGENT_LOCAL_STACK_ENHANCE：Docker code-server（宿主机共享 frpc）');
   }
   if (useDockerIde && !process.env.LINKAGENT_DEV_BY_NODE?.trim()) {
@@ -460,7 +558,7 @@ export function startNodeServeWeb(
     mountedWorkspace = workspaceDir;
     activeTaskId = taskId.trim();
     const marker = activeTaskId ? writeCurrentTaskMarker(launch.runtimeDir, activeTaskId) : undefined;
-    writeFileSync(composeFile, renderIdeCompose(serveWeb, workspaceDir, undefined, marker), 'utf8');
+    writeFileSync(composeFile, renderIdeCompose(compose, workspaceDir, undefined, marker), 'utf8');
     run('up', recreate);
   };
 
@@ -485,7 +583,7 @@ export function startNodeServeWeb(
     }
   };
 
-  hostFrpc = startNativeHostFrpc(launch, serveWeb);
+  hostFrpc = startNativeHostFrpc(launch, compose);
 
   const switchTask = (taskId: string, cwd: string) => {
     const id = taskId.trim();
@@ -500,7 +598,7 @@ export function startNodeServeWeb(
 
   if (mountedWorkspace.trim()) {
     console.log(
-      `[node] 启动 IDE 容器 ${CODE_CONTAINER}（仅 code-server/dev/vnc），发布 ${serveWeb.host}:${serveWeb.port}；frpc 在宿主机`,
+      `[node] 启动 IDE 容器 ${CODE_CONTAINER}（仅 code-server/dev/vnc），发布 ${compose.host}:${compose.port}；frpc 在宿主机`,
     );
     writeCompose(mountedWorkspace, '', false);
   } else {
@@ -518,15 +616,15 @@ export function startNodeServeWeb(
 }
 
 /** 形态 A：不启 IDE 容器，在宿主机拉起 frpc，登记 dev/ide/vnc.localhost → 本机端口。 */
-function startNativeHostFrpc(launch: ServeWebLaunch, serveWeb: ServeWebConfig): { stop: () => void } {
+function startNativeHostFrpc(launch: ServeWebLaunch, compose: HostCodeServerComposeConfig): { stop: () => void } {
   const token = frpcToken(launch.frpsTokenFile);
   if (!token) {
-    console.warn('[node] serveWeb 未启用且未写 frpc：缺少 .runtime-state/edge/frps.token（或 FRPS_TOKEN）');
+    console.warn('[node] hostCodeServerCompose 未启用且未写 frpc：缺少 .runtime-state/edge/frps.token（或 FRPS_TOKEN）');
     return { stop() {} };
   }
   mkdirSync(launch.runtimeDir, { recursive: true });
   const frpcFile = join(launch.runtimeDir, 'frpc.toml');
-  const idePort = serveWeb.port > 0 ? serveWeb.port : WORKSPACE_IDE_PORT;
+  const idePort = compose.port > 0 ? compose.port : WORKSPACE_IDE_PORT;
   const bootTask = process.env.LINKAGENT_TASK_ID?.trim() || 'default';
   process.env.LINKAGENT_IDE_LOCAL_PORT = String(idePort);
   writeFileSync(

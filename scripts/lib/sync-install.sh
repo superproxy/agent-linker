@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 # 将发布包目录（含 .linkagent-root）同步到运行安装目录，保留已有 config / .runtime-state。
-# 供 dist/install.sh 与 server-install-update.sh 共用。迁入见 migrate-config / migrate-install-config。
+# 供 dist/install.sh 与 deploy-server-install-update.sh 共用。
 
 linkagent_default_install_dir() {
   echo "/opt/agent-linker"
+}
+
+linkagent_materialize_config_from_templates() {
+  local dest="$1"
+  local f
+  mkdir -p "$dest"
+  for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
+    [ -f "$dest/$f" ] && continue
+    if [ -f "$dest/$f.template" ]; then
+      cp -a "$dest/$f.template" "$dest/$f"
+      echo "→ 配置：由模板生成 $dest/$f"
+    fi
+  done
 }
 
 # $1=发布包根 $2=安装根 $3=skip_npm(0|1)
@@ -42,8 +55,6 @@ linkagent_sync_publish_to_install() {
     [ -f "$t" ] || continue
     cp -a "$t" "$install_cfg/$(basename "$t")"
   done
-  # shellcheck source=migrate-install.sh
-  . "$(dirname "${BASH_SOURCE[0]}")/migrate-install.sh"
   linkagent_materialize_config_from_templates "$install_cfg"
 
   if [ "$skip_npm" = 0 ] || [ ! -d "$install/node_modules" ]; then

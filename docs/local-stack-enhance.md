@@ -7,11 +7,19 @@
 
 ## 1. 命令怎么选
 
+**启动脚本（本机 PM，非 `pnpm dev` 源码模式）**
+
+| 方式 | 原生完整栈 | enhance 单机 | 纯 node | Docker 节点 |
+|---|---|---|---|---|
+| Bash | `bash scripts/local-stack.sh` | `bash scripts/local-stack-enhance.sh` | `bash scripts/local-node.sh` | `bash scripts/local-node-docker.sh` |
+| Windows | `scripts\local-stack.bat` | `local-stack-enhance.bat` | `local-node.bat` | `local-node-docker.bat` |
+| pnpm | `pnpm local:start` | `pnpm local:enhance` | `pnpm local:node` | `pnpm local:node:docker` |
+
 | 命令 | 模式 | 执行面 / IDE / frpc |
 |---|---|---|
-| `pnpm local:stack:start` | 原生 | 宿主机 **PM node**，一般无浏览器 IDE |
-| `pnpm local:stack:start:enhance` | **单机模式** | PM node + **`linkagent-code-serve-web`**；**frpc 在宿主机** |
-| `pnpm local:stack:start:enhance:docker` | **Docker 模式** | **`linkagent-node` 聚合容器**（node + IDE + **容器内 frpc**） |
+| `pnpm local:stack:start` / `local:start` | 原生 | 宿主机 **PM node**，一般无浏览器 IDE |
+| `pnpm local:stack:start:enhance` / `local:enhance` | **单机模式** | PM node + **`linkagent-code-serve-web`**；**frpc 在宿主机** |
+| `pnpm local:stack:start:enhance:docker` / `local:enhance:docker` | **Docker 模式** | **`linkagent-node` 聚合容器**（node + IDE + **容器内 frpc**） |
 
 **单机模式** 与 **Docker 模式** 不要同时开。  
 - 起 **单机模式** 时会尝试停 Docker 模式节点；未在跑则只提示「Docker 模式节点未在运行」。  
@@ -45,7 +53,7 @@
 | PM node、单机 IDE 容器 | **停止** | 与单机模式互斥 |
 
 容器内 node 回连 **`ws://host.docker.internal:<gateway端口>/api/nodes/ws`**；frpc 连 **`host.docker.internal:7000`**。  
-建议 `serveWeb.enabled: false`、`LINKAGENT_NODE_SERVE_WEB=0`（见 [`edge-apisix-node.md`](edge-apisix-node.md) §3.2）。
+建议 `hostCodeServerCompose.enabled: false`、`LINKAGENT_NODE_SERVE_WEB=0`（见 [`edge-apisix-node.md`](edge-apisix-node.md) §3.2）。
 
 ---
 
@@ -80,7 +88,7 @@ edge:
 
 **9080 上没有** `/vibe-ide` 路由；浏览器 code-server 只用 **`/<taskId>-code`**。管理后台嵌 IDE 走 **网关同源** `http://127.0.0.1:<gateway>/vibe-ide/`（不经 APISIX）。
 
-**5173 / dev / VNC / code-server 跟「当前激活任务」**：网关激活或切换任务时会向属主 PM 节点发 `switchTask`；node 将 **任务 `cwd` 挂进 IDE 容器** 并 **`docker compose up --force-recreate`**，由入口脚本重启 dev（5173）、code-server、VNC。enhance 时建议 **`serveWeb.workspace` 留空**（勿写死桌面项目路径），等激活任务下发后再起容器。节点上线时也会同步一次当前激活任务。
+**5173 / dev / VNC / code-server 跟「当前激活任务」**：网关激活或切换任务时会向属主 PM 节点发 `switchTask`；node 将 **任务 `cwd` 挂进 IDE 容器** 并 **`docker compose up --force-recreate`**，由入口脚本重启 dev（5173）、code-server、VNC。enhance 时建议 **`hostCodeServerCompose.workspace` 留空**（勿写死桌面项目路径），等激活任务下发后再起容器。节点上线时也会同步一次当前激活任务。
 
 ---
 

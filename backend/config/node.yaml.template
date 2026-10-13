@@ -20,7 +20,8 @@ agents:
 
 # 默认 false（原生 frpc）；浏览器 IDE 用 pnpm local:stack:enhance 或 enabled: true + pnpm image:code-server。
 # 桌面 VS Code/Cursor 直接打开 workspace，不经过此开关。
-serveWeb:
+# PM 原生 node 是否在宿主机 docker compose 独立 code-server（8010）。形态 C 须 false。
+hostCodeServerCompose:
   enabled: false
   image: linkagent-code-server:local
   host: 127.0.0.1

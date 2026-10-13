@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   dockerDevProcess,
+  normalizeContainerDevProcesses,
   resolveNodeTaskCwd,
   resolveTaskSwitchProcesses,
   taskProcessesFromConfig,
@@ -36,17 +37,17 @@ test('切换任务：停掉上一组进程，在新目录按命令拉起', () =>
   assert.equal(spawned[0]?.cwd, join(root, 'a'));
 
   group.switchTo('t_a', join(root, 'a'), [dev]);
-  assert.equal(spawned.length, 1);
+  assert.equal(spawned.length, 3, '同任务第三次下发 dev 仍应重启进程');
 
   group.switchTo('t_b', join(root, 'b'), [{ id: 'vnc', command: ['echo', 'vnc'] }]);
-  assert.deepEqual(killed, ['npm run dev']);
+  assert.deepEqual(killed, ['npm run dev', 'npm run dev', 'npm run dev']);
   assert.equal(group.currentTaskId(), 't_b');
-  assert.equal(spawned.length, 2);
-  assert.equal(spawned[1]?.cwd, join(root, 'b'));
+  assert.equal(spawned.length, 4);
+  assert.equal(spawned[3]?.cwd, join(root, 'b'));
 
   group.stop();
   assert.equal(group.currentTaskId(), '');
-  assert.deepEqual(killed, ['npm run dev', 'echo vnc']);
+  assert.deepEqual(killed, ['npm run dev', 'npm run dev', 'npm run dev', 'echo vnc']);
 });
 
 test('容器工作区把宿主机任务目录换到 /root/workspace/<taskId>', () => {
@@ -57,12 +58,18 @@ test('容器工作区把宿主机任务目录换到 /root/workspace/<taskId>', (
   assert.equal(resolveNodeTaskCwd(host, '/root/workspace'), join('/root/workspace', 't_abc'));
 });
 
+test('normalizeContainerDevProcesses：本机不替换 dev 命令', () => {
+  const custom: TaskProcessSpec[] = [{ id: 'dev', command: ['npm', 'run', 'dev'] }];
+  assert.deepEqual(normalizeContainerDevProcesses(custom, '1'), custom);
+});
+
 test('容器未配 taskProcesses 时用 dev 命令，本机配置优先', () => {
   assert.deepEqual(taskProcessesFromConfig([], undefined), []);
   assert.deepEqual(taskProcessesFromConfig([], '1'), []);
   assert.equal(dockerDevProcess().command[0], 'sh');
   assert.match(dockerDevProcess().command.join('\n'), /allowedHosts: true/);
-  assert.match(dockerDevProcess().command.join('\n'), /current-task/);
+  assert.match(dockerDevProcess().command.join('\n'), /LINKAGENT_ACTIVE_TASK_ID/);
+  assert.match(dockerDevProcess().command.join('\n'), /base: "\/\$\{task\}\/"/);
   const custom: TaskProcessSpec[] = [{ id: 'app', command: ['npm', 'start'] }];
   assert.deepEqual(taskProcessesFromConfig(custom, '1'), custom);
 });

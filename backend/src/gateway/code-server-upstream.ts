@@ -25,12 +25,14 @@ export function readCodeServerUpstream(nodeYamlPath: string): CodeServerUpstream
   if (!existsSync(nodeYamlPath)) return { ...DEFAULT };
   try {
     const doc = parseYaml(readFileSync(nodeYamlPath, 'utf8')) as {
+      hostCodeServerCompose?: { host?: string; port?: number; basePath?: string };
       serveWeb?: { host?: string; port?: number; basePath?: string };
     };
-    const hostRaw = doc.serveWeb?.host?.trim() || DEFAULT.host;
+    const section = doc.hostCodeServerCompose ?? doc.serveWeb;
+    const hostRaw = section?.host?.trim() || DEFAULT.host;
     const host = hostRaw === '0.0.0.0' || hostRaw === '::' ? '127.0.0.1' : hostRaw;
-    const port = doc.serveWeb?.port ?? DEFAULT.port;
-    const publicPath = normalizePublicPath(doc.serveWeb?.basePath);
+    const port = section?.port ?? DEFAULT.port;
+    const publicPath = normalizePublicPath(section?.basePath);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       return { ...DEFAULT, publicPath };
     }

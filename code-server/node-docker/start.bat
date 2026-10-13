@@ -1,5 +1,7 @@
 @echo off
 cd /d "%~dp0"
-set "CMD=%~1"
-if "%CMD%"=="" set "CMD=start"
-node ctl.mjs %CMD%
+if "%~1"=="" (
+  node ctl.mjs start
+) else (
+  node ctl.mjs %*
+)

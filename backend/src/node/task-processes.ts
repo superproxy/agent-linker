@@ -25,6 +25,18 @@ export function devOwnedByNode(flag: string | undefined): boolean {
  * 容器内 dev：工作区没有 vite 时先安装，再听 0.0.0.0:5173。
  * 只在 LINKAGENT_DEV_BY_NODE 且 node.taskProcesses 为空时使用。
  */
+/** 聚合容器内 dev 必须带公网 base 与 allowedHosts；忽略网关/Agent 自报的 npm run dev。 */
+export function normalizeContainerDevProcesses(
+  processes: readonly TaskProcessSpec[],
+  devByNodeFlag: string | undefined,
+): TaskProcessSpec[] {
+  if (!devOwnedByNode(devByNodeFlag) || !nodeRunsInsideIdeContainer()) {
+    return processes.map((spec) => ({ id: spec.id, command: [...spec.command] }));
+  }
+  const rest = processes.filter((spec) => spec.id.trim() !== 'dev');
+  return [...rest.map((spec) => ({ id: spec.id, command: [...spec.command] })), dockerDevProcess()];
+}
+
 export function dockerDevProcess(): TaskProcessSpec {
   return {
     id: 'dev',
@@ -32,6 +44,8 @@ export function dockerDevProcess(): TaskProcessSpec {
       'sh',
       '-c',
       [
+        'if command -v fuser >/dev/null 2>&1; then fuser -k 5173/tcp 2>/dev/null || true; elif command -v pkill >/dev/null 2>&1; then pkill -f "node_modules/.bin/vite" 2>/dev/null || true; fi',
+        'sleep 0.3',
         'root="${LINKAGENT_NODE_WORKSPACE:-/root/workspace}"',
         'if [ ! -f package.json ]; then',
         '  found=""',
@@ -45,7 +59,10 @@ export function dockerDevProcess(): TaskProcessSpec {
         'fi',
         'if [ ! -f package.json ]; then echo "[node] 任务目录没有 package.json，跳过 dev"; exit 0; fi',
         'if [ ! -x node_modules/.bin/vite ]; then npm install; fi',
-        'task=$(cat /etc/linkagent/current-task 2>/dev/null || true)',
+        'task="${LINKAGENT_ACTIVE_TASK_ID:-}"',
+        'if [ -z "$task" ]; then task=$(tr -d "\\n\\r" < /etc/linkagent/current-task 2>/dev/null || true); fi',
+        'vite_base="${LINKAGENT_VITE_BASE:-}"',
+        'if [ -z "$vite_base" ] && [ -n "$task" ]; then vite_base="/${task}/"; fi',
         'host="${LINKAGENT_PUBLIC_HOST:-}"',
         'cfg=""',
         'for name in vite.config.ts vite.config.js vite.config.mjs; do',
@@ -55,11 +72,13 @@ export function dockerDevProcess(): TaskProcessSpec {
         '  cat > "$PWD/node_modules/.linkagent-vite.config.mjs" << EOF',
         'import { defineConfig, mergeConfig } from "vite";',
         'import config from "$cfg";',
-        'export default mergeConfig(config, defineConfig({ base: "/$task/", server: { allowedHosts: true, host: true, port: 5173, strictPort: true } }));',
+        'export default mergeConfig(config, defineConfig({ base: "/${task}/", server: { allowedHosts: true, host: true, port: 5173, strictPort: true, origin: "https://${host}" } }));',
         'EOF',
         '  exec npx vite --config "$PWD/node_modules/.linkagent-vite.config.mjs" --host 0.0.0.0 --port 5173 --strictPort',
         'fi',
-        'exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort',
+        'base=""',
+        'if [ -n "$vite_base" ] && [ -n "$host" ]; then base=" --base ${vite_base}"; fi',
+        'exec npm run dev -- --host 0.0.0.0 --port 5173 --strictPort --allowedHosts true$base',
       ].join('\n'),
     ],
   };

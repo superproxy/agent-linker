@@ -1,5 +1,6 @@
+import { taskViteBasePath } from '@linkagent/shared';
 import type { TaskProcessSpec } from './task-processes.js';
-import { devOwnedByNode } from './task-processes.js';
+import { devOwnedByNode, normalizeContainerDevProcesses } from './task-processes.js';
 import {
   nodeRunsInsideIdeContainer,
   pickFreePort,
@@ -27,20 +28,25 @@ export function shouldAllocateHostDev(devByNodeFlag: string | undefined, pathRou
 
 /** 供 sh 嵌入：exec vite / npm run dev（路径模式用 CLI --base，避免 merge 函数式 vite.config）。 */
 export function buildHostDevShellBody(taskId: string, port: number, publicHost: string, pathRouting: boolean): string {
-  const task = taskId.replace(/'/g, '');
-  const baseArg = pathRouting && publicHost.trim().length > 0 ? ` --base /${task}-web/` : '';
+  const baseArg =
+    pathRouting && publicHost.trim().length > 0 ? ` --base ${taskViteBasePath(taskId).replace(/'/g, '')}` : '';
+  const hostArg = pathRouting && publicHost.trim().length > 0 ? ' --allowedHosts true' : '';
   return [
     'if [ ! -f package.json ]; then echo "[dev] 任务目录没有 package.json，跳过"; exit 0; fi',
-    `exec npm run dev -- --host 127.0.0.1 --port ${port} --strictPort${baseArg}`,
+    `exec npm run dev -- --host 127.0.0.1 --port ${port} --strictPort${hostArg}${baseArg}`,
   ].join('\n');
 }
 
 /** Windows：PowerShell 启动 dev（路径模式用 CLI --base）。 */
 export function buildHostDevPowerShellBody(taskId: string, port: number, publicHost: string, pathRouting: boolean): string {
-  const baseArg = pathRouting && publicHost.trim().length > 0 ? ` --base /${taskId.replace(/"/g, '`"')}-web/` : '';
+  const baseArg =
+    pathRouting && publicHost.trim().length > 0
+      ? ` --base ${taskViteBasePath(taskId).replace(/"/g, '`"')}`
+      : '';
+  const hostArg = pathRouting && publicHost.trim().length > 0 ? ' --allowedHosts true' : '';
   return `
 if (-not (Test-Path package.json)) { Write-Host '[dev] 任务目录没有 package.json，跳过'; exit 0 }
-& npm run dev -- --host 127.0.0.1 --port ${port} --strictPort${baseArg}
+& npm run dev -- --host 127.0.0.1 --port ${port} --strictPort${hostArg}${baseArg}
 `.trim();
 }
 
@@ -72,17 +78,20 @@ export async function augmentTaskProcessesWithHostDev(input: {
   const fromMessage = input.fromMessage;
   const hasExplicitList = fromMessage !== undefined;
   if (hasExplicitList) {
-    return fromMessage
+    const explicit = fromMessage
       .map((spec) => ({
         id: spec.id.trim(),
         command: spec.command.map((p) => p.trim()).filter((p) => p.length > 0),
       }))
       .filter((spec) => spec.id && spec.command.length > 0);
+    return normalizeContainerDevProcesses(explicit, input.devByNodeFlag);
   }
   if (input.configured.length > 0) {
-    return input.configured.map((spec) => ({ id: spec.id, command: [...spec.command] }));
+    return normalizeContainerDevProcesses(input.configured, input.devByNodeFlag);
   }
-  if (!shouldAllocateHostDev(input.devByNodeFlag, input.pathRouting)) return [];
+  if (!shouldAllocateHostDev(input.devByNodeFlag, input.pathRouting)) {
+    return normalizeContainerDevProcesses([], input.devByNodeFlag);
+  }
 
   const port = await pickFreePort();
   setSaasDevTargetPort(port);

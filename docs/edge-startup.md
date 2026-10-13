@@ -17,7 +17,7 @@
 | 包管理 | 仓库根目录已执行 `pnpm install` |
 | 网关出网 | 第一次启动要能访问 `nginx.org` 和 `github.com`，用来下载 nginx 1.26.3 与 frp 0.60.0 |
 | Linux / macOS 的 nginx | 系统里已有 `nginx` 命令。这两个系统不下载 nginx 二进制 |
-| code-server | 本机 Docker 可用，且 `backend/config/node.yaml` 里 `serveWeb.enabled: true` |
+| code-server | 本机 Docker 可用，且 `backend/config/node.yaml` 里 `hostCodeServerCompose.enabled: true` |
 | 远端隧道 | 网关机对 NAT 客户端开放 TCP `7000`，以及实际使用的远端端口（`10000–50000`） |
 
 ## 2. 下载
@@ -33,7 +33,7 @@ tar -xf .runtime-state\tools\nginx\download.bin -C .runtime-state\tools\nginx
 docker build -t linkagent-code-server:local -f code-server/Dockerfile code-server
 ```
 
-原始路线用上面的镜像：宿主机 node 在 `serveWeb.enabled: true` 时 compose 它。`pnpm node` 默认是本机原生进程。同一组命令加上 `--docker`，或设置 `LINKAGENT_NODE_RUNTIME=docker`，改为 Docker 聚合镜像。本机没有 `linkagent-node:local` 时会先构建。没有 `code-server/node-docker/node.env` 时用同目录的 `node.env.example`。强制重新构建用 `pnpm node:docker:build`。
+原始路线用上面的镜像：宿主机 node 在 `hostCodeServerCompose.enabled: true` 时 compose 它。`pnpm node` 默认是本机原生进程。同一组命令加上 `--docker`，或设置 `LINKAGENT_NODE_RUNTIME=docker`，改为 Docker 聚合镜像。本机没有 `linkagent-node:local` 时会先构建。没有 `code-server/node-docker/node.env` 时用同目录的 `node.env.example`。强制重新构建用 `pnpm node:docker:build`。
 
 参数说明：
 
@@ -99,7 +99,7 @@ IDE 需要 Docker。在另一个终端、仓库根目录：
 pnpm --filter @linkagent/backend node:connect
 ```
 
-`node.yaml` 的 `serveWeb.enabled` 为 `true` 时，node 执行 `docker compose up -d`，只发布：
+`node.yaml` 的 `hostCodeServerCompose.enabled` 为 `true` 时，node 执行 `docker compose up -d`，只发布：
 
 ```text
 127.0.0.1:8000 → 容器 8080
@@ -111,7 +111,7 @@ pnpm --filter @linkagent/backend node:connect
 http://127.0.0.1:8088/vibe-ide
 ```
 
-`serveWeb.workspace` 为空时，挂进容器的目录是仓库根。node 退出时执行 `docker compose down`。
+`hostCodeServerCompose.workspace` 为空时，挂进容器的目录是仓库根。node 退出时执行 `docker compose down`。
 
 ## 5. 启动 nat-tunnel
 

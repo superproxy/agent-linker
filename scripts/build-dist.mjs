@@ -5,7 +5,7 @@
  *   pnpm build:dist:node                    执行机包 dist/linkagent-node（仅节点连接器）
  *   node scripts/build-dist.mjs --target=node --skip-install --out=<dir>
  *
- * 整包：bin/*.mjs、config/、scripts/（运维）、lib/+install.sh（仅安装期）、web/、dev/
+ * 整包：bin/*.mjs、config/、scripts/（运维）、install.sh、web/、dev/
  * 节点包：bin/node.mjs + bin/ctl.mjs（启停）+ config/ + scripts/ 子集
  */
 import { spawnSync } from 'node:child_process';
@@ -151,16 +151,26 @@ const DIST_RUNTIME_SCRIPT_COPY = [
   ['ops-config-init.sh', 'config-init.sh'],
   ['ops-setup-pi.mjs', 'setup-pi.mjs'],
   ['ops-setup-channels.mjs', 'setup-channels.mjs'],
-  ['ops-edge.sh', 'edge.sh'],
-  ['ops-edge.ps1', 'edge.ps1'],
-  ['ops-edge.bat', 'edge.bat'],
+  ['ops-edge-ctl.sh', 'edge-ctl.sh'],
+  ['ops-edge-ctl.ps1', 'edge-ctl.ps1'],
+  ['ops-edge-ctl.bat', 'edge-ctl.bat'],
   ['edge-ctl.mjs', 'edge-ctl.mjs'],
   ['ops-edge-prepare.mjs', 'edge-prepare.mjs'],
+  ['ops-server-ctl.sh', 'server-ctl.sh'],
+  ['ops-server-ctl.ps1', 'server-ctl.ps1'],
+  ['server-ctl.mjs', 'server-ctl.mjs'],
 ];
 
-/** 独立包 <根>/lib/：仅 ./install.sh 使用，同步到运行目录时会跳过 */
-const DIST_INSTALL_LIB_RELS = ['sync-install.sh', 'migrate-install.sh'];
-
+function writeRootExecSh(distRoot, rootName, scriptsRel) {
+  writeFileSync(
+    join(distRoot, rootName),
+    `#!/usr/bin/env bash
+set -u
+exec "$(cd "$(dirname "$0")" && pwd)/${scriptsRel}" "$@"
+`,
+    { mode: 0o755 },
+  );
+}
 function copyDistRuntimeScripts(destRoot) {
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
   for (const [srcRel, destRel] of DIST_RUNTIME_SCRIPT_COPY) {
@@ -181,19 +191,13 @@ function copyDistRuntimeScripts(destRoot) {
 }
 
 function copyDistInstallBundle(destRoot) {
-  mkdirSync(join(destRoot, 'lib'), { recursive: true });
-  for (const rel of DIST_INSTALL_LIB_RELS) {
-    const src = join(REPO, 'scripts', 'lib', rel);
-    if (!existsSync(src)) continue;
-    cpSync(src, join(destRoot, 'lib', rel));
-  }
   const pkgInstall = join(REPO, 'scripts', 'deploy-install.sh');
   if (existsSync(pkgInstall)) {
     cpSync(pkgInstall, join(destRoot, 'install.sh'));
   }
 }
 
-/** destRoot = 独立包根（bin/、config/、scripts/、lib/ 仅安装期） */
+/** destRoot = 独立包根（bin/、config/、scripts/、install.sh） */
 function copyPiSetup(destRoot) {
   const piAgentCandidates = [
     join(REPO, 'config', 'pi-agent'),
@@ -238,13 +242,20 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nodeEntryEnvFileArgv, parseNodeEnvFileArgs } from '../scripts/node-env-file-args.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const stateDir = join(root, '.runtime-state');
 const pidFile = join(stateDir, 'node.pid');
 const logFile = join(stateDir, 'node.log');
 const entry = join(root, 'bin', 'node.mjs');
-const cmd = (process.argv[2] ?? 'start').toLowerCase();
+const argParse = parseNodeEnvFileArgs(process.argv.slice(2));
+if (argParse.error) {
+  console.error(argParse.error);
+  process.exit(1);
+}
+const cmd = (argParse.rest[0] ?? 'start').toLowerCase();
+const nodeEnvArgv = nodeEntryEnvFileArgv(argParse.envFiles);
 
 function readPid() {
   if (!existsSync(pidFile)) return null;
@@ -305,7 +316,7 @@ if (cmd === 'log' || cmd === 'logs') {
 }
 
 if (cmd === 'foreground' || cmd === 'fg' || cmd === 'run') {
-  const child = spawn(process.execPath, [entry], { cwd: root, stdio: 'inherit', env: process.env });
+  const child = spawn(process.execPath, [entry, ...nodeEnvArgv], { cwd: root, stdio: 'inherit', env: process.env });
   child.on('exit', (code) => process.exit(code ?? 1));
 } else if (cmd === 'start' || cmd === 'restart') {
   if (cmd === 'restart') {
@@ -319,7 +330,7 @@ if (cmd === 'foreground' || cmd === 'fg' || cmd === 'run') {
   }
   mkdirSync(stateDir, { recursive: true });
   const logFd = openSync(logFile, 'a');
-  const child = spawn(process.execPath, [entry], {
+  const child = spawn(process.execPath, [entry, ...nodeEnvArgv], {
     cwd: root,
     env: process.env,
     detached: true,
@@ -330,7 +341,7 @@ if (cmd === 'foreground' || cmd === 'fg' || cmd === 'run') {
   child.unref();
   console.log(\`✅ 节点已启动 (pid \${child.pid}，日志 \${logFile})\`);
 } else {
-  console.error('用法: node bin/ctl.mjs {start|stop|restart|status|log|foreground}');
+  console.error('用法: node bin/ctl.mjs {start|stop|restart|status|log|foreground} [-f <node.env>]');
   process.exit(1);
 }
 `;
@@ -478,6 +489,11 @@ async function buildFull(dist, skipInstall) {
             gateway: 'node bin/gateway.mjs',
             'setup:pi': 'node scripts/setup-pi.mjs',
             'setup:channels': 'node scripts/setup-channels.mjs',
+            'server:start': 'node scripts/server-ctl.mjs start',
+            'server:stop': 'node scripts/server-ctl.mjs stop',
+            'server:restart': 'node scripts/server-ctl.mjs restart',
+            'server:status': 'node scripts/server-ctl.mjs status',
+            'server:logs': 'node scripts/server-ctl.mjs logs',
             'edge:start': 'node scripts/edge-ctl.mjs start',
             'edge:stop': 'node scripts/edge-ctl.mjs stop',
             'edge:restart': 'node scripts/edge-ctl.mjs restart',
@@ -493,50 +509,27 @@ async function buildFull(dist, skipInstall) {
       )}\n`,
     );
 
-    writeFileSync(
-      join(dist, 'start.sh'),
-      `#!/usr/bin/env bash
-# linkagent 单机进程管理器（gateway + 微信 + node 三进程，仅编排拉起不守护）
-#   ./start.sh              后台启动全部三进程（gateway 就绪后再起微信/node）
-#   ./start.sh stop         停止全部
-#   ./start.sh restart      重启全部
-#   ./start.sh status       查看三进程状态
-#   ./start.sh logs         跟随全部日志
-#   ./start.sh foreground   前台联调（Ctrl-C 一起退出）
-#   ./start.sh start gateway|weixin|node   仅操作单个进程
-set -u
-DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$DIR"
-CMD="\${1:-start}"
-TARGET="\${2:-all}"
-case "$CMD" in
-  start|stop|restart) exec node bin/pm.mjs "$CMD" "$TARGET" ;;
-  status) exec node bin/pm.mjs status ;;
-  logs) exec node bin/pm.mjs logs "$TARGET" ;;
-  foreground|fg|run) exec node bin/pm.mjs foreground "$TARGET" ;;
-  *) echo "用法: $0 {start|stop|restart|status|logs|foreground} [all|gateway|weixin|node]"; exit 1 ;;
-esac
-`,
-      { mode: 0o755 },
-    );
+    writeRootExecSh(dist, 'server-ctl.sh', 'scripts/server-ctl.sh');
+    writeRootExecSh(dist, 'edge-ctl.sh', 'scripts/edge-ctl.sh');
+    writeRootExecSh(dist, 'start.sh', 'scripts/server-ctl.sh');
 
+    writeFileSync(
+      join(dist, 'server-ctl.bat'),
+      `@echo off
+cd /d "%~dp0"
+node scripts\\server-ctl.mjs %*
+`,
+    );
     writeFileSync(
       join(dist, 'start.bat'),
       `@echo off
-rem linkagent pm (gateway + channels + node)
 cd /d "%~dp0"
-set "CMD=%~1"
-if "%CMD%"=="" set "CMD=start"
-set "TARGET=%~2"
-if "%TARGET%"=="" set "TARGET=all"
-node bin\\pm.mjs %CMD% %TARGET%
+node scripts\\server-ctl.mjs %*
 `,
     );
-
     writeFileSync(
-      join(dist, 'edge.bat'),
+      join(dist, 'edge-ctl.bat'),
       `@echo off
-rem frps + APISIX（需 Docker Desktop）
 cd /d "%~dp0"
 node scripts\\edge-ctl.mjs %*
 `,
@@ -552,7 +545,7 @@ node scripts\\edge-ctl.mjs %*
   }
 
   console.log(`\n✅ 独立部署包已生成：${dist}`);
-  console.log('   启动三进程：cd 该目录 && ./start.sh（Windows: start.bat）');
+  console.log('   启动：cd 该目录 && ./edge-ctl.sh start && ./server-ctl.sh start');
 }
 
 const FULL_README = `# linkagent 独立部署包
@@ -568,10 +561,10 @@ OpenAI 兼容网关：Chatbox / Open WebUI → \`/v1\` → ACP(acpx) → 本地 
 linkagent/
 ├── bin/                  进程入口（gateway / pm / node / edge 等 .mjs）
 ├── config/               gateway.yaml / weixin.yaml / node.yaml
-├── scripts/              装好后运维：edge.sh、setup-pi、config-init 等
-├── lib/                  仅 ./install.sh 使用（不同步到运行安装目录）
+├── scripts/              装好后运维：edge-ctl、server-ctl、setup-pi 等
 ├── install.sh            发布包 → 运行目录（如 /opt/agent-linker）
-├── start.sh              启停（内部 node bin/pm.mjs）
+├── server-ctl.sh         网关/渠道/节点启停（内部 node bin/pm.mjs）
+├── edge-ctl.sh           frps + APISIX
 ├── dev/                  内置聊天页
 ├── web/                  后台管理端
 ├── node_modules/
@@ -580,20 +573,22 @@ linkagent/
 
 ## 启动（单机三进程：gateway + 微信 + node）
 \`\`\`bash
-./start.sh              # 后台启动全部（gateway 就绪后再起微信/node）
-./start.sh status       # 查看三进程状态
-./start.sh logs         # 跟随全部日志（Ctrl-C 只退出查看，不停进程）
-./start.sh stop         # 停止全部；restart 重启；foreground 前台联调
-./start.sh start weixin # 仅操作单个进程：gateway|weixin|node
+./edge-ctl.sh build     # 首次构建 APISIX 镜像（需 Docker）
+./edge-ctl.sh start     # frps + APISIX
+./server-ctl.sh start   # 后台启动 gateway/channels/node
+./server-ctl.sh status
+./server-ctl.sh logs
+./server-ctl.sh stop
+./server-ctl.sh restart gateway   # 仅重启网关
 \`\`\`
 \`\`\`bat
-start.bat               # Windows：后台启动 gateway/channels/node
-edge.bat build          # 首次构建 APISIX 镜像
-edge.bat start          # frps + APISIX；再 start.bat start 拉起网关
-edge.bat status
+edge-ctl.bat build
+edge-ctl.bat start
+server-ctl.bat start
 \`\`\`
 
-进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；进程崩溃后重新执行 \`./start.sh start\` 即可。
+进程管理器只负责拉起/停止（不常驻、崩溃不自动重启）；崩溃后重新执行 \`./server-ctl.sh start\` 即可。
+\`start.sh\` / \`start.bat\` 仍转发到 \`server-ctl\`（兼容旧文档）。
 网关开启 \`auth\` 时，微信/node 进程自动读取 \`config/gateway.yaml\` 的静态 token 回连，无需单独配置。
 微信首次使用需先在后台 \`/admin\` 扫码登录。
 
@@ -606,7 +601,7 @@ edge.bat status
 安装根可用 \`LINKAGENT_HOME\` 显式指定。
 
 ## 配置
-编辑 \`config/\` 下三文件（修改后 \`./start.sh restart\`）：
+编辑 \`config/\` 下三文件（修改后 \`./server-ctl.sh restart\`）：
 - \`gateway.yaml\`：\`server.host/port\`、\`auth\`、网关侧 \`agents\` / \`tasks\` / \`plugins\` / \`channels\`
 - \`weixin.yaml\`：个人微信渠道；单机包 \`mode: external\`，后台 /admin 扫码
 - \`node.yaml\`：本机节点连接器、\`node.agents\`（含 pi 等 ACP 权限）
@@ -643,6 +638,10 @@ async function buildNode(dist, skipInstall) {
     copySplitConfig(distCfg, 'node');
     copyConfigTemplatesToDist(distCfg);
     writeFileSync(join(dist, 'bin', 'ctl.mjs'), NODE_CTL_SOURCE);
+    cpSync(
+      join(REPO, 'scripts', 'lib', 'node-env-file-args.mjs'),
+      join(dist, 'scripts', 'node-env-file-args.mjs'),
+    );
     writeFileSync(join(dist, '.linkagent-root'), 'linkagent-node standalone deployment root\n');
     writeFileSync(join(dist, 'node.env.example'), NODE_ENV_EXAMPLE);
     writeFileSync(join(dist, 'README.md'), NODE_README);

@@ -45,7 +45,7 @@ export interface GatewayEdgeOptions {
   installRoot?: string;
   idePrefix: string;
   ideUpstream: string;
-  /** 浏览器入口路径前缀，与 node.yaml serveWeb.basePath 一致，默认 /vibe-ide */
+  /** 浏览器入口路径前缀，与 node.yaml hostCodeServerCompose.basePath 一致，默认 /vibe-ide */
   idePublicPath?: string;
   /** {taskId}-web.localhost 转到网关 */
   gatewayUpstream: string;

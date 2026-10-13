@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { devScriptPath } from "./lib/shell-entry.mjs";
+import { nodeEntryEnvFileArgv, parseNodeEnvFileArgs } from "./lib/node-env-file-args.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.dirname(dir);
@@ -29,6 +30,8 @@ export const NODE_LAUNCH_HELP = `用法
   --native                      本机进程
   --docker                      Docker 聚合镜像。本机没有镜像时先构建
   LINKAGENT_NODE_RUNTIME        native 或 docker。命令行开关优先于这个环境变量
+
+  -f <path>                 指定节点 dotenv（可多次）；未指定时读默认 node.env 路径
 
 连接参数（原生读环境变量和 node.yaml；Docker 读 code-server/node-docker/node.env。已有环境变量优先）
   LINKAGENT_GATEWAY_URL         回连地址，例如 ws://127.0.0.1:8787。容器里可用 host.docker.internal
@@ -54,38 +57,54 @@ export const NODE_LAUNCH_HELP = `用法
   pnpm node start builder-01
   pnpm node:status
   pnpm node -- --docker
+  pnpm node -- --docker -f .runtime-state/node.env
   pnpm node:stop -- --docker
   pnpm node:docker:build
 `;
 
 export function resolveNodeLaunch(argv, envRuntime) {
   if (argv.some((arg) => arg === "help" || arg === "--help" || arg === "-h")) return { help: true };
-  const dockerFlag = argv.includes("--docker");
-  const nativeFlag = argv.includes("--native");
+  const envParsed = parseNodeEnvFileArgs(argv);
+  if (envParsed.error) return { error: envParsed.error };
+  const afterEnv = envParsed.rest;
+  const dockerFlag = afterEnv.includes("--docker");
+  const nativeFlag = afterEnv.includes("--native");
   if (dockerFlag && nativeFlag) return { error: "不能同时指定 --docker 和 --native" };
-  const rest = argv.filter((arg) => arg !== "--docker" && arg !== "--native");
+  const rest = afterEnv.filter((arg) => arg !== "--docker" && arg !== "--native");
   const fromEnv = (envRuntime ?? "").trim().toLowerCase();
   let runtime = "native";
   if (dockerFlag) runtime = "docker";
   else if (nativeFlag) runtime = "native";
   else if (fromEnv === "docker" || fromEnv === "native") runtime = fromEnv;
   else if (fromEnv) return { error: "LINKAGENT_NODE_RUNTIME 只能是 native 或 docker" };
-  return { runtime, args: rest.length > 0 ? rest : ["start"] };
+  const ctlArgs = rest.length > 0 ? rest : ["start"];
+  const envFileArgv = nodeEntryEnvFileArgv(envParsed.envFiles);
+  return { runtime, ctlArgs, envFileArgv };
 }
 
 function spawnNode(launch) {
   const isWin = process.platform === "win32";
+  const env = { ...process.env };
+  if (launch.envFileArgv?.length) {
+    const paths = [];
+    for (let i = 0; i < launch.envFileArgv.length; i += 2) {
+      if (launch.envFileArgv[i] === "-f") paths.push(launch.envFileArgv[i + 1]);
+    }
+    if (paths.length) env.LINKAGENT_NODE_ENV_FILES = paths.map((p) => path.resolve(p)).join(path.delimiter);
+  }
+  const dockerArgv = [...launch.ctlArgs, ...launch.envFileArgv];
   const child = launch.runtime === "docker"
-    ? spawn(process.execPath, [path.join(repo, "code-server", "node-docker", "ctl.mjs"), ...launch.args], {
+    ? spawn(process.execPath, [path.join(repo, "code-server", "node-docker", "ctl.mjs"), ...dockerArgv], {
         stdio: "inherit",
+        env,
       })
     : isWin
       ? spawn(
           "powershell.exe",
-          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", devScriptPath(dir, "node.ps1"), ...launch.args],
-          { stdio: "inherit", windowsHide: false },
+          ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", devScriptPath(dir, "node.ps1"), ...launch.ctlArgs],
+          { stdio: "inherit", windowsHide: false, env },
         )
-      : spawn("bash", [devScriptPath(dir, "node.sh"), ...launch.args], { stdio: "inherit" });
+      : spawn("bash", [devScriptPath(dir, "node.sh"), ...launch.ctlArgs], { stdio: "inherit", env });
   child.on("error", (err) => {
     console.error(err.message);
     process.exit(1);

@@ -34,6 +34,34 @@ test('applyDotenvFile：不覆盖已有环境变量', () => {
   }
 });
 
+test('loadNodeConnectorEnvFiles：-f 指定文件时不读默认 node.env', () => {
+  const root = mkdtempSync(join(tmpdir(), 'la-node-explicit-'));
+  writeFileSync(join(root, '.linkagent-root'), '', 'utf8');
+  mkdirSync(join(root, 'config'), { recursive: true });
+  writeFileSync(
+    join(root, 'config', 'gateway.yaml'),
+    'server:\n  host: 127.0.0.1\n  port: 8787\nauth:\n  mode: local\n  token: ""\n',
+    'utf8',
+  );
+  writeFileSync(join(root, 'node.env'), 'LINKAGENT_GATEWAY_URL=ws://default:8787\n', 'utf8');
+  const custom = join(root, 'custom.env');
+  writeFileSync(custom, 'LINKAGENT_GATEWAY_URL=ws://custom:8787\n', 'utf8');
+
+  const prevHome = process.env.LINKAGENT_HOME;
+  const prevUrl = process.env.LINKAGENT_GATEWAY_URL;
+  delete process.env.LINKAGENT_GATEWAY_URL;
+  process.env.LINKAGENT_HOME = root;
+  try {
+    loadNodeConnectorEnvFiles([custom]);
+    assert.equal(process.env.LINKAGENT_GATEWAY_URL, 'ws://custom:8787');
+  } finally {
+    if (prevHome === undefined) delete process.env.LINKAGENT_HOME;
+    else process.env.LINKAGENT_HOME = prevHome;
+    if (prevUrl === undefined) delete process.env.LINKAGENT_GATEWAY_URL;
+    else process.env.LINKAGENT_GATEWAY_URL = prevUrl;
+  }
+});
+
 test('loadNodeConnectorEnvFiles：安装根 node.env 注入 LINKAGENT_GATEWAY_URL', () => {
   const root = mkdtempSync(join(tmpdir(), 'la-node-root-'));
   writeFileSync(join(root, '.linkagent-root'), '', 'utf8');

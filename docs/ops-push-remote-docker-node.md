@@ -124,7 +124,7 @@ cd code-server\node-docker
 |----|-----|
 | 推送 | `origin/main` @ `b76db3d` |
 | 本机 PM（操作前） | gateway / channels / **node** 均在运行 |
-| 本机 `config/node.yaml` | `serveWeb.enabled: false`（enhance 靠 `LINKAGENT_LOCAL_STACK_ENHANCE` 或 Docker C） |
+| 本机 `config/node.yaml` | `hostCodeServerCompose.enabled: false`（enhance 靠 `LINKAGENT_LOCAL_STACK_ENHANCE` 或 Docker C） |
 | 原 `node.env` | 指向 `host.docker.internal`（单机形态 C 联调），连远程需按 §3 改写 |
 
 ---

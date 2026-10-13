@@ -6,10 +6,21 @@ import {
   dockerRunArgs,
   envFileFor,
   mergeNodeEnvFromFiles,
+  parseNodeEnvFileArgs,
+  parseCtlArgv,
   readDotenv,
   shouldBuildImage,
   userWorkspaceHost,
 } from '../../../code-server/node-docker/ctl.mjs';
+
+test('parseNodeEnvFileArgs / parseCtlArgv：-f 与命令顺序', () => {
+  assert.deepEqual(parseNodeEnvFileArgs(['start', '-f', '/a.env']), {
+    envFiles: ['/a.env'],
+    rest: ['start'],
+  });
+  assert.deepEqual(parseCtlArgv(['-f', '/a.env', 'restart']).cmd, 'restart');
+  assert.equal(parseNodeEnvFileArgs(['-f']).error, '-f 需要配置文件路径');
+});
 
 test('shouldBuildImage：只在缺省镜像不存在时构建', () => {
   assert.equal(shouldBuildImage('linkagent-node:local', false), true);

@@ -7,7 +7,7 @@
 | `gateway.yaml` | gateway：监听、鉴权、agents、tasks、plugins |
 | `channels.yaml` | channel-gateway：企微、飞书、微信插件 |
 | `weixin.yaml` | 个人微信 bot（external） |
-| `node.yaml` | 本机 node 连接器、serveWeb 等 |
+| `node.yaml` | 本机 node 连接器、hostCodeServerCompose 等 |
 
 - 模板：`backend/config/*.template`；`build:dist` 会在 dist 内生成 yaml 并附带 `*.template`。
 - **开发/运行（默认）**：**`<repo>/config/`** + `.runtime-state/`。配置整理：`pnpm migrate:config` / `bash scripts/migrate-config.sh`（默认仅 config；登录态等加 `--with-runtime`）。

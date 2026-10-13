@@ -165,8 +165,49 @@ export type NodeAgentListItem = z.infer<typeof nodeAgentListItemSchema>;
 /** LinkAgent 自己的 code-server 镜像，由 code-server/Dockerfile 构建。 */
 export const LINKAGENT_CODE_SERVER_IMAGE = 'linkagent-code-server:local';
 
+const hostCodeServerComposeDefaults = {
+  enabled: false,
+  image: LINKAGENT_CODE_SERVER_IMAGE,
+  host: '127.0.0.1',
+  port: 8010,
+  basePath: '/vibe-ide',
+  workspace: '',
+  useHostNodeModules: false,
+} as const;
+
+/**
+ * PM 原生 node 是否在宿主机 docker compose 独立 code-server（默认 127.0.0.1:8010）。
+ * 形态 C 聚合容器 `linkagent-node` 须 `enabled: false` + `LINKAGENT_NODE_SERVE_WEB=0`。
+ * 旧键 `serveWeb` 仍可读，解析时映射到本段。
+ */
+export const hostCodeServerComposeSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    image: z.string().min(1).default(LINKAGENT_CODE_SERVER_IMAGE),
+    host: z.string().default('127.0.0.1'),
+    port: z.number().int().positive().default(8010),
+    basePath: z.string().default('/vibe-ide'),
+    workspace: z.string().default(''),
+    useHostNodeModules: z.boolean().default(false),
+  })
+  .default({ ...hostCodeServerComposeDefaults });
+
+export type HostCodeServerComposeSection = z.infer<typeof hostCodeServerComposeSchema>;
+
+function normalizeNodeSectionRaw(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const o = { ...(raw as Record<string, unknown>) };
+  if (o.serveWeb !== undefined && o.hostCodeServerCompose === undefined) {
+    o.hostCodeServerCompose = o.serveWeb;
+  }
+  delete o.serveWeb;
+  return o;
+}
+
 /** node（executor）执行器进程段：本机/远程节点连接器 */
-export const nodeSectionSchema = z
+export const nodeSectionSchema = z.preprocess(
+  normalizeNodeSectionRaw,
+  z
   .object({
     /** pm start all 时是否拉起该进程（默认 true） */
     enabled: z.boolean().default(true),
@@ -194,38 +235,7 @@ export const nodeSectionSchema = z
         }),
       )
       .default([]),
-    /**
-     * 浏览器 IDE。node 只拉起 code-server，端口发布到回环地址。
-     * nginx 与 frps 由网关安装并监听，不在 node 里起反代容器。
-     * 缺省关闭，避免没有 docker 的节点启动失败。
-     */
-    serveWeb: z
-      .object({
-        enabled: z.boolean().default(false),
-        /** 浏览器 IDE 镜像。缺省是本仓库构建的 code-server */
-        image: z.string().min(1).default(LINKAGENT_CODE_SERVER_IMAGE),
-        /** 发布到宿主机的地址，供网关本机 nginx 反代 */
-        host: z.string().default('127.0.0.1'),
-        port: z.number().int().positive().default(8010),
-        /** 必须与网关前缀一致 */
-        basePath: z.string().default('/vibe-ide'),
-        /** 挂进 IDE 的目录；空则用安装根 */
-        workspace: z.string().default(''),
-        /**
-         * true：node_modules 随 workspace  bind mount（本机已在宿主机 npm install 时用）。
-         * false（默认）：独立 Docker 卷，避免 Linux 容器写 Windows node_modules；全容器 node 时保持 false 并在容器内 install。
-         */
-        useHostNodeModules: z.boolean().default(false),
-      })
-      .default({
-        enabled: false,
-        image: LINKAGENT_CODE_SERVER_IMAGE,
-        host: '127.0.0.1',
-        port: 8010,
-        basePath: '/vibe-ide',
-        workspace: '',
-        useHostNodeModules: false,
-      }),
+    hostCodeServerCompose: hostCodeServerComposeSchema,
   })
   .default({
     enabled: true,
@@ -234,16 +244,9 @@ export const nodeSectionSchema = z
     gatewayUrl: '',
     gatewayToken: '',
     taskProcesses: [],
-    serveWeb: {
-      enabled: false,
-      image: LINKAGENT_CODE_SERVER_IMAGE,
-      host: '127.0.0.1',
-      port: 8010,
-      basePath: '/vibe-ide',
-      workspace: '',
-      useHostNodeModules: false,
-    },
-  });
+    hostCodeServerCompose: { ...hostCodeServerComposeDefaults },
+  }),
+);
 export type NodeSection = z.infer<typeof nodeSectionSchema>;
 
 /**

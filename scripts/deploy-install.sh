@@ -5,6 +5,64 @@
 #   ./install.sh --restart
 set -euo pipefail
 
+linkagent_materialize_config_from_templates() {
+  local dest="$1"
+  local f
+  mkdir -p "$dest"
+  for f in gateway.yaml weixin.yaml channels.yaml node.yaml; do
+    [ -f "$dest/$f" ] && continue
+    if [ -f "$dest/$f.template" ]; then
+      cp -a "$dest/$f.template" "$dest/$f"
+      echo "→ 配置：由模板生成 $dest/$f"
+    fi
+  done
+}
+
+linkagent_sync_publish_to_install() {
+  local package="$1"
+  local install="$2"
+  local skip_npm="${3:-0}"
+  local install_cfg="$install/config"
+  local install_state="$install/.runtime-state"
+
+  if [ ! -f "$package/.linkagent-root" ]; then
+    echo "不是 linkagent 发布包：缺少 $package/.linkagent-root" >&2
+    return 1
+  fi
+
+  mkdir -p "$install" "$install_cfg" "$install_state"
+
+  echo "→ 同步程序文件 → $install（不覆盖 config、.runtime-state）"
+  local entry base
+  for entry in "$package"/*; do
+    base="$(basename "$entry")"
+    case "$base" in
+      config|.runtime-state|lib) continue ;;
+      node_modules)
+        if [ "$skip_npm" = 1 ] && [ -d "$install/node_modules" ]; then
+          continue
+        fi
+        ;;
+    esac
+    rm -rf "$install/$base"
+    cp -a "$entry" "$install/$base"
+  done
+
+  local t
+  for t in "$package/config"/*.template; do
+    [ -f "$t" ] || continue
+    cp -a "$t" "$install_cfg/$(basename "$t")"
+  done
+  linkagent_materialize_config_from_templates "$install_cfg"
+
+  if [ "$skip_npm" = 0 ] || [ ! -d "$install/node_modules" ]; then
+    echo "→ npm install --omit=dev（$install）"
+    (cd "$install" && npm install --omit=dev --legacy-peer-deps --no-audit --no-fund --loglevel=error)
+  fi
+
+  printf 'linkagent runtime install root\n' >"$install/.linkagent-root"
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/.linkagent-root" ]; then
   PACKAGE="$SCRIPT_DIR"
@@ -49,7 +107,7 @@ while [ $# -gt 0 ]; do
   LINKAGENT_INSTALL     缺省 /opt/agent-linker
 
   不覆盖安装目录已有 config/*.yaml 与 .runtime-state/（含登录账号）。
-  迁入：migrate-config.sh（仓库）或 migrate-install-config.sh（外部目录），不随本脚本执行。
+  缺省 yaml 由 config/*.template 自动生成（仅当目标文件尚不存在）。
 EOF
       exit 0
       ;;
@@ -61,8 +119,8 @@ EOF
   esac
 done
 
-if [ ! -f "$PACKAGE/lib/sync-install.sh" ]; then
-  echo "不是 linkagent 发布包：缺少 $PACKAGE/lib/sync-install.sh" >&2
+if [ ! -f "$PACKAGE/.linkagent-root" ]; then
+  echo "不是 linkagent 发布包：缺少 $PACKAGE/.linkagent-root" >&2
   if [ -f "$(dirname "$PACKAGE")/pnpm-workspace.yaml" ] || [ -f "$PACKAGE/pnpm-workspace.yaml" ]; then
     echo "提示：源码仓库请用 bash scripts/deploy-server-install-update.sh 或 pnpm local:install-update" >&2
   elif [ "$PACKAGE" != "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ]; then
@@ -70,9 +128,6 @@ if [ ! -f "$PACKAGE/lib/sync-install.sh" ]; then
   fi
   exit 1
 fi
-
-# shellcheck source=lib/sync-install.sh
-. "$PACKAGE/lib/sync-install.sh"
 
 if [ "$(id -u)" -ne 0 ] && [ ! -w "$(dirname "$INSTALL")" ] 2>/dev/null; then
   echo "提示：安装到 $INSTALL 通常需要 root，或使用 LINKAGENT_INSTALL=~/agent-linker" >&2
@@ -82,8 +137,9 @@ linkagent_sync_publish_to_install "$PACKAGE" "$INSTALL" "$SKIP_NPM"
 
 echo "✅ 已安装到 $INSTALL"
 echo "   配置：$INSTALL/config/"
-echo "   启动：cd $INSTALL && ./start.sh start"
+echo "   边缘：cd $INSTALL && ./edge-ctl.sh start"
+echo "   网关：cd $INSTALL && ./server-ctl.sh start"
 
 if [ "$RESTART" = 1 ]; then
-  (cd "$INSTALL" && ./start.sh restart gateway)
+  (cd "$INSTALL" && ./server-ctl.sh restart gateway)
 fi

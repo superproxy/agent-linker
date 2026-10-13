@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
-import { nodeSectionSchema, LINKAGENT_CODE_SERVER_IMAGE } from '@linkagent/shared';
+import {
+  LINKAGENT_CODE_SERVER_IMAGE,
+  nodeSectionSchema,
+  taskPublicPath,
+  taskSaasDevFrpcLocations,
+  taskViteBasePath,
+} from '@linkagent/shared';
 import {
   adapterResponseHeaders,
   closeSaasLocalAdapters,
@@ -12,7 +18,7 @@ import {
   rewriteSaasLocalPath,
   rewriteSaasRedirect,
 } from '../../src/node/saas-path.js';
-import { frpcToken, nodeServeWebSuppressed, publishSaasFrpc, renderIdeCompose, renderSaasWorkspaceFrpc, renderWorkspaceFrpc, serveWebDockerArgs, stackEnhanceIdeEnabled, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
+import { frpcToken, nodeServeWebSuppressed, publishSaasFrpc, renderIdeCompose, renderSaasWorkspaceFrpc, renderWorkspaceFrpc, saasCodeProxyBasePath, serveWebDockerArgs, stackEnhanceIdeEnabled, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
 import { renderEmbeddedHttpFrpc } from '../../../code-server/render-frpc.mjs';
 
 const enabled = {
@@ -24,12 +30,20 @@ const enabled = {
   workspace: '',
 };
 
-test('node.serveWeb 缺省关闭', () => {
+test('node.hostCodeServerCompose 缺省关闭', () => {
   const node = nodeSectionSchema.parse({ enabled: true, agents: ['pi'] });
-  assert.equal(node.serveWeb.enabled, false);
+  assert.equal(node.hostCodeServerCompose.enabled, false);
   assert.deepEqual(node.taskProcesses, []);
-  assert.equal(node.serveWeb.image, LINKAGENT_CODE_SERVER_IMAGE);
-  assert.equal(node.serveWeb.port, 8010);
+  assert.equal(node.hostCodeServerCompose.image, LINKAGENT_CODE_SERVER_IMAGE);
+  assert.equal(node.hostCodeServerCompose.port, 8010);
+});
+
+test('node.yaml 旧键 serveWeb 映射到 hostCodeServerCompose', () => {
+  const node = nodeSectionSchema.parse({
+    serveWeb: { enabled: true, port: 8020 },
+  });
+  assert.equal(node.hostCodeServerCompose.enabled, true);
+  assert.equal(node.hostCodeServerCompose.port, 8020);
 });
 
 test('renderIdeCompose：只发布 code-server 到回环地址', () => {
@@ -69,7 +83,7 @@ test('startNodeServeWeb：启用时写 compose 并执行 docker compose up，停
     on() {},
   });
   const handle = startNodeServeWeb(
-    { serveWeb: enabled, workspaceDir: 'D:/work/repo', runtimeDir: dir },
+    { hostCodeServerCompose: enabled, workspaceDir: 'D:/work/repo', runtimeDir: dir },
     (_command, args) => {
       calls.push(args);
       return child();
@@ -95,7 +109,7 @@ test('startNodeServeWeb：switchTask 重建 compose 并 force-recreate', () => {
     on() {},
   });
   const handle = startNodeServeWeb(
-    { serveWeb: enabled, workspaceDir: 'D:/work/a', runtimeDir: dir },
+    { hostCodeServerCompose: enabled, workspaceDir: 'D:/work/a', runtimeDir: dir },
     (_command, args) => {
       calls.push(args);
       return child();
@@ -133,6 +147,12 @@ test('renderWorkspaceFrpc：legacy 三 Host', () => {
   }
 });
 
+test('task-host：SaaS 公网路径与 Vite base', () => {
+  assert.equal(taskPublicPath('t_41db7238', 'web'), '/t_41db7238-web');
+  assert.equal(taskViteBasePath('t_41db7238'), '/t_41db7238/');
+  assert.deepEqual(taskSaasDevFrpcLocations('t_41db7238'), ['/t_41db7238', '/t_41db7238-web']);
+});
+
 test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
   const text = renderSaasWorkspaceFrpc('abc', {
     publicHost: 'hubide.ljyd.cn',
@@ -150,10 +170,12 @@ test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
   assert.match(text, /localPort = 16080/);
   assert.doesNotMatch(text, /localhost/);
   assert.equal(devPublicWebTrailingSlashRedirect('t_41db7238', '/t_41db7238-web'), '/t_41db7238-web/');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web'), '/t_41db7238-web/');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web?foo=1'), '/t_41db7238-web/?foo=1');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/t_41db7238-web/@vite/client');
-  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/'), '/t_41db7238-web/');
+  assert.equal(saasCodeProxyBasePath('t_41db7238'), '/t_41db7238-code');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web'), '/t_41db7238/');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web?foo=1'), '/t_41db7238/?foo=1');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/t_41db7238/@vite/client');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/'), '/t_41db7238/');
+  assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/src/main.ts'), '/t_41db7238/src/main.ts');
   assert.equal(rewriteSaasLocalPath('code', 't_41db7238', '/t_41db7238-code/?folder=/root/workspace'), '/?folder=/root/workspace');
   assert.equal(rewriteSaasLocalPath('vnc', 't_41db7238', '/t_41db7238-vnc/vnc.html'), '/vnc.html');
   const headers = adapterResponseHeaders(
@@ -227,7 +249,7 @@ test('publishSaasFrpc：按任务改写路径（含 ide.localhost）', () => {
   assert.match(local, /locations = \["\/default-code"\]/);
   publishSaasFrpc('t_41db7238', file);
   const after = readFileSync(file, 'utf8');
-  assert.match(after, /serverAddr = "10\.0\.0\.8"/);
+  assert.match(after, /serverAddr = "150\.5\.140\.64"/);
   assert.match(after, /locations = \["\/t_41db7238-code"\]/);
   closeSaasLocalAdapters();
 });
@@ -242,7 +264,7 @@ test('startNodeServeWeb：有 frps 令牌时挂上 frpc 配置', () => {
   let handle: ReturnType<typeof startNodeServeWeb> | undefined;
   try {
     handle = startNodeServeWeb(
-      { serveWeb: enabled, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
+      { hostCodeServerCompose: enabled, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
       () => ({ killed: false, exitCode: null, kill: () => true, on() {} }),
     );
   } finally {
@@ -281,7 +303,7 @@ test('startNodeServeWeb：容器内只写 frpc.toml，不再 compose', () => {
   try {
     startNodeServeWeb(
       {
-        serveWeb: { ...enabled, enabled: false },
+        hostCodeServerCompose: { ...enabled, enabled: false },
         workspaceDir: 'D:/work/repo',
         runtimeDir: dir,
         frpsTokenFile: join(dir, 'frps.token'),
@@ -325,7 +347,7 @@ test('startNodeServeWeb：LINKAGENT_NODE_SERVE_WEB=0 时不 compose', () => {
   let called = false;
   try {
     startNodeServeWeb(
-      { serveWeb: enabled, workspaceDir: 'D:/work/repo', runtimeDir: 'unused' },
+      { hostCodeServerCompose: enabled, workspaceDir: 'D:/work/repo', runtimeDir: 'unused' },
       () => {
         called = true;
         throw new Error('不应调用');
@@ -381,7 +403,7 @@ test('startNodeServeWeb：enhance 时未 enabled 也 compose', () => {
   let handle: ReturnType<typeof startNodeServeWeb> | undefined;
   try {
     handle = startNodeServeWeb(
-      { serveWeb: { ...enabled, enabled: false }, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
+      { hostCodeServerCompose: { ...enabled, enabled: false }, workspaceDir: 'D:/work/repo', runtimeDir: dir, frpsTokenFile: join(dir, 'frps.token') },
       (_c, args) => {
         calls.push(args);
         return { killed: false, exitCode: null, kill: () => true, on() {} };
@@ -400,7 +422,7 @@ test('startNodeServeWeb：未启用时不调用 docker', () => {
   let called = false;
   startNodeServeWeb(
     {
-      serveWeb: { ...enabled, enabled: false },
+      hostCodeServerCompose: { ...enabled, enabled: false },
       workspaceDir: 'D:/work/repo',
       runtimeDir: 'unused',
     },

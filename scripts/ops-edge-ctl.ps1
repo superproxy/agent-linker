@@ -1,4 +1,4 @@
-﻿# frps 与 APISIX 启停（Windows，与 scripts/edge.sh 对齐）
+﻿# frps 与 APISIX 启停（Windows，与 scripts/edge-ctl.sh 对齐）
 # 安装根：LINKAGENT_HOME，否则当前工作目录
 #   scripts/edge.ps1 start|stop|restart|status|log|build
 #
