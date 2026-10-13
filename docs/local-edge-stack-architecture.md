@@ -87,7 +87,7 @@
 1. 浏览器请求 `GET http://ide.localhost:9080/<taskId>-web/…`，Host=`ide.localhost`。
 2. **APISIX** 匹配 `task-<taskId>-web` 等路由，**pass_host**，上游 **frps:7080**（容器内常为 `host.docker.internal:7080`）。
 3. **frps** 按 Host + **location** 最长前缀选中 frpc 登记的 `workspace-dev`，转到 **127.0.0.1:15173**（经 frpc 隧道到 worker 机器）。
-4. **worker 内 15173 适配器**（`saas-path.ts`）剥 `/<taskId>-web` 前缀，反代到 **dev-port.json** 里的动态端口（如 Vite `127.0.0.1:50718`）。
+4. **worker 内 15173**（`saas-path.ts`）**剥** `/<taskId>-web` 后反代 Vite（base `/`），并对 HTML/Location **补回**公网前缀。
 5. 若 dev 未监听 → 适配器返回 **502**（APISIX/frps/frpc 仍可能正常）。
 
 code / vnc 同理：**18080 / 16080** → code-server / noVNC，路径 `/<taskId>-code`、`-vnc`。

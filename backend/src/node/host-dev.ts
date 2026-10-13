@@ -25,7 +25,7 @@ export function shouldAllocateHostDev(devByNodeFlag: string | undefined, pathRou
   return false;
 }
 
-/** 供 sh 嵌入：只注入监听地址/端口；路径前缀由 15173 适配器剥掉，不改动项目 `dev` 脚本。 */
+/** 路径模式：`/-web` 仅公网/frps 区分；15173 剥前缀 upstream，Vite 仍 base `/`。 */
 export function buildHostDevShellBody(_taskId: string, port: number, _publicHost: string, _pathRouting: boolean): string {
   return [
     'if [ ! -f package.json ]; then echo "[dev] 任务目录没有 package.json，跳过"; exit 0; fi',

@@ -91,9 +91,13 @@ export function App() {
     let cancelled = false;
     void fetch(new URL('/api/edge', base).href)
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { publicHost?: string; publicPort?: number } | null) => {
+      .then((body: { publicHost?: string; publicPort?: number; taskRouting?: 'path' | 'host' } | null) => {
         if (cancelled || !body?.publicHost || !body.publicPort) return;
-        setTaskPublicEndpoint({ host: body.publicHost, port: body.publicPort });
+        setTaskPublicEndpoint({
+          host: body.publicHost,
+          port: body.publicPort,
+          taskRouting: body.taskRouting,
+        });
         setEdgeTick((tick) => tick + 1);
       })
       .catch(() => undefined);

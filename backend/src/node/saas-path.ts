@@ -1,6 +1,6 @@
 import http from 'node:http';
 import net from 'node:net';
-import { taskPublicPath } from '@linkagent/shared';
+import { taskPublicPath, taskSubdomainUsesPathRewrite } from '@linkagent/shared';
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -21,10 +21,11 @@ export type SaasPathKind = 'dev' | 'code' | 'vnc';
 
 /**
  * frps 只按 Host + 最长 location 选代理，不剥路径。
- * dev：公网 `/<taskId>-web/…`；15173 剥 `-web` 前缀，upstream 为 Vite 默认 base `/`。
+ * dev：`/-web` 仅路由区分；15173 请求 **rewrite 去掉** 前缀，upstream Vite base `/`；HTML/Location 再补回前缀。
  * code / vnc 去掉任务前缀，本机进程仍挂在 `/`。
  */
 export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: string): string {
+  if (!taskSubdomainUsesPathRewrite()) return url;
   const queryAt = url.indexOf('?');
   const path = queryAt >= 0 ? url.slice(0, queryAt) : url;
   const query = queryAt >= 0 ? url.slice(queryAt) : '';
@@ -55,7 +56,30 @@ export function rewriteSaasLocalPath(kind: SaasPathKind, taskId: string, url: st
  * 浏览器会把这个相对地址解析到站点根，公网就变成 APISIX 的 404。
  * 按「这个路径是目录」来解析，并给绝对路径补上 `/<taskId>-code|vnc`。
  */
+/** dev：Vite 回根路径 Location，浏览器需带 `/<taskId>-web` 前缀。 */
+export function rewriteDevPublicLocation(taskId: string, location: string): string {
+  if (!taskSubdomainUsesPathRewrite()) return location;
+  if (/^https?:\/\//i.test(location)) return location;
+  const web = taskPublicPath(taskId, 'web');
+  if (!web) return location;
+  if (location.startsWith('/') && !location.startsWith(web)) return `${web}${location}`;
+  return location;
+}
+
+/** dev HTML：Vite 输出 `href="/…"`，补公网 `/-web` 前缀（避免 `/@vite/client` 打到 9080 根）。 */
+export function rewriteDevHtmlForPublicPath(taskId: string, html: string): string {
+  if (!taskSubdomainUsesPathRewrite()) return html;
+  const web = taskPublicPath(taskId, 'web');
+  if (!web) return html;
+  const webTail = web.startsWith('/') ? web.slice(1) : web;
+  return html.replace(/(\s(?:href|src)=["'])\/([^"'#?]*)/g, (full, attr, rest: string) => {
+    if (rest === '' || rest.startsWith(`${webTail}/`) || rest === webTail) return full;
+    return `${attr}${web}/${rest}`;
+  });
+}
+
 export function rewriteSaasRedirect(kind: 'code' | 'vnc', taskId: string, requestUrl: string, location: string): string {
+  if (!taskSubdomainUsesPathRewrite()) return location;
   if (/^https?:\/\//i.test(location)) return location;
   const prefix = taskPublicPath(taskId, kind);
   if (!prefix) return location;
@@ -99,6 +123,7 @@ export function saasPublicEntryTrailingSlashRedirect(
   taskId: string,
   url: string,
 ): string | null {
+  if (!taskSubdomainUsesPathRewrite()) return null;
   const queryAt = url.indexOf('?');
   const path = queryAt >= 0 ? url.slice(0, queryAt) : url;
   const query = queryAt >= 0 ? url.slice(queryAt) : '';
@@ -136,11 +161,22 @@ function forward(kind: SaasPathKind, taskId: () => string, targetPort: TargetPor
             if (res.writableEnded) return;
             const upstreamHeaders = { ...up.headers };
             const loc = upstreamHeaders.location;
-            if ((kind === 'code' || kind === 'vnc') && typeof loc === 'string') {
-              upstreamHeaders.location = rewriteSaasRedirect(kind, taskId(), req.url || '/', loc);
+            if (typeof loc === 'string') {
+              if (kind === 'dev') upstreamHeaders.location = rewriteDevPublicLocation(taskId(), loc);
+              else if (kind === 'code' || kind === 'vnc') {
+                upstreamHeaders.location = rewriteSaasRedirect(kind, taskId(), req.url || '/', loc);
+              }
             }
-            res.writeHead(up.statusCode || 502, adapterResponseHeaders(upstreamHeaders, body.length));
-            res.end(body);
+            let out = body;
+            if (kind === 'dev') {
+              const ct = upstreamHeaders['content-type'];
+              const ctStr = Array.isArray(ct) ? ct[0] : ct;
+              if (typeof ctStr === 'string' && ctStr.toLowerCase().includes('text/html')) {
+                out = Buffer.from(rewriteDevHtmlForPublicPath(taskId(), body.toString('utf8')), 'utf8');
+              }
+            }
+            res.writeHead(up.statusCode || 502, adapterResponseHeaders(upstreamHeaders, out.length));
+            res.end(out);
           })
           .catch(() => {
             if (!res.headersSent) res.writeHead(502);

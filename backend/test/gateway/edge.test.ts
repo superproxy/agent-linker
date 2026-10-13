@@ -265,6 +265,80 @@ test('syncTaskHosts 在正式域名上按 /taskId-type 转发', async () => {
   edge.stop();
 });
 
+test('子域模式：APISIX 登记 *.apex 并去掉 task-* 路径路由', async () => {
+  const prevMode = process.env.LINKAGENT_TASK_ROUTING;
+  process.env.LINKAGENT_TASK_ROUTING = 'host';
+  const root = mkdtempSync(join(tmpdir(), 'edge-host-'));
+  const calls: { method: string; url: string; body?: string }[] = [];
+  try {
+    const edge = await startGatewayEdge({
+      toolsDir: join(root, 'tools'),
+      runtimeDir: join(root, 'runtime'),
+      idePrefix: '/',
+      ideUpstream: 'http://127.0.0.1:8010',
+      gatewayUpstream: 'http://127.0.0.1:8787',
+      publicHost: 'hubide.ljyd.cn',
+      platform: 'freebsd',
+      arch: 'x64',
+      adminFetch: async (input, init) => {
+        calls.push({
+          method: init?.method ?? 'GET',
+          url: String(input),
+          body: typeof init?.body === 'string' ? init.body : undefined,
+        });
+        return new Response('{}', { status: 200 });
+      },
+    });
+    await edge.syncTaskHosts([{ id: 't_41db7238', name: 'test', enabled: true }]);
+    const put = (id: string) => calls.find((call) => call.method === 'PUT' && call.url.endsWith(`/routes/${id}`));
+    assert.match(put('task-wildcard-subdomain')?.body ?? '', /"host":"\*\.hubide\.ljyd\.cn"/);
+    assert.match(put('task-wildcard-subdomain')?.body ?? '', /host\.docker\.internal:7080/);
+    assert.equal(put('task-t_41db7238'), undefined);
+    edge.stop();
+  } finally {
+    if (prevMode === undefined) delete process.env.LINKAGENT_TASK_ROUTING;
+    else process.env.LINKAGENT_TASK_ROUTING = prevMode;
+  }
+});
+
+test('TCP 模式：APISIX 剥路径并指 frps TCP 远端口', async () => {
+  const prev = process.env.LINKAGENT_FRPC_MODE;
+  process.env.LINKAGENT_FRPC_MODE = 'tcp';
+  const root = mkdtempSync(join(tmpdir(), 'edge-tcp-'));
+  const calls: { method: string; url: string; body?: string }[] = [];
+  try {
+    const edge = await startGatewayEdge({
+      toolsDir: join(root, 'tools'),
+      runtimeDir: join(root, 'runtime'),
+      idePrefix: '/',
+      ideUpstream: 'http://127.0.0.1:8010',
+      gatewayUpstream: 'http://127.0.0.1:8787',
+      platform: 'freebsd',
+      arch: 'x64',
+      adminFetch: async (input, init) => {
+        calls.push({
+          method: init?.method ?? 'GET',
+          url: String(input),
+          body: typeof init?.body === 'string' ? init.body : undefined,
+        });
+        return new Response('{}', { status: 200 });
+      },
+    });
+    await edge.syncTaskHosts([{ id: 'default', name: '默认', enabled: true }]);
+    const put = (id: string) => calls.find((call) => call.method === 'PUT' && call.url.endsWith(`/routes/${id}`));
+    assert.match(put('task-default')?.body ?? '', /host\.docker\.internal:20001/);
+    assert.match(put('task-code-default')?.body ?? '', /host\.docker\.internal:20002/);
+    assert.match(put('task-vnc-default')?.body ?? '', /host\.docker\.internal:20003/);
+    assert.match(put('task-default')?.body ?? '', /proxy-rewrite/);
+    assert.doesNotMatch(put('task-default')?.body ?? '', /upstream_host/);
+    assert.doesNotMatch(put('task-default')?.body ?? '', /:7080/);
+    edge.stop();
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_FRPC_MODE;
+    else process.env.LINKAGENT_FRPC_MODE = prev;
+  }
+});
+
 test('SaaS 公网域名只校验并原样转到 frps', async () => {
   const root = mkdtempSync(join(tmpdir(), 'edge-saas-'));
   const calls: { method: string; url: string; body?: string }[] = [];

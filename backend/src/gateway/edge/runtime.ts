@@ -24,8 +24,18 @@ import {
   FRPS_DASHBOARD_ROUTE_ID_LOOPBACK,
   frpsDashboardRouteSpec,
   gatewayNodeWsRouteSpec,
+  TASK_WILDCARD_SUBDOMAIN_ROUTE_ID,
+  wildcardTaskSubdomainRouteSpec,
 } from './apisix.js';
-import { isSaasPublicHost, useFrpTaskPathRouting } from '@linkagent/shared';
+import {
+  apisixStripsTaskPathBeforeFrps,
+  apisixUpstreamUsesFrpTcp,
+  frpcUsesTaskPathLocations,
+  isSaasPublicHost,
+  useFrpTaskPathRouting,
+  useTaskSubdomainRouting,
+  workspaceFrpTcpRemotePorts,
+} from '@linkagent/shared';
 import { renderFrpsConf } from './render.js';
 
 /** Docker Compose 项目名：同机多安装时避免容器栈互相覆盖（可用 LINKAGENT_EDGE_PROJECT 覆盖） */
@@ -324,45 +334,66 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         }
         await admin.remove(taskDevRouteId(taskId));
         const codePrefix = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const frps = vncUpstream;
-        const saas = useFrpTaskPathRouting(host);
+        const stripAtApisix = apisixStripsTaskPathBeforeFrps(host);
+        const tcpMode = apisixUpstreamUsesFrpTcp(host);
+        const tcpPorts = workspaceFrpTcpRemotePorts();
+        const upstreamDev = tcpMode ? `http://127.0.0.1:${tcpPorts.dev}` : vncUpstream;
+        const upstreamCode = tcpMode ? `http://127.0.0.1:${tcpPorts.code}` : vncUpstream;
+        const upstreamVnc = tcpMode ? `http://127.0.0.1:${tcpPorts.vnc}` : vncUpstream;
+        const stripOpts = (
+          kind: 'open' | 'web' | 'code' | 'vnc',
+        ): { upstreamHost?: string; rewrite?: [string, string] } => {
+          if (!stripAtApisix) return {};
+          const rewriteByKind: Record<typeof kind, [string, string]> = {
+            open: [`^/${codePrefix}/?(.*)`, '/$1'],
+            web: [`^/${codePrefix}-web/?(.*)`, '/$1'],
+            code: [`^/${codePrefix}-code/?(.*)`, '/$1'],
+            vnc: [`^/${codePrefix}-vnc/?(.*)`, '/$1'],
+          };
+          if (tcpMode) return { rewrite: rewriteByKind[kind] };
+          const hostByKind: Record<typeof kind, string> = {
+            open: 'dev.localhost',
+            web: 'dev.localhost',
+            code: 'ide.localhost',
+            vnc: 'vnc.localhost',
+          };
+          return { upstreamHost: hostByKind[kind], rewrite: rewriteByKind[kind] };
+        };
         await admin.upsert({
           id: taskOpenRouteId(taskId),
           host,
           uris: taskOpenRouteUris(taskId),
-          upstream: frps,
+          upstream: upstreamDev,
           enabled: change.enabled,
           priority: 1,
-          ...(saas ? {} : { upstreamHost: 'dev.localhost', rewrite: [`^/${codePrefix}/?(.*)`, '/$1'] as [string, string] }),
+          ...stripOpts('open'),
         });
         await admin.upsert({
           id: taskRouteId(taskId),
           host,
           uris: taskRouteUris(taskId, 'web'),
-          upstream: frps,
+          upstream: upstreamDev,
           enabled: change.enabled,
           priority: 10,
-          ...(saas ? {} : { upstreamHost: 'dev.localhost', rewrite: [`^/${codePrefix}-web/?(.*)`, '/$1'] as [string, string] }),
+          ...stripOpts('web'),
         });
         await admin.upsert({
           id: taskCodeRouteId(taskId),
           host,
           uris: taskRouteUris(taskId, 'code'),
-          upstream: frps,
+          upstream: upstreamCode,
           enabled: change.enabled,
           priority: 10,
-          ...(saas
-            ? {}
-            : { upstreamHost: 'ide.localhost', rewrite: [`^/${codePrefix}-code/?(.*)`, '/$1'] as [string, string] }),
+          ...stripOpts('code'),
         });
         await admin.upsert({
           id: taskVncRouteId(taskId),
           host,
           uris: taskRouteUris(taskId, 'vnc'),
-          upstream: frps,
+          upstream: upstreamVnc,
           enabled: change.enabled,
           priority: 10,
-          ...(saas ? {} : { upstreamHost: 'vnc.localhost', rewrite: [`^/${codePrefix}-vnc/?(.*)`, '/$1'] as [string, string] }),
+          ...stripOpts('vnc'),
         });
       },
       async syncTaskHosts(tasks) {
@@ -370,6 +401,8 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
         await admin.remove('code-localhost');
         await admin.remove('code-ide');
         const platformHost = opts.publicHost ?? TASK_PUBLIC_HOST;
+        const frpsHttp = opts.vncUpstream ?? `http://127.0.0.1:${FRPS_VHOST_HTTP_PORT}`;
+        const subdomain = useTaskSubdomainRouting(platformHost);
         if (useFrpTaskPathRouting(platformHost)) {
           await admin.upsert(gatewayNodeWsRouteSpec(platformHost, opts.gatewayUpstream));
         }
@@ -380,8 +413,21 @@ export async function startGatewayEdge(opts: GatewayEdgeOptions): Promise<Gatewa
           await admin.upsert(frpsDashboardRouteSpec(platformHost));
           await admin.upsert(frpsDashboardRouteSpec('127.0.0.1', FRPS_DASHBOARD_ROUTE_ID_LOOPBACK));
         }
-        for (const task of tasks) {
-          await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });
+        if (subdomain) {
+          await admin.upsert(wildcardTaskSubdomainRouteSpec(platformHost, frpsHttp));
+          for (const task of tasks) {
+            const taskId = task.id;
+            await admin.remove(taskOpenRouteId(taskId));
+            await admin.remove(taskRouteId(taskId));
+            await admin.remove(taskCodeRouteId(taskId));
+            await admin.remove(taskDevRouteId(taskId));
+            await admin.remove(taskVncRouteId(taskId));
+          }
+        } else {
+          await admin.remove(TASK_WILDCARD_SUBDOMAIN_ROUTE_ID);
+          for (const task of tasks) {
+            await edgeApi.applyTaskHost({ taskId: task.id, name: task.name, enabled: task.enabled });
+          }
         }
       },
     };

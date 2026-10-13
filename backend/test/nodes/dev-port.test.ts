@@ -47,11 +47,11 @@ test('dev-port.json 读写与 setSaasDevTargetPort', () => {
   assert.equal(getSaasDevTargetPort(), 52001);
 });
 
-test('host dev PowerShell 脚本含动态端口与 base', () => {
+test('host dev PowerShell 路径模式不注入 base（15173 rewrite）', () => {
   const body = buildHostDevPowerShellBody('t_abc', 52344, 'ide.localhost', true);
   assert.match(body, /52344/);
   assert.match(body, /--host 127\.0\.0\.1/);
-  assert.doesNotMatch(body, /strictPort/);
   assert.doesNotMatch(body, /--base/);
+  assert.doesNotMatch(body, /strictPort/);
   assert.doesNotMatch(body, /allowedHosts/);
 });

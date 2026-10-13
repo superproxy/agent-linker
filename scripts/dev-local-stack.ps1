@@ -42,6 +42,9 @@ function Set-LocalStackFrpEnv {
   if ($Skip) { return }
   $env:LINKAGENT_LOCAL_STACK = '1'
   $env:LINKAGENT_PUBLIC_HOST = 'ide.localhost'
+  $env:LINKAGENT_TASK_ROUTING = 'host'
+  Remove-Item Env:LINKAGENT_FRPC_MODE -ErrorAction SilentlyContinue
+  Remove-Item Env:LINKAGENT_FRPC_TCP_MODE -ErrorAction SilentlyContinue
   if (-not $env:FRPS_SERVER_ADDR) { $env:FRPS_SERVER_ADDR = '127.0.0.1' }
 }
 

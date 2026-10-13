@@ -10,15 +10,31 @@ import {
   taskPublicPath,
   taskSaasDevFrpcLocations,
   taskViteBasePath,
+  taskViteWebBasePath,
 } from '@linkagent/shared';
 import {
   adapterResponseHeaders,
   closeSaasLocalAdapters,
   devPublicWebTrailingSlashRedirect,
+  rewriteDevHtmlForPublicPath,
+  rewriteDevPublicLocation,
   rewriteSaasLocalPath,
   rewriteSaasRedirect,
 } from '../../src/node/saas-path.js';
-import { frpcToken, nodeServeWebSuppressed, publishSaasFrpc, renderIdeCompose, renderSaasWorkspaceFrpc, renderWorkspaceFrpc, saasCodeProxyBasePath, serveWebDockerArgs, stackEnhanceIdeEnabled, startNodeServeWeb, type ServeWebChild } from '../../src/node/serve-web.js';
+import {
+  frpcToken,
+  nodeServeWebSuppressed,
+  publishSaasFrpc,
+  renderHostWorkspaceFrpc,
+  renderIdeCompose,
+  renderSaasWorkspaceFrpc,
+  renderWorkspaceFrpc,
+  saasCodeProxyBasePath,
+  serveWebDockerArgs,
+  stackEnhanceIdeEnabled,
+  startNodeServeWeb,
+  type ServeWebChild,
+} from '../../src/node/serve-web.js';
 import { renderEmbeddedHttpFrpc } from '../../../code-server/render-frpc.mjs';
 
 const enabled = {
@@ -134,23 +150,66 @@ test('renderWorkspaceFrpc：默认 ide.localhost 走路径 locations', () => {
 });
 
 test('renderWorkspaceFrpc：legacy 三 Host', () => {
-  const prev = process.env.LINKAGENT_FRPC_LEGACY_HOSTS;
-  process.env.LINKAGENT_FRPC_LEGACY_HOSTS = '1';
+  const prev = process.env.LINKAGENT_FRPC_MODE;
+  process.env.LINKAGENT_FRPC_MODE = 'legacy';
   try {
     const text = renderWorkspaceFrpc('abc');
     assert.match(text, /customDomains = \["dev\.localhost"\]/);
-    assert.match(text, /localPort = 5173/);
+    assert.match(text, /localPort = 15173/);
     assert.doesNotMatch(text, /locations/);
   } finally {
-    if (prev === undefined) delete process.env.LINKAGENT_FRPC_LEGACY_HOSTS;
-    else process.env.LINKAGENT_FRPC_LEGACY_HOSTS = prev;
+    if (prev === undefined) delete process.env.LINKAGENT_FRPC_MODE;
+    else process.env.LINKAGENT_FRPC_MODE = prev;
+  }
+});
+
+test('renderWorkspaceFrpc：TCP 固定 remotePort', () => {
+  const prev = process.env.LINKAGENT_FRPC_MODE;
+  process.env.LINKAGENT_FRPC_MODE = 'tcp';
+  try {
+    const text = renderWorkspaceFrpc('abc');
+    assert.match(text, /type = "tcp"/g);
+    assert.equal(text.match(/type = "tcp"/g)?.length, 3);
+    assert.match(text, /remotePort = 20001/);
+    assert.match(text, /remotePort = 20002/);
+    assert.match(text, /remotePort = 20003/);
+    assert.match(text, /localPort = 15173/);
+    assert.doesNotMatch(text, /customDomains/);
+    assert.doesNotMatch(text, /locations/);
+  } finally {
+    if (prev === undefined) delete process.env.LINKAGENT_FRPC_MODE;
+    else process.env.LINKAGENT_FRPC_MODE = prev;
   }
 });
 
 test('task-host：SaaS 公网路径与 Vite base', () => {
   assert.equal(taskPublicPath('t_41db7238', 'web'), '/t_41db7238-web');
   assert.equal(taskViteBasePath('t_41db7238'), '/t_41db7238/');
+  assert.equal(taskViteWebBasePath('t_41db7238'), '/t_41db7238-web/');
   assert.deepEqual(taskSaasDevFrpcLocations('t_41db7238'), ['/t_41db7238-web']);
+});
+
+test('renderHostWorkspaceFrpc：子域三条 Host、无 locations', () => {
+  const text = renderHostWorkspaceFrpc('abc', {
+    publicHost: 'hubide.ljyd.cn',
+    taskId: 't_41db7238',
+    taskName: 'test',
+  });
+  assert.match(text, /customDomains = \["test-t-41db7238-ide\.hubide\.ljyd\.cn"\]/);
+  assert.match(text, /customDomains = \["test-t-41db7238-web\.hubide\.ljyd\.cn"\]/);
+  assert.match(text, /customDomains = \["test-t-41db7238-vnc\.hubide\.ljyd\.cn"\]/);
+  assert.doesNotMatch(text, /locations/);
+});
+
+test('renderHostWorkspaceFrpc：本机 ide.localhost 子域', () => {
+  const text = renderHostWorkspaceFrpc('abc', {
+    publicHost: 'ide.localhost',
+    taskId: 't_41db7238',
+    taskName: '',
+  });
+  assert.match(text, /customDomains = \["t-41db7238-web\.ide\.localhost"\]/);
+  assert.match(text, /customDomains = \["t-41db7238-ide\.ide\.localhost"\]/);
+  assert.doesNotMatch(text, /locations/);
 });
 
 test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
@@ -174,6 +233,11 @@ test('renderSaasWorkspaceFrpc：同一公网域名，路径分开', () => {
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web'), '/');
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web?foo=1'), '/?foo=1');
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238-web/@vite/client'), '/@vite/client');
+  assert.equal(rewriteDevPublicLocation('t_41db7238', '/@vite/client'), '/t_41db7238-web/@vite/client');
+  assert.equal(
+    rewriteDevHtmlForPublicPath('t_41db7238', '<script src="/@vite/client"></script>'),
+    '<script src="/t_41db7238-web/@vite/client"></script>',
+  );
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/'), '/t_41db7238/');
   assert.equal(rewriteSaasLocalPath('dev', 't_41db7238', '/t_41db7238/src/main.ts'), '/t_41db7238/src/main.ts');
   assert.equal(rewriteSaasLocalPath('code', 't_41db7238', '/t_41db7238-code/?folder=/root/workspace'), '/?folder=/root/workspace');

@@ -92,15 +92,17 @@ export const gatewaySectionSchema = z.object({
       workspaceDir: z.string().optional(),
     })
     .default({ defaultAgentId: 'pi' }),
-  /** 浏览器入口。APISIX 按这个主机加 `/<taskId>-web|code|vnc` 转发。 */
+  /** 浏览器入口。path：`/<taskId>-web`；host：`*.<publicHost>` 子域。 */
   edge: z
     .object({
       /** 正式域名。可写成 host:443。 */
       publicHost: z.string().default(TASK_PUBLIC_HOST),
       /** 浏览器端口。写在 publicHost 里的端口优先。80 / 443 不出现在链接里。 */
       publicPort: z.number().int().positive().max(65535).default(TASK_PUBLIC_PORT),
+      /** `path`（默认）或 `host`（`*.publicHost` 子域，frpc 按 Host 登记）。 */
+      taskRouting: z.enum(['path', 'host']).default('path'),
     })
-    .default({ publicHost: TASK_PUBLIC_HOST, publicPort: TASK_PUBLIC_PORT }),
+    .default({ publicHost: TASK_PUBLIC_HOST, publicPort: TASK_PUBLIC_PORT, taskRouting: 'path' }),
 });
 export type GatewaySection = z.infer<typeof gatewaySectionSchema>;
 

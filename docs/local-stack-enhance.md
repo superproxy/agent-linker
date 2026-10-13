@@ -84,11 +84,13 @@ edge:
   publicPort: 9080
 ```
 
-| 能力 | URL（`<taskId>` 如 `t_abc`） |
+| 能力 | URL（子域模式，默认） |
 |---|---|
-| 任务 dev / web | `http://ide.localhost:9080/<taskId>-web/` |
-| 任务浏览器 IDE | `http://ide.localhost:9080/<taskId>-code/` |
-| 任务 VNC | `http://ide.localhost:9080/<taskId>-vnc/` |
+| 任务 dev / web | `http://<stem>-web.ide.localhost:9080/` |
+| 任务浏览器 IDE | `http://<stem>-ide.ide.localhost:9080/` |
+| 任务 VNC | `http://<stem>-vnc.ide.localhost:9080/` |
+
+路径模式（`LINKAGENT_TASK_ROUTING=path`）仍为 `http://ide.localhost:9080/<taskId>-web/` 等。
 
 **9080 上没有** `/vibe-ide` 路由；浏览器 code-server 只用 **`/<taskId>-code`**。管理后台嵌 IDE 走 **网关同源** `http://127.0.0.1:<gateway>/vibe-ide/`（不经 APISIX）。
 

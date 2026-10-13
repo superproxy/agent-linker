@@ -3,6 +3,8 @@ import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import {
+  frpcUsesTaskPathLocations,
+  useTaskSubdomainRouting,
   useFrpTaskPathRouting,
   TASK_PUBLIC_HOST,
   type GatewayToNode,
@@ -189,7 +191,9 @@ class NodeConnector {
       this.opts.switchIdeTask?.(id, dir);
       const pathRouting = useFrpTaskPathRouting(entryHost);
       delete process.env.LINKAGENT_VITE_BASE;
-      if (pathRouting) publishSaasFrpc(id);
+      if (pathRouting && (useTaskSubdomainRouting(entryHost) || frpcUsesTaskPathLocations(entryHost))) {
+        publishSaasFrpc(id);
+      }
       if (processes.length > 0) {
         process.env.LINKAGENT_ACTIVE_TASK_ID = id;
         this.taskProcesses.switchTo(id, dir, processes);

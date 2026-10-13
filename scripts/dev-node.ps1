@@ -38,8 +38,23 @@ if ($Name) {
 }
 
 function Get-NodeConnectArgs {
-  if ($Name) { return @("--", "--name", $Name) }
-  return @()
+  $out = @()
+  $list = $env:LINKAGENT_NODE_ENV_FILES
+  if ($list) {
+    foreach ($p in $list -split ';') {
+      $t = $p.Trim()
+      if ($t) {
+        $out += "-f"
+        $out += $t
+      }
+    }
+  }
+  if ($Name) {
+    $out += "--"
+    $out += "--name"
+    $out += $Name
+  }
+  return $out
 }
 
 function Get-StoredProcId {
@@ -92,8 +107,9 @@ function Start-NodeBackground {
     New-Item -ItemType File -Path $NodeLogPath | Out-Null
   }
   Write-Host "→ 后台启动节点 $(Get-InstanceLabel) ..."
-  $nameArg = if ($Name) { " -- --name $Name" } else { "" }
-  $cmdLine = "/c pnpm --filter @linkagent/backend node:connect$nameArg >> `"$NodeLogPath`" 2>&1"
+  $connectArgs = @(Get-NodeConnectArgs)
+  $argTail = if ($connectArgs.Count -gt 0) { " " + ($connectArgs | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) -join " " } else { "" }
+  $cmdLine = "/c pnpm --filter @linkagent/backend node:connect$argTail >> `"$NodeLogPath`" 2>&1"
   $p = Start-Process -FilePath "cmd.exe" `
     -ArgumentList $cmdLine `
     -WorkingDirectory $Repo `

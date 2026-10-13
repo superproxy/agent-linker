@@ -1,4 +1,11 @@
-import { TASK_PUBLIC_HOST, taskIdFromHostname, taskIdFromPublicPath, taskPublicPath } from '../../../shared/src/task-host';
+import {
+  TASK_PUBLIC_HOST,
+  taskIdFromHostname,
+  taskIdFromPublicPath,
+  taskPublicPath,
+  taskSubdomainHost,
+  type LinkagentTaskRouting,
+} from '../../../shared/src/task-host';
 
 /** 边缘代理上任务 Web 的端口。 */
 export const TASK_HOST_PORT = 9080;
@@ -26,16 +33,21 @@ export function matchTaskHost<T extends { id: string }>(tasks: T[], label: strin
 export interface TaskPublicEndpoint {
   host: string;
   port: number;
+  taskRouting?: LinkagentTaskRouting;
 }
 
-let loadedEndpoint: TaskPublicEndpoint = { host: TASK_PUBLIC_HOST, port: TASK_HOST_PORT };
+let loadedEndpoint: TaskPublicEndpoint = { host: TASK_PUBLIC_HOST, port: TASK_HOST_PORT, taskRouting: 'path' };
 
 /** 网关 `/api/edge` 加载到的正式域名。 */
 export function setTaskPublicEndpoint(endpoint: TaskPublicEndpoint): void {
   const host = endpoint.host.trim();
   const port = endpoint.port;
   if (!host || !Number.isInteger(port) || port <= 0) return;
-  loadedEndpoint = { host, port };
+  loadedEndpoint = {
+    host,
+    port,
+    taskRouting: endpoint.taskRouting === 'host' ? 'host' : 'path',
+  };
 }
 
 export function taskPublicEndpoint(): TaskPublicEndpoint {
@@ -55,19 +67,30 @@ function originOf(endpoint: TaskPublicEndpoint): string {
   return `http://${endpoint.host}:${endpoint.port}`;
 }
 
-function publicUrl(taskId: string, type: 'web' | 'code' | 'vnc', port?: number, host?: string): string {
+function originForHost(host: string, port: number): string {
+  if (port === 443) return `https://${host}`;
+  if (port === 80) return `http://${host}`;
+  return `http://${host}:${port}`;
+}
+
+function publicUrl(name: string, taskId: string, type: 'web' | 'code' | 'vnc', port?: number, host?: string): string {
+  const ep = endpointOf(port, host);
+  if (loadedEndpoint.taskRouting === 'host') {
+    const sub = taskSubdomainHost(name, taskId, type, ep.host);
+    return sub ? `${originForHost(sub, ep.port)}/` : '';
+  }
   const path = taskPublicPath(taskId, type);
-  return path ? `${originOf(endpointOf(port, host))}${path}` : '';
+  return path ? `${originOf(ep)}${path}` : '';
 }
 
-/** 浏览器打开该任务 Web，例如 http://ide.localhost:9080/t_41db7238-web */
-export function taskIdeOrigin(_name: string, taskId: string, port?: number, host?: string): string {
-  return publicUrl(taskId, 'web', port, host);
+/** 浏览器打开该任务 Web，例如 http://ide.localhost:9080/t_41db7238-web 或 https://test-t_xxx-web.hubide.ljyd.cn/ */
+export function taskIdeOrigin(name: string, taskId: string, port?: number, host?: string): string {
+  return publicUrl(name, taskId, 'web', port, host);
 }
 
-/** 浏览器打开该任务 code-server，例如 http://ide.localhost:9080/t_41db7238-code */
-export function taskCodeServerOrigin(_name: string, taskId: string, port?: number, host?: string): string {
-  return publicUrl(taskId, 'code', port, host);
+/** 浏览器打开该任务 code-server */
+export function taskCodeServerOrigin(name: string, taskId: string, port?: number, host?: string): string {
+  return publicUrl(name, taskId, 'code', port, host);
 }
 
 /** 与 Web 入口相同。 */
@@ -75,13 +98,18 @@ export function taskDevOrigin(name: string, taskId: string, port?: number, host?
   return taskIdeOrigin(name, taskId, port, host);
 }
 
-/** 该任务的 VNC。WebSocket 路径留在同一条 `/<taskId>-vnc` 下。 */
-export function taskVncOrigin(_name: string, taskId: string, port?: number, host?: string): string {
+/** 该任务的 VNC。子域模式下 Host 已是 vnc 子域，websockify 走相对 path。 */
+export function taskVncOrigin(name: string, taskId: string, port?: number, host?: string): string {
+  const ep = endpointOf(port, host);
+  if (loadedEndpoint.taskRouting === 'host') {
+    const sub = taskSubdomainHost(name, taskId, 'vnc', ep.host);
+    if (!sub) return '';
+    return `${originForHost(sub, ep.port)}/vnc.html?autoconnect=1&resize=scale&path=${encodeURIComponent('websockify')}`;
+  }
   const path = taskPublicPath(taskId, 'vnc');
   if (!path) return '';
   const socket = `${taskId.trim()}-vnc/websockify`;
-  const base = originOf(endpointOf(port, host));
-  return `${base}${path}/vnc.html?autoconnect=1&resize=scale&path=${encodeURIComponent(socket)}`;
+  return `${originOf(ep)}${path}/vnc.html?autoconnect=1&resize=scale&path=${encodeURIComponent(socket)}`;
 }
 
 /** 在线 IDE 里嵌套的 code-server、开发页和 VNC。没有任务时后两者为空。 */

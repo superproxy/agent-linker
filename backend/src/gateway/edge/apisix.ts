@@ -99,6 +99,20 @@ export const GATEWAY_NODE_WS_ROUTE_ID = 'gateway-node-ws';
 /** 本机 enhance：经 APISIX 9080 访问 frps 面板（上游宿主机 :7500）。 */
 export const FRPS_DASHBOARD_ROUTE_ID = 'frps-dashboard';
 export const FRPS_DASHBOARD_ROUTE_ID_LOOPBACK = 'frps-dashboard-127';
+/** 子域任务入口：`*.hubide.example.com` → frps（Host 原样，无路径前缀）。 */
+export const TASK_WILDCARD_SUBDOMAIN_ROUTE_ID = 'task-wildcard-subdomain';
+
+export function wildcardTaskSubdomainRouteSpec(apexHost: string, upstream: string): ApisixRouteSpec {
+  const apex = apexHost.trim().toLowerCase().replace(/\.$/, '');
+  return {
+    id: TASK_WILDCARD_SUBDOMAIN_ROUTE_ID,
+    host: `*.${apex}`,
+    uri: '/*',
+    upstream,
+    enabled: true,
+    priority: 100,
+  };
+}
 
 export function frpsDashboardRouteSpec(host: string, id = FRPS_DASHBOARD_ROUTE_ID): ApisixRouteSpec {
   return {

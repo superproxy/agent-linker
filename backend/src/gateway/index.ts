@@ -496,6 +496,9 @@ export async function buildServer(options?: {
   });
 
   const edgePublic = resolveEdgePublic(gw.edge);
+  if (!(process.env.LINKAGENT_TASK_ROUTING ?? '').trim()) {
+    process.env.LINKAGENT_TASK_ROUTING = edgePublic.taskRouting;
+  }
   app.get('/healthz', async () => ({ ok: true, agents: manager.listDescriptors() }));
   app.get('/api/edge', async () => edgePublic);
   registerFrpPluginRoute(app, {

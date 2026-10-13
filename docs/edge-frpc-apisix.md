@@ -11,9 +11,9 @@
 SLB
   ▼
 APISIX :9080          都转到同一个 frps:7080。默认 Host+路径（locations）与 SaaS 一致；legacy 三 Host 见 `LINKAGENT_FRPC_LEGACY_HOSTS=1`
-  ├─ web  ──▶ frps:7080 ──▶ frpc ──▶ 本机 5173
-  ├─ code ──▶ frps:7080 ──▶ frpc ──▶ 本机 code-server 8000
-  └─ vnc  ──▶ frps:7080 ──▶ frpc ──▶ 本机 VNC
+  ├─ web  ──▶ frps:7080 ──▶ frpc ──▶ 15173（剥 `/-web` + HTML 补前缀）──▶ Vite 动态口（base `/`）
+  ├─ code ──▶ frps:7080 ──▶ frpc ──▶ 18080 ──▶ code-server
+  └─ vnc  ──▶ frps:7080 ──▶ frpc ──▶ 16080 ──▶ noVNC
 ```
 
 frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 控制口 `7000`，协议是 frp 自己的二进制协议，不是 HTTP。
@@ -44,14 +44,15 @@ frpc 另有一条出站连接，用来登记上面的域名。它连的是 frps 
 3. frpc 连控制口 `7000`。Login 的 `privilege_key` 可以由网关 `POST /internal/frp/handler` 把 `nt_` 改写成服务端令牌。登录之后，0.60 用两边配置里的 `auth.token` 加密控制连接，插件改不了这把密钥。两边不一致时，日志是 `login to server success` 接着马上 `try to connect`，frps 侧没有 `new proxy`。
 4. HTTP 代理登记在 `7080`。frps 的匹配键是 Host（`customDomains`）加最长路径前缀（`locations`）。命中之后，原始 Host 和路径原样送到 `localIP:localPort`，frps 自己不剥路径。同一 Host 且没有互斥路径时，后登记的代理会失败，控制连接被关掉。
 
-**默认（本机 `ide.localhost` 与 SaaS 公网域）**：frps **0.60+** 支持 HTTP 代理的 `locations` 路径前缀（日志里可见 `location ["…"]`）。浏览器入口 **一个 Host**，三条 frpc 代理用路径分开；APISIX **不改 Host、不剥路径**。node 上 **15173 / 18080 / 16080** 适配器剥 `/<taskId>-*` 并重写 code-server 相对跳转。
+**默认（本机 `ide.localhost` 与 SaaS 公网域）**：frps **0.60+** 支持 HTTP 代理的 `locations` 路径前缀（日志里可见 `location ["…"]`）。浏览器入口 **一个 Host**，三条 frpc 代理用路径分开；APISIX **不改 Host、不剥路径**。`/<taskId>-web` **仅** frps/frpc 路由区分；node **15173** 对 dev **rewrite 去掉**该前缀再转 Vite（base `/`），并对 HTML `Location` **补回**前缀，避免 `/@vite/client` 打到 9080 根。code/vnc 在 18080/16080 剥 `/-code|vnc`。
 
 frps 取最长前缀，所以 `/<taskId>` 不会吃掉 `/<taskId>-code`：
 
 | 模式 | 浏览器 Host | frpc `customDomains` | APISIX |
 |---|---|---|---|
-| 默认 | `edge.publicHost`（如 `ide.localhost` / `hubide.example.com`） | 同上 + `locations` | `pass_host=pass`，路径原样 |
-| legacy | `ide.localhost:9080` 路径仍 `/<taskId>-*` | `dev/ide/vnc.localhost` 三 Host、无 locations | 改 Host + 剥前缀（`LINKAGENT_FRPC_LEGACY_HOSTS=1`） |
+| 默认 path | `edge.publicHost`（如 `ide.localhost` / `hubide.example.com`） | 同上 + `locations` | `pass_host=pass`，路径原样 |
+| **host 子域** | `{stem}-web.<apex>` 等（DNS `*.<apex>`） | 每任务三条 FQDN、无 locations | APISIX `*.<apex>` → frps `7080`，Host 原样 |
+| legacy | `ide.localhost:9080` 路径仍 `/<taskId>-*` | `dev/ide/vnc.localhost` 三 Host、无 locations | 改 Host + 剥前缀（`LINKAGENT_FRPC_MODE=legacy`） |
 
 SaaS / 默认本机登记示例（`hubide.ljyd.cn` 或 `ide.localhost`）：
 
@@ -61,7 +62,76 @@ SaaS / 默认本机登记示例（`hubide.ljyd.cn` 或 `ide.localhost`）：
 | code | `18080` | `8080` | `/<taskId>-code` |
 | vnc | `16080` | `6080` | `/<taskId>-vnc` |
 
-`15173` / `18080` / `16080` 是节点上的适配器。dev 把 `/<taskId>-web/…` 剥成 `/…` 再转 Vite（base `/`）。**frpc 不要**把 `workspace-dev` 的 `localPort` 写成 Vite 口（如 5173/1573），否则路径带前缀 Vite 无法服务。code、vnc 去掉任务前缀，进程仍挂在 `/`。APISIX 在 SaaS 下不改 Host、不剥路径，否则 `7080` 匹配不到。
+`15173` / `18080` / `16080` 是节点上的适配器。**frpc 不要**把 `workspace-dev` 的 `localPort` 写成 Vite 动态口。APISIX 在默认路径模式下不改 Host、不剥路径，否则 `7080` 匹配不到。
+
+## frps 路由 vs Nginx（对照理解）
+
+frps **7080** 上的 HTTP 代理，行为接近 Nginx 的 **`server_name` + `location` 前缀 + `proxy_pass`（不带 URI 路径）**：选中一条 `location` 后，把**完整原始 URI** 和 **Host** 转到后端，**不会**像 `proxy_pass http://upstream/;` 那样自动去掉 matched 前缀。
+
+| frps / frpc（0.60+） | Nginx 近似写法 | 说明 |
+|----------------------|----------------|------|
+| `vhostHTTPPort = 7080` | `listen 7080;` | HTTP 入口 |
+| `customDomains = ["ide.localhost"]` | `server_name ide.localhost;` | 先按 Host 选虚拟主机 |
+| `locations = ["/t_6795b0f8-web"]` | `location /t_6795b0f8-web { ... }` | 同一 Host 下再按**最长路径前缀**选 `location` |
+| `localPort = 15173` | `proxy_pass http://127.0.0.1:15173;`（**无**尾斜杠 URI） | 转发 **`/t_6795b0f8-web/@vite/client` 整段**，不是 `/@vite/client` |
+| （frps 自身） | **没有** `rewrite` | 路径改写必须在 APISIX（legacy）或本机 15173/18080/16080 |
+
+**本仓库默认路径模式**（`ide.localhost:9080` / SaaS 单 Host）可拆成两段 Nginx 类比：
+
+```nginx
+# ① APISIX :9080 — 只做反向代理，不改 Host/URI（pass_host=pass）
+server {
+  listen 9080;
+  server_name ide.localhost;
+  location /t_6795b0f8-web/ {
+    proxy_pass http://127.0.0.1:7080;   # 原样 Host + URI 进 frps
+    proxy_set_header Host $host;
+  }
+  # 另有 task-* 路由匹配 /t_*-code、-vnc、/-web 等，upstream 均为 frps:7080
+}
+
+# ② frps :7080 — 按 Host + location 前缀选 frpc 登记的后端（仍不 rewrite）
+server {
+  listen 7080;
+  server_name ide.localhost;
+  location /t_6795b0f8-web {           # frpc workspace-dev 的 locations
+    proxy_pass http://127.0.0.1:15173; # URI 仍为 /t_6795b0f8-web/...
+  }
+  location /t_6795b0f8-code {
+    proxy_pass http://127.0.0.1:18080;
+  }
+  location /t_6795b0f8-vnc {
+    proxy_pass http://127.0.0.1:16080;
+  }
+}
+
+# ③ 本机 15173（node saas-path）— dev：rewrite 剥前缀 + sub_filter 补 HTML；code/vnc 同理
+server {
+  listen 15173;
+  location /t_6795b0f8-web/ {
+    rewrite ^/t_6795b0f8-web(.*)$ $1 break;
+    proxy_pass http://127.0.0.1:50718;   # upstream 见 /、/@vite/client（Vite base /）
+    sub_filter 'src="/' 'src="/t_6795b0f8-web/';  # 实现上等价 rewriteDevHtmlForPublicPath
+  }
+}
+server {
+  listen 18080;
+  location /t_6795b0f8-code/ {
+    rewrite ^/t_6795b0f8-code(.*)$ $1 break;
+    proxy_pass http://127.0.0.1:8080;
+  }
+}
+```
+
+**最长前缀**（frps 与 Nginx `location` 类似）：若同时登记 `/<taskId>` 与 `/<taskId>-code`，请求 `/-code` 会命中更长的 `-code` 规则；因此 dev 只登记 `/<taskId>-web`，不要再用裸 `/<taskId>` 盖住 `-code` / `-vnc`。
+
+**Legacy 模式**（`LINKAGENT_FRPC_LEGACY_HOSTS=1`）：路径剥前缀 + 改 Host 放在 **APISIX**（像 Nginx 的 `rewrite` + `proxy_set_header Host dev.localhost`），frps 上只有三个 `server_name`（`dev/ide/vnc.localhost`），**无** `locations`——等价于「APISIX 做 rewrite，frps 只做按 Host 转发」。
+
+| 现象 | 常见误解 | 对照 Nginx |
+|------|----------|------------|
+| 打开 `/-web/` 正常，但 `/@vite/client` 404 | 以为 frps 会剥前缀 | frps 从不剥；**15173** 剥前缀给 Vite，并 **rewrite HTML** 把 `src="/…"` 补成 `/-web/…` |
+| frps 面板有规则但 502 | 只看了 APISIX | frps ≈ 第二层 `proxy_pass`；502 可能是 15173 后 Vite 未监听 |
+| 9080 404、7080 200 | APISIX 缺路由 | 第一层 server 缺 `location`；与 frps 无关 |
 
 **跳过 APISIX、直连 frps 数据口**（本机 `7080`）：
 
@@ -79,9 +149,18 @@ curl.exe -s -o NUL -w "7080:%{http_code}`n" -H "Host: ide.localhost" "http://127
 
 网关在任务创建、删除、改名、开关，以及进程启动时的 `syncTaskHosts`，通过 Admin API 写入。节点上线不会改这些规则。`127.0.0.1` 上游会改写成 `host.docker.internal`，因为 APISIX 跑在容器里。
 
-公网 Host 是 `edge.publicHost`（例如 `hubide.ljyd.cn`）。路径是 `/<taskId>-web|code|vnc`。
+公网 apex 是 `edge.publicHost`（例如 `hubide.ljyd.cn`）。
 
-默认模式下 APISIX 上游均为 frps `7080`，`pass_host=pass`，路径保持浏览器原样。legacy 三 Host 才在 APISIX 剥前缀并改 Host。
+**`edge.taskRouting: host`（或 `LINKAGENT_TASK_ROUTING=host`）** — 试 `*.hubide.ljyd.cn`：
+
+- 浏览器：`https://{名称}-{taskId}-web.hubide.ljyd.cn/`（code 为 `-ide`，vnc 为 `-vnc`）
+- DNS：`* .hubide.ljyd.cn` → SLB/APISIX；证书：通配符 SAN
+- APISIX：一条 `task-wildcard-subdomain`，`host: *.hubide.ljyd.cn` → frps `7080`，**无** per-task `task-*` 路径路由
+- frpc：三条 HTTP 代理，各自 `customDomains` 为上述 FQDN，**无** `locations`；切任务 reload frpc
+- 15173/18080/16080：**不**剥 `/-web` 前缀（upstream 已是 `/`）
+- 与 **`LINKAGENT_FRPC_MODE=tcp` 不要同开**（子域依赖 frps HTTP Host 匹配）
+
+**`taskRouting: path`（默认）** — 单 Host + 路径 `/<taskId>-web|code|vnc`；APISIX 上游均为 frps `7080`，`pass_host=pass`，路径原样。legacy/tcp 见 `LINKAGENT_FRPC_MODE`。
 
 下面表为 **legacy**（`LINKAGENT_FRPC_LEGACY_HOSTS=1`）。默认路径模式见上节。
 

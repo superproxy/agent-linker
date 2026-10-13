@@ -33,6 +33,6 @@ frps 选中代理后，把浏览器的 Host 和路径原样送到本机端口。
 
 SaaS 才是现在要写的。用户地址是 `https://<publicHost>/<taskId>` 以及 `/<taskId>-web|code|vnc`。一个 frps 时，APISIX 只做校验，上游固定是这个 frps 的 `7080`：`pass_host: pass`，不把 Host 改成 localhost，也不在进 frps 之前删路径。frpc 三条代理的 `customDomains` 都是这个公网域名，用上面的 `locations` 分开。`switchTask` 只改当前任务的路径。多个 frps 时才用 APISIX 选择哪一个。
 
-路径要变成应用自己的根路径（code-server、noVNC 在 `/`，Vite 要用 `base: /<taskId>/` 并放行公网 Host），只能在 frps 已经选中代理之后、本机端口之前做。不要把这一步放回 APISIX。
+`/-web` 仅 frps 路由区分；15173 dev **rewrite 去掉**前缀，Vite base `/`，HTML/Location 补回前缀。code/vnc 由 18080/16080 剥 `/-code|vnc`。frps 自身不 rewrite。legacy 在 APISIX 剥路径改 Host。
 
 不要把 `auth.token` 写入规则、文档、提交或日志。

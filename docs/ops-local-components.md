@@ -136,6 +136,41 @@ pnpm --filter @linkagent/backend pm:logs
 
 ## 5. frpc 启动方式（维护重点）
 
+### 5.0 推荐：本机 + 远程同一套（**子域** `taskRouting: host`）
+
+`pnpm local:enhance` / `dev-local-stack` 已默认 **`LINKAGENT_TASK_ROUTING=host`**（与 hubide 子域模型一致）：
+
+| 项 | 本机（`edge.publicHost: ide.localhost`） | SaaS（如 `hubide.ljyd.cn`） |
+|----|------------------------------------------|-----------------------------|
+| 浏览器 URL | `http://default-web.ide.localhost:9080/`（code → `-ide`，vnc → `-vnc`） | `https://{stem}-web.hubide.ljyd.cn/` |
+| **APISIX** | `host: *.ide.localhost` → frps `:7080` | `host: *.hubide.ljyd.cn` → `:7080` |
+| **frpc** | 三条 HTTP，各自 `customDomains` 为上述 FQDN，**无** `locations` | 同左 |
+| **15173** | 路径已是 `/`，**不**剥 `/-web` | 同左 |
+
+Chrome/Edge 会把 `*.localhost` 解析到 `127.0.0.1`；若不通，在 hosts 里补一条示例即可。
+
+**环境变量（gateway + worker 一致）**：
+
+```text
+LINKAGENT_TASK_ROUTING=host
+LINKAGENT_PUBLIC_HOST=ide.localhost          # 本机
+# LINKAGENT_PUBLIC_HOST=hubide.ljyd.cn      # 远程
+LINKAGENT_FRPC_MODE=path                     # 子域走 frps HTTP 7080，勿开 tcp
+```
+
+或在 `gateway.yaml`：`edge.taskRouting: host`。
+
+**传输层**（与子域正交，一般保持 `path`）：
+
+| `LINKAGENT_FRPC_MODE` | 说明 |
+|----------------------|------|
+| `path`（与子域同用） | frps HTTP + 按 Host 选代理 |
+| `legacy` / `tcp` | 旧备选；**不要**与 `taskRouting: host` 同开 |
+
+**URL 仍用路径**时：`taskRouting: path`（或不设），见 `edge-frpc-apisix.md`。
+
+改完后 **`pnpm server:restart`** + **`pnpm worker:restart`**。
+
 配置文件 **不等于** 已在 frps 登记；**必须有 frpc 进程** 且 **7000 登录成功**。
 
 ### 5.1 谁启动 frpc
@@ -170,7 +205,8 @@ $bin = (Get-Content .runtime-state\edge\frpc.path).Trim()
 | `LINKAGENT_PUBLIC_HOST` | frpc `customDomains`；本机栈应为 `ide.localhost` |
 | `LINKAGENT_LOCAL_STACK=1` | 强制本机 `ide.localhost`，忽略误留的 SaaS 域名 |
 | `LINKAGENT_FRPC_PATH` | 默认 `ide-proxy/frpc.toml` |
-| `LINKAGENT_FRPC_LEGACY_HOSTS=1` | 三域名 legacy，非路径模式 |
+| `LINKAGENT_FRPC_MODE` | `path` \| `legacy` \| `tcp`（本机栈推荐 **tcp**，§5.0） |
+| `LINKAGENT_FRPC_TCP_PORTS` | 可选 `dev,code,vnc` 远端口，默认 `20001,20002,20003` |
 
 ### 5.4 代码路径：谁写 `frpc.toml`、谁 reload frpc
 
@@ -308,6 +344,8 @@ pnpm local:stack:verify
 
 **面板没有 HTTP 规则** → 先按 **§9.2** 查 frpc ↔ frps，不要先用 APISIX 路由是否为空来推断。
 
+frps 选路（Host + 最长 `locations`、**不 rewrite URI**）与 Nginx `server_name` / `location` / `proxy_pass` 的对照见 [`edge-frpc-apisix.md` §frps 路由 vs Nginx](edge-frpc-apisix.md#frps-路由-vs-nginx对照理解)。
+
 **数据链**（本机路径模式）：
 
 ```text
@@ -323,8 +361,8 @@ worker 写 frpc.toml → spawn frpc
 
 | 端口 | 谁监听 | frpc `workspace-dev` |
 |------|--------|----------------------|
-| **15173** | worker 路径适配器（剥 `/<taskId>-web`） | **`localPort` 固定登记这里** |
-| **动态口**（如 50718；手测可用 1573 + `LINKAGENT_DEV_FIXED_PORT=1573`） | 任务目录 Vite | **不要**写进 frpc；由 15173 反代 |
+| **15173** | worker 适配器：dev **rewrite 去掉** `/<taskId>-web`，HTML/Location **补回**前缀 | **`localPort` 固定登记这里** |
+| **动态口**（如 50718） | Vite **base `/`**（`/-web` 不进项目） | **不要**写进 frpc |
 
 直连 frps 数据口（不经过 9080）：`curl -H "Host: ide.localhost" http://127.0.0.1:7080/<taskId>-web/` → 与上表相同，仍到 **15173**，再到 Vite 动态口。
 ```
@@ -519,7 +557,7 @@ netstat -ano | findstr "<上一步 port 字段>"
 |--------|----------------------|-----------------|
 | 工作目录 | 当前 shell 目录 | 任务 **cwd**（网关任务配置） |
 | 命令 | 多为 `vite` | `npm run dev -- --host 127.0.0.1 --port <动态>`（**不**注入 `--strictPort` / `--base`） |
-| 路径前缀 | — | 由 **15173 适配器**剥 `/<taskId>-web` → 上游 `/`，与本地 dev 的 base `/` 一致 |
+| 路径前缀 | — | `/-web` 仅公网/frps 区分；15173 **剥**前缀 upstream，**rewrite HTML** 补 `src`/`href` |
 | 访问方式 | 常开 `localhost:5173` | 必须走 `/<taskId>-web/`（9080 或 15173） |
 
 在 **任务 cwd** 下用 `dev-port.json` 里的端口执行 `npm run dev -- --host 127.0.0.1 --port <port>` 试跑；能起则 `pnpm worker:restart` 或后台 **切换激活任务** 让 gateway 再发 `switchTask`。

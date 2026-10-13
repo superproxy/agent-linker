@@ -7,7 +7,12 @@ import {
   taskPublicPath,
   taskSaasCodeProxyBasePath,
   taskSaasDevFrpcLocations,
+  frpcUsesTaskPathLocations,
+  resolveLinkagentFrpcMode,
+  taskSubdomainHost,
   useFrpTaskPathRouting,
+  useTaskSubdomainRouting,
+  workspaceFrpTcpRemotePorts,
   type NodeSection,
 } from '@linkagent/shared';
 import { dockerExecutable } from '../gateway/edge/runtime.js';
@@ -77,6 +82,17 @@ function frpcDomain(value: string | undefined, fallback: string): string {
   return text;
 }
 
+function frpcTcpProxy(name: string, localPort: number, remotePort: number): string {
+  return [
+    '[[proxies]]',
+    `name = "${name}"`,
+    'type = "tcp"',
+    'localIP = "127.0.0.1"',
+    `localPort = ${localPort}`,
+    `remotePort = ${remotePort}`,
+  ].join('\n');
+}
+
 function frpcProxy(name: string, port: number, domain: string, locations?: string[]): string {
   const lines = [
     '[[proxies]]',
@@ -120,8 +136,17 @@ auth.method = "token"
 auth.token = "${secret}"`;
   const publicHost = frpcDomain(endpoint?.publicHost, TASK_PUBLIC_HOST);
   const taskId = (endpoint?.taskId ?? '').trim() || 'default';
-  const legacyHosts = process.env.LINKAGENT_FRPC_LEGACY_HOSTS === '1';
-  if (!legacyHosts && useFrpTaskPathRouting(publicHost)) {
+  const frpcMode = resolveLinkagentFrpcMode();
+  if (useTaskSubdomainRouting(publicHost)) {
+    return renderHostWorkspaceFrpc(secret, {
+      publicHost,
+      taskId,
+      taskName: endpoint?.taskName ?? '',
+      serverAddr,
+      serverPort,
+    });
+  }
+  if (frpcMode === 'path' && useFrpTaskPathRouting(publicHost)) {
     return renderSaasWorkspaceFrpc(secret, {
       publicHost,
       taskId,
@@ -129,20 +154,87 @@ auth.token = "${secret}"`;
       serverPort,
     });
   }
-  const ideDomain = frpcDomain(endpoint?.ideDomain, WORKSPACE_IDE_HOST);
-  const devDomain = frpcDomain(endpoint?.devDomain, WORKSPACE_DEV_HOST);
-  const vncDomain = frpcDomain(endpoint?.vncDomain, WORKSPACE_VNC_HOST);
   const idePort =
     endpoint?.ideLocalPort != null && endpoint.ideLocalPort > 0 && endpoint.ideLocalPort <= 65535
       ? endpoint.ideLocalPort
       : WORKSPACE_IDE_PORT;
+  if (frpcMode === 'tcp') {
+    const remote = workspaceFrpTcpRemotePorts();
+    return `${head}
+
+${frpcTcpProxy('workspace-dev', SAAS_DEV_LISTEN, remote.dev)}
+
+${frpcTcpProxy('workspace-ide', SAAS_IDE_LISTEN, remote.code)}
+
+${frpcTcpProxy('workspace-vnc', SAAS_VNC_LISTEN, remote.vnc)}
+`;
+  }
+  const ideDomain = frpcDomain(endpoint?.ideDomain, WORKSPACE_IDE_HOST);
+  const devDomain = frpcDomain(endpoint?.devDomain, WORKSPACE_DEV_HOST);
+  const vncDomain = frpcDomain(endpoint?.vncDomain, WORKSPACE_VNC_HOST);
   return `${head}
 
 ${frpcProxy('workspace-ide', idePort, ideDomain)}
 
-${frpcProxy('workspace-dev', WORKSPACE_DEV_PORT, devDomain)}
+${frpcProxy('workspace-dev', SAAS_DEV_LISTEN, devDomain)}
 
 ${frpcProxy('workspace-vnc', WORKSPACE_VNC_PORT, vncDomain)}
+`;
+}
+
+/**
+ * 子域：每条代理一个 FQDN（`{stem}-web.<apex>` 等），无 locations；frps 按 Host 转发。
+ */
+export function renderHostWorkspaceFrpc(
+  token: string,
+  endpoint: {
+    publicHost: string;
+    taskId: string;
+    taskName?: string;
+    serverAddr?: string;
+    serverPort?: number;
+  },
+): string {
+  const secret = token.trim();
+  if (!secret || /["\r\n]/.test(secret)) throw new Error('frps token 无效');
+  const publicHost = frpcDomain(endpoint.publicHost, '');
+  if (!publicHost || !useFrpTaskPathRouting(publicHost)) {
+    throw new Error('浏览器入口域名无效');
+  }
+  const taskId = endpoint.taskId.trim();
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(taskId)) throw new Error('taskId 无效');
+  const taskName = (endpoint.taskName ?? '').trim();
+  const webDom = taskSubdomainHost(taskName, taskId, 'web', publicHost);
+  const codeDom = taskSubdomainHost(taskName, taskId, 'code', publicHost);
+  const vncDom = taskSubdomainHost(taskName, taskId, 'vnc', publicHost);
+  if (!webDom || !codeDom || !vncDom) throw new Error('任务子域无效');
+  const serverAddr = (endpoint.serverAddr ?? '').trim() || 'host.docker.internal';
+  const serverPort = endpoint.serverPort && endpoint.serverPort > 0 ? endpoint.serverPort : 7000;
+  return `serverAddr = "${serverAddr}"
+serverPort = ${serverPort}
+auth.method = "token"
+auth.token = "${secret}"
+
+[[proxies]]
+name = "workspace-ide"
+type = "http"
+localIP = "127.0.0.1"
+localPort = ${SAAS_IDE_LISTEN}
+customDomains = ["${codeDom}"]
+
+[[proxies]]
+name = "workspace-dev"
+type = "http"
+localIP = "127.0.0.1"
+localPort = ${SAAS_DEV_LISTEN}
+customDomains = ["${webDom}"]
+
+[[proxies]]
+name = "workspace-vnc"
+type = "http"
+localIP = "127.0.0.1"
+localPort = ${SAAS_VNC_LISTEN}
+customDomains = ["${vncDom}"]
 `;
 }
 
@@ -266,10 +358,16 @@ function frpcPublishInContainer(file: string): boolean {
   return normalized.endsWith('/etc/linkagent/frpc.toml') || normalized === EMBEDDED_FRPC_PATH.replace(/\\/g, '/');
 }
 
-/** 任务切换后改写 frpc locations（本机 ide.localhost 与 SaaS 公网域均走路径）。 */
-export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRPC_PATH?.trim() || EMBEDDED_FRPC_PATH): void {
+/** 任务切换后改写 frpc（路径 locations 或子域 Host）。 */
+export function publishSaasFrpc(
+  taskId: string,
+  file = process.env.LINKAGENT_FRPC_PATH?.trim() || EMBEDDED_FRPC_PATH,
+  opts?: { taskName?: string },
+): void {
   const publicHost = browserEntryPublicHost();
   if (!useFrpTaskPathRouting(publicHost)) return;
+  const subdomain = useTaskSubdomainRouting(publicHost);
+  if (!subdomain && !frpcUsesTaskPathLocations(publicHost)) return;
   const id = taskId.trim();
   if (!id) return;
   const token = frpcTokenFromFileOrEnv(file);
@@ -290,12 +388,20 @@ export function publishSaasFrpc(taskId: string, file = process.env.LINKAGENT_FRP
           ? { serverPort: fromEnv.serverPort }
           : {}),
   };
-  const body = renderSaasWorkspaceFrpc(token, {
-    publicHost,
-    taskId: id,
-    ...(endpoint.serverAddr ? { serverAddr: endpoint.serverAddr } : {}),
-    ...(endpoint.serverPort ? { serverPort: endpoint.serverPort } : {}),
-  });
+  const body = subdomain
+    ? renderHostWorkspaceFrpc(token, {
+        publicHost,
+        taskId: id,
+        taskName: opts?.taskName ?? '',
+        ...(endpoint.serverAddr ? { serverAddr: endpoint.serverAddr } : {}),
+        ...(endpoint.serverPort ? { serverPort: endpoint.serverPort } : {}),
+      })
+    : renderSaasWorkspaceFrpc(token, {
+        publicHost,
+        taskId: id,
+        ...(endpoint.serverAddr ? { serverAddr: endpoint.serverAddr } : {}),
+        ...(endpoint.serverPort ? { serverPort: endpoint.serverPort } : {}),
+      });
   const frpcDir = dirname(file);
   mkdirSync(frpcDir, { recursive: true });
   writeFileSync(file, body, { encoding: 'utf8', mode: 0o600 });
@@ -323,8 +429,11 @@ export function restartBundledCodeServer(taskId: string, workspaceDir: string): 
   const id = taskId.trim();
   const dir = workspaceDir.trim();
   if (!id || !dir) return;
-  const base = saasCodeProxyBasePath(id);
-  const origins = `https://${publicHost},http://${publicHost},*.localhost:9080,*.localhost:8088`;
+  const subdomain = useTaskSubdomainRouting(publicHost);
+  const base = subdomain ? '/' : saasCodeProxyBasePath(id);
+  const origins = subdomain
+    ? `https://*.${publicHost},http://*.${publicHost},https://${publicHost},http://${publicHost}`
+    : `https://${publicHost},http://${publicHost},*.localhost:9080,*.localhost:8088`;
   const logFile = '/tmp/linkagent-code-server.log';
   const start = () => {
     let out = 2;
