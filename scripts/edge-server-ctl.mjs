@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { psScriptPath, shellScriptPath } from "./lib/shell-entry.mjs";
+import { installRootShellScriptPath, psScriptPath } from "./lib/shell-entry.mjs";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.dirname(dir);
@@ -44,7 +44,7 @@ const child = isWin
       ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScriptPath(dir, "edge-server-ctl"), ...args],
       { stdio: "inherit", windowsHide: false, cwd: installRoot, env: spawnEnv },
     )
-  : spawn("bash", [shellScriptPath(dir, "edge-server-ctl"), ...args], {
+  : spawn("bash", [installRootShellScriptPath(dir, "edge-server-ctl"), ...args], {
       stdio: "inherit",
       cwd: installRoot,
       env: spawnEnv,

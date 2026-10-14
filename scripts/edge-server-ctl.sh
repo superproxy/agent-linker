@@ -3,9 +3,17 @@
 #   scripts/edge-server-ctl.sh start|stop|restart|status|log|build
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# 运行安装根 = 本脚本所在 scripts/ 的上级
-ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SELF="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SELF/scripts/edge/docker-compose.yaml" ]; then
+  ROOT="$SELF"
+  SCRIPT_DIR="$SELF/scripts"
+elif [ -f "$SELF/edge/docker-compose.yaml" ]; then
+  SCRIPT_DIR="$SELF"
+  ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+  SCRIPT_DIR="$SELF"
+  ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 export LINKAGENT_HOME="${LINKAGENT_HOME:-$ROOT}"
 RUNTIME="$ROOT/.runtime-state/edge"
 EDGE_ASSETS="$SCRIPT_DIR/edge"

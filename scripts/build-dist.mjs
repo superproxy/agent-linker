@@ -151,7 +151,6 @@ const DIST_RUNTIME_SCRIPT_COPY = [
   ['ops-config-init.sh', 'config-init.sh'],
   ['ops-setup-pi.mjs', 'setup-pi.mjs'],
   ['ops-setup-channels.mjs', 'setup-channels.mjs'],
-  ['edge-server-ctl.sh', 'edge-server-ctl.sh'],
   ['edge-server-ctl.ps1', 'edge-server-ctl.ps1'],
   ['edge-server-ctl.bat', 'edge-server-ctl.bat'],
   ['edge-server-ctl.mjs', 'edge-server-ctl.mjs'],
@@ -163,7 +162,6 @@ const DIST_RUNTIME_SCRIPT_COPY = [
   ['edge-prepare.mjs', 'edge-prepare.mjs'],
   ['edge.sh', 'edge.sh'],
   ['edge.ps1', 'edge.ps1'],
-  ['ops-server-ctl.sh', 'server-ctl.sh'],
   ['ops-server-ctl.ps1', 'server-ctl.ps1'],
   ['server-ctl.mjs', 'server-ctl.mjs'],
 ];
@@ -173,10 +171,17 @@ function writeRootExecSh(distRoot, rootName, scriptsRel) {
     join(distRoot, rootName),
     `#!/usr/bin/env bash
 set -u
-exec "$(cd "$(dirname "$0")" && pwd)/${scriptsRel}" "$@"
+exec bash "$(cd "$(dirname "$0")" && pwd)/${scriptsRel}" "$@"
 `,
     { mode: 0o755 },
   );
+}
+
+/** 安装根唯一入口（与 scripts/ 内 ops-* 同源，避免双份 server-ctl / edge-server-ctl） */
+function copyInstallRootShell(distRoot, srcRel, destName) {
+  const src = join(REPO, 'scripts', srcRel);
+  if (!existsSync(src)) return;
+  cpSync(src, join(distRoot, destName), { mode: 0o755 });
 }
 function copyDistRuntimeScripts(destRoot) {
   mkdirSync(join(destRoot, 'scripts'), { recursive: true });
@@ -517,10 +522,10 @@ async function buildFull(dist, skipInstall) {
       )}\n`,
     );
 
-    writeRootExecSh(dist, 'server-ctl.sh', 'scripts/server-ctl.sh');
-    writeRootExecSh(dist, 'edge-server-ctl.sh', 'scripts/edge-server-ctl.sh');
-    writeRootExecSh(dist, 'edge-ctl.sh', 'scripts/edge-ctl.sh');
-    writeRootExecSh(dist, 'start.sh', 'scripts/server-ctl.sh');
+    copyInstallRootShell(dist, 'ops-server-ctl.sh', 'server-ctl.sh');
+    copyInstallRootShell(dist, 'edge-server-ctl.sh', 'edge-server-ctl.sh');
+    writeRootExecSh(dist, 'edge-ctl.sh', 'edge-server-ctl.sh');
+    writeRootExecSh(dist, 'start.sh', 'server-ctl.sh');
 
     writeFileSync(
       join(dist, 'server-ctl.bat'),

@@ -72,7 +72,7 @@ cd /opt/agent-linker
 ./server-ctl.sh start
 ```
 
-源码机构建后同步：仓库内 `bash scripts/deploy-server-install-update.sh --restart`（等价于 build dist + `install.sh` 逻辑）。
+源码机构建后同步：仓库内 `bash scripts/server-install-update.sh --restart`（等价于 build dist + `install.sh` 逻辑）。
 
 ## 本机配置（部署脚本 + 配置文件）
 

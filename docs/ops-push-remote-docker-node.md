@@ -29,8 +29,7 @@ OpenSSH **`ssh my-server`**（`~/.ssh/config` → `150.5.142.161`）在 **BatchM
 ```bash
 # 1) 未跟踪的 config/pi-agent/* 挡住 merge → 先 mv 到 backup 目录
 # 2) git pull --ff-only → b76db3d
-# 3) chmod +x scripts/deploy-server-install-update.sh
-# 4) bash scripts/deploy-server-install-update.sh --no-pull --restart
+# 3) bash scripts/server-install-update.sh --no-pull --restart
 ```
 
 手工等价命令：

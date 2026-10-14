@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
-# 兼容旧名：scripts/deploy-server-install-update.sh
-exec "$(cd "$(dirname "$0")" && pwd)/deploy-server-install-update.sh" "$@"
+# 兼容旧名；请改用 bash scripts/server-install-update.sh
+exec bash "$(cd "$(dirname "$0")" && pwd)/server-install-update.sh" "$@"

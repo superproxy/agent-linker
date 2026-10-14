@@ -3,7 +3,12 @@
 #   ./server-ctl.sh start|stop|restart [all|gateway|weixin|node]
 #   ./server-ctl.sh status | logs | foreground
 set -u
-DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SELF="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SELF/bin/pm.mjs" ]; then
+  DIR="$SELF"
+else
+  DIR="$(cd "$SELF/.." && pwd)"
+fi
 cd "$DIR"
 CMD="${1:-start}"
 TARGET="${2:-all}"

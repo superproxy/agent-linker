@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * 安装根 gateway 启停：Unix → scripts/server-ctl.sh，Windows → scripts/server-ctl.ps1（若有）
+ * 安装根 gateway 启停：Unix → 安装根 server-ctl.sh，Windows → scripts/server-ctl.ps1（若有）
  */
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { psScriptPath, shellScriptPath } from './lib/shell-entry.mjs';
+import { installRootShellScriptPath, psScriptPath } from './lib/shell-entry.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -26,7 +26,7 @@ if (cmd === 'help' || cmd === '--help' || cmd === '-h') {
 }
 
 const isWin = process.platform === 'win32';
-const sh = shellScriptPath(dir, 'server-ctl');
+const sh = installRootShellScriptPath(dir, 'server-ctl');
 const ps = psScriptPath(dir, 'server-ctl');
 const child = isWin
   ? spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps, ...args], {

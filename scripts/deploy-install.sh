@@ -122,7 +122,7 @@ done
 if [ ! -f "$PACKAGE/.linkagent-root" ]; then
   echo "不是 linkagent 发布包：缺少 $PACKAGE/.linkagent-root" >&2
   if [ -f "$(dirname "$PACKAGE")/pnpm-workspace.yaml" ] || [ -f "$PACKAGE/pnpm-workspace.yaml" ]; then
-    echo "提示：源码仓库请用 bash scripts/deploy-server-install-update.sh 或 pnpm local:install-update" >&2
+    echo "提示：源码仓库请用 bash scripts/server-install-update.sh 或 pnpm server:install-update" >&2
   elif [ "$PACKAGE" != "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ]; then
     echo "提示：请在发布包根目录执行 ./install.sh" >&2
   fi
@@ -141,5 +141,5 @@ echo "   边缘：cd $INSTALL && ./edge-ctl.sh start"
 echo "   网关：cd $INSTALL && ./server-ctl.sh start"
 
 if [ "$RESTART" = 1 ]; then
-  (cd "$INSTALL" && ./server-ctl.sh restart gateway)
+  (cd "$INSTALL" && bash server-ctl.sh restart gateway)
 fi

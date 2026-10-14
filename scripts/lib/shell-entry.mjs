@@ -19,6 +19,13 @@ export function shellScriptPath(dir, name) {
   return plain;
 }
 
+/** dist 安装根下的 server-ctl.sh / edge-server-ctl.sh（不在 scripts/ 重复一份） */
+export function installRootShellScriptPath(scriptsDir, name) {
+  const atRoot = path.join(path.dirname(scriptsDir), `${name}.sh`);
+  if (existsSync(atRoot)) return atRoot;
+  return shellScriptPath(scriptsDir, name);
+}
+
 export function psScriptPath(dir, name) {
   const plain = path.join(dir, `${name}.ps1`);
   if (existsSync(plain)) return plain;
